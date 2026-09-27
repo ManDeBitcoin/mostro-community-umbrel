@@ -124,3 +124,30 @@ async fn health_never_fabricates_connected_services() {
     assert_eq!(value["bitcoin"]["status"], "unknown");
     assert_eq!(value["market_started"], false);
 }
+
+#[tokio::test]
+async fn imported_identity_is_not_exposed_over_http() {
+    use nostr::{Keys, SecretKey, ToBech32};
+    let (dir, app) = setup();
+    let keys = Keys::new(SecretKey::from_slice(&[3; 32]).unwrap());
+    let secret = keys.secret_key().to_bech32().unwrap();
+    let public = keys.public_key().to_bech32().unwrap();
+    mostro_community_api::identity::import(dir.path(), &secret, &public).unwrap();
+    for path in [
+        "/api/community",
+        "/api/dashboard",
+        "/api/identity",
+        "/api/identity/mostro.nsec",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        if path.starts_with("/api/identity") {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(!String::from_utf8_lossy(&body).contains(&secret));
+    }
+}

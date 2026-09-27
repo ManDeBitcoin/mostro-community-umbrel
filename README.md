@@ -63,3 +63,7 @@ El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y 
 Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin credenciales. La visibilidad del repositorio no convierte automáticamente sus paquetes en públicos.
 
 [Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Blueprint original](docs/reference/blueprint-v4.md)
+
+## Identidad local (posterior a preview.4)
+
+El código fuente incorpora una importación interactiva de `nsec`, con comprobación del `npub` esperado, permisos privados y protección contra sobrescritura. Todavía no está disponible en la imagen preview.4 ni arranca Mostro. Ver [instrucciones y límites](docs/identity.md).

@@ -1,0 +1,148 @@
+//! Local-only identity provisioning. Secret material is never exposed by the HTTP API.
+use nostr::{FromBech32, Keys, PublicKey, SecretKey, ToBech32};
+use std::{
+    fs::{self, DirBuilder, File},
+    io::{self, IsTerminal, Write},
+    os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+};
+use zeroize::Zeroizing;
+
+fn validated_keys(nsec: &str, expected_npub: &str) -> Result<Keys, &'static str> {
+    let secret = SecretKey::from_bech32(nsec).map_err(|_| "Clave nsec inválida")?;
+    let expected = PublicKey::from_bech32(expected_npub).map_err(|_| "Clave npub inválida")?;
+    let keys = Keys::new(secret);
+    if keys.public_key() != expected {
+        return Err("La clave privada no corresponde al npub indicado");
+    }
+    Ok(keys)
+}
+
+/// Uses an atomic no-clobber persist: an existing identity is never replaced.
+/// Parent directories must be controlled by the operator (CONFIG_DIR in Umbrel).
+pub fn import(root: &Path, nsec: &str, expected_npub: &str) -> Result<String, &'static str> {
+    let keys = validated_keys(nsec, expected_npub)?;
+    let canonical = Zeroizing::new(
+        keys.secret_key()
+            .to_bech32()
+            .map_err(|_| "Clave inválida")?,
+    );
+    let npub = keys
+        .public_key()
+        .to_bech32()
+        .map_err(|_| "Clave pública inválida")?;
+    let directory = root.join("identity");
+    match DirBuilder::new().mode(0o700).create(&directory) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(_) => return Err("No se pudo crear el directorio de identidad"),
+    }
+    let metadata = fs::symlink_metadata(&directory).map_err(|_| "Directorio no disponible")?;
+    if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err("El directorio de identidad debe ser privado (0700) y no un enlace");
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)
+        .map_err(|_| "No se pudo preparar el archivo privado")?;
+    // A new temporary file is owned by this process. Reject directories owned by another user.
+    if temporary
+        .as_file()
+        .metadata()
+        .map_err(|_| "Archivo no disponible")?
+        .uid()
+        != metadata.uid()
+    {
+        return Err("El directorio de identidad pertenece a otro usuario");
+    }
+    temporary
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| "No se pudieron restringir los permisos")?;
+    temporary
+        .write_all(canonical.as_bytes())
+        .map_err(|_| "No se pudo escribir la identidad")?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|_| "No se pudo sincronizar la identidad")?;
+    temporary
+        .persist_noclobber(directory.join("mostro.nsec"))
+        .map_err(|_| "No se guardó: ya existe una identidad o no se puede escribir")?;
+    File::open(&directory).and_then(|f| f.sync_all()).map_err(
+        |_| "Identidad guardada; no se pudo sincronizar el directorio. No repetir la importación",
+    )?;
+    Ok(npub)
+}
+
+pub fn import_interactive() -> Result<(), &'static str> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err("La importación requiere una terminal interactiva local (-it)");
+    }
+    let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
+    if !root.is_dir() {
+        return Err("CONFIG_DIR debe existir antes de importar");
+    }
+    print!("npub esperado: ");
+    io::stdout().flush().map_err(|_| "Terminal no disponible")?;
+    let mut expected = String::new();
+    io::stdin()
+        .read_line(&mut expected)
+        .map_err(|_| "No se pudo leer el npub")?;
+    let secret = Zeroizing::new(
+        rpassword::prompt_password("Clave privada nsec (entrada oculta): ")
+            .map_err(|_| "No se pudo leer la clave privada")?,
+    );
+    let npub = import(&root, secret.trim(), expected.trim())?;
+    println!("Identidad guardada para {npub}. El mercado permanece detenido.");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn fixture(byte: u8) -> (String, String) {
+        // Synthetic test keys only; never use these identities outside tests.
+        let keys = Keys::new(SecretKey::from_slice(&[byte; 32]).unwrap());
+        (
+            keys.secret_key().to_bech32().unwrap(),
+            keys.public_key().to_bech32().unwrap(),
+        )
+    }
+    #[test]
+    fn validates_pair_and_checksum_before_writing() {
+        let root = tempfile::tempdir().unwrap();
+        let (secret, public) = fixture(1);
+        let (_, different) = fixture(2);
+        assert!(import(root.path(), &secret, &different).is_err());
+        assert!(import(root.path(), "nsec1invalid", &public).is_err());
+        assert!(import(root.path(), &public, &public).is_err());
+        assert!(!root.path().join("identity").exists());
+    }
+    #[test]
+    fn private_persistence_never_overwrites_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let (secret, public) = fixture(1);
+        assert_eq!(import(root.path(), &secret, &public).unwrap(), public);
+        let directory = root.path().join("identity");
+        let path = directory.join("mostro.nsec");
+        assert_eq!(fs::metadata(&directory).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        let (other_secret, other_public) = fixture(2);
+        assert!(import(root.path(), &other_secret, &other_public).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), secret);
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+    }
+    #[test]
+    fn rejects_symlink_and_world_readable_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let (secret, public) = fixture(1);
+        let path = root.path().join("identity");
+        std::os::unix::fs::symlink(other.path(), &path).unwrap();
+        assert!(import(root.path(), &secret, &public).is_err());
+        assert_eq!(fs::read_dir(other.path()).unwrap().count(), 0);
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(import(root.path(), &secret, &public).is_err());
+    }
+}

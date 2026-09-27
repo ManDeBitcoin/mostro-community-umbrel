@@ -5,6 +5,14 @@ use std::{
 };
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        if args == ["import-identity"] {
+            return mostro_community_api::identity::import_interactive()
+                .map_err(|message| message.into());
+        }
+        return Err("Uso: mostro-community-api [import-identity]".into());
+    }
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());
     let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
     let state = AppState {

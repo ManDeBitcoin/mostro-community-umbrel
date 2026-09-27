@@ -14,12 +14,15 @@ reqwest = { version = "0.12.28", default-features = false, features = ["rustls-t
 tonic = { version = "0.12.3", features = ["transport"] }
 prost = "0.13.5"
 tower-http = { version = "0.6.11", features = ["fs", "set-header"] }
+nostr = { version = "0.44.4", default-features = false, features = ["std"] }
+rpassword = "7"
+zeroize = "1"
+tempfile = "3"
 
 [build-dependencies]
 tonic-build = "0.12.3"
 protoc-bin-vendored = "3.2"
 
 [dev-dependencies]
-tempfile = "3.26"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

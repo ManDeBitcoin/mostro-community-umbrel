@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod config;
+pub mod identity;
 pub mod store;
 use adapters::Integrations;
 use axum::{
