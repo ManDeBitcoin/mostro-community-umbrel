@@ -9,7 +9,7 @@
 | Mostro | Adaptador RPC de lectura disponible; daemon y conexión pendientes |
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |
 | Compose de desarrollo | Implementado; imágenes nativas y smoke test Docker aprobados |
-| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.8 publicada e instalada, con LND conectado y persistencia confirmada por el operador |
+| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.9 publicada con conexión Mostro App (nprofile/QR), LND conectado y persistencia confirmada por el operador |
 | Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; lanzador privado que exige identidad y settings, probado sin LND; aún no se instala en Umbrel |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
 | Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración y preparación TOML aisladas en desarrollo, sin aplicación a la instancia activa; DB y arranque pendientes |
