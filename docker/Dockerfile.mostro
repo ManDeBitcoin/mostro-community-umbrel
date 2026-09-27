@@ -15,9 +15,9 @@ RUN set -eu; \
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ncurses-base && rm -rf /var/lib/apt/lists/*
 COPY --from=download /mostrod /usr/local/bin/mostrod
+COPY docker/mostro-entrypoint.sh /usr/local/bin/mostro-entrypoint
 USER 1000:1000
 WORKDIR /data
 ENV TERM=xterm
-# Deliberately no default settings: integration owner must provision and verify them.
-ENTRYPOINT ["mostrod"]
-CMD ["-d", "/data"]
+# Deliberately no default settings or identity: both must be mounted explicitly.
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/mostro-entrypoint"]

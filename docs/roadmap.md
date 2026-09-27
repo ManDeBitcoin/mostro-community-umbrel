@@ -10,7 +10,7 @@
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |
 | Compose de desarrollo | Implementado; imágenes nativas y smoke test Docker aprobados |
 | Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.7 publicada e instalada, con LND conectado y persistencia confirmada por el operador |
-| Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; verificación en CI, no arrancado |
+| Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; lanzador privado que exige identidad y settings, probado sin LND; aún no se instala en Umbrel |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
 | Backup cifrado y arranque de mercado | Pendiente |
 | QR de conexión Mostro App | Pendiente de identidad pública y formato compatible verificado |
