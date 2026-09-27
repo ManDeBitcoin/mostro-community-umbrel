@@ -4,15 +4,15 @@
 | --- | --- |
 | API Axum y UI React local | Implementada |
 | Configuración de comunidad, monedas, límites, fees, bonds, relays y catálogo | Borrador persistente; sin aplicar al daemon |
-| Renderer TOML del contrato v0.18.8 | Candidato sin nsec ni token RPC, RPC apagado; implementado internamente, no desplegado |
+| Renderer TOML del contrato v0.18.8 | Candidato sin nsec ni token RPC, RPC apagado; preparación privada por revisión en desarrollo, no desplegada |
 | LND | Consulta real de lectura de estado, red, canales y saldo agregado; TLS y macaroon readonly; no habilita operaciones |
 | Mostro | Adaptador RPC de lectura disponible; daemon y conexión pendientes |
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |
 | Compose de desarrollo | Implementado; imágenes nativas y smoke test Docker aprobados |
-| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.8 publicada y preview.7 instalada, con LND conectado y persistencia confirmada por el operador |
+| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.8 publicada e instalada, con LND conectado y persistencia confirmada por el operador |
 | Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; lanzador privado que exige identidad y settings, probado sin LND; aún no se instala en Umbrel |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
-| Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración aislada en desarrollo, sin aplicación a la instancia activa; DB y arranque pendientes |
+| Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración y preparación TOML aisladas en desarrollo, sin aplicación a la instancia activa; DB y arranque pendientes |
 | QR de conexión Mostro App | Pendiente de identidad pública y formato compatible verificado |
 | Trade smoke test regtest | Pendiente de fixture LND/Bitcoin/relay y cliente |
 | Órdenes, trades, disputas y chat | Pendiente |

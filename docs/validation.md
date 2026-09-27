@@ -70,3 +70,11 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 
 - La prueba con identidad sintética exporta el backup, lo restaura en un directorio nuevo, comprueba `npub`, revisión original y permisos 0700, y confirma que un destino existente permanece intacto.
 - `./scripts/check.sh` pasa con 19 pruebas Rust, Clippy, build web, validación Compose y smoke del lanzador. No se restauró el backup real ni se cambió la instalación Umbrel.
+
+## Preparación aislada de configuración Mostro — desarrollo posterior a preview.8
+
+- `mostro-community-api stage-mostro-settings <origen>` genera un `settings.toml` inerte por revisión en `CONFIG_DIR/staging/revision-N/` con permisos `0700` de directorio y `0600` de archivo.
+- Valida que el origen gRPC use HTTPS y puerto explícito, y rechaza rutas inseguras o preparar dos veces la misma revisión.
+- No monta el macaroon financiero ni lee la identidad ni toca el daemon Mostro.
+- `./scripts/check.sh` pasa con 21 pruebas Rust (incluyendo 2 de staging), Clippy sin advertencias, build web, validación Compose y smoke del lanzador.
+

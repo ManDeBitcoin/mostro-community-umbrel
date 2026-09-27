@@ -41,6 +41,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
+        if args.len() == 2 && args[0] == "stage-mostro-settings" {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            let staged = mostro_community_api::staging::stage(&root, &args[1])?;
+            println!("{}", serde_json::to_string_pretty(&staged)?);
+            return Ok(());
+        }
         if args == ["check-lnd"] {
             let status = Integrations::from_env().lightning().await;
             println!("{}", serde_json::to_string_pretty(&status)?);
@@ -51,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
         }
         return Err(
-            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|check-lnd|check-mostro|lnd-tunnel]".into(),
+            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|check-lnd|check-mostro|lnd-tunnel]".into(),
         );
     }
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());

@@ -10,6 +10,8 @@ La [documentación upstream de Mostro v0.18.8](https://github.com/MostroP2P/most
 
 El renderer interno ya puede formar un candidato `settings.toml` desde la plantilla fijada a v0.18.8. Es deliberadamente inerte: deja `nsec_privkey` vacío, RPC deshabilitado y no se escribe en el volumen del daemon. [Mostro admite `MOSTRO_NSEC_PRIVKEY`](https://github.com/MostroP2P/mostro/tree/v0.18.8#providing-the-nsec-via-environment-variable) para suministrar la identidad en el arranque sin duplicarla en el TOML. La imagen opcional incluye un lanzador que exige un archivo de identidad privado, del mismo usuario y sin enlace simbólico, además de `settings.toml`, antes de iniciar Mostro; no incorpora el secreto en la imagen ni en Compose. El lanzador se prueba con un binario sintético y la CI comprueba que la imagen real rehúsa arrancar sin archivos. Faltan el montaje y permisos mínimos de LND para pagos, backup y una prueba de ciclo completo en regtest antes de incorporar el daemon al paquete Umbrel.
 
+En desarrollo, `mostro-community-api stage-mostro-settings https://HOST:10009` genera una copia privada en `CONFIG_DIR/staging/revision-N/`. El origen gRPC debe usar HTTPS y puerto explícito; el certificado y el futuro macaroon financiero se referencian como `/lnd/tls.cert` y `/lnd/mostro.macaroon` dentro del futuro contenedor. El comando no monta ese macaroon, no lee la identidad y rechaza preparar dos veces la misma revisión. El resultado es solo para revisión: el Compose de Umbrel no monta esta carpeta en Mostro ni arranca el daemon. La ruta definitiva de datos y credenciales se fijará tras las pruebas regtest.
+
 Para comprobar la imagen desde el host Umbrel cuando Docker requiere `sudo`:
 
 ```sh

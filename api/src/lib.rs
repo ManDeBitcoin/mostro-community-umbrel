@@ -4,6 +4,7 @@ pub mod config;
 pub mod identity;
 pub mod lnd;
 pub mod preflight;
+pub mod staging;
 pub mod store;
 pub mod tunnel;
 use adapters::Integrations;
