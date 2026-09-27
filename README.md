@@ -17,7 +17,7 @@ Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda an
 
 ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
 
-El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. No depende de Lightning o Bitcoin en esta vista previa, porque no los conecta ni opera todavía.
+El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel para sus consultas de lectura; todavía no usa Bitcoin directamente ni ejecuta operaciones.
 
 ## Si ya tienes Mostro funcionando
 
@@ -33,7 +33,7 @@ Esto permite probar el panel por separado. **Instalarlo no importa ni administra
 - Consulta de lectura al LND de Umbrel: sincronización, red, canales y saldos agregados, sin acceso de administración al nodo. El adaptador Mostro aún no está conectado en el paquete.
 - Contratos y renderer TOML fijados a Mostro v0.18.8; todavía sin aplicar configuraciones al daemon.
 
-Pendientes: identidad/backup cifrado, inicio de mercado, trades, disputas, Telegram, upgrades y pruebas E2E regtest. [Estado del blueprint](docs/roadmap.md).
+Pendientes: backup cifrado de la identidad, inicio de mercado, trades, disputas, Telegram, upgrades y pruebas E2E regtest. [Estado del blueprint](docs/roadmap.md).
 
 ## Desarrollo local
 
