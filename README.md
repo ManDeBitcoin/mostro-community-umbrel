@@ -6,12 +6,12 @@ Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de c
 
 Este repositorio también es una tienda comunitaria de una sola aplicación.
 
-**Disponible: [0.1.0-preview.4](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.4).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36302699252).
+**Disponible: [0.1.0-preview.5](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.5).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36305089657).
 
 1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
 2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
 3. Instalar **Mostro Community Manager**.
-4. Comprobar que la ficha muestre **0.1.0-preview.4** o posterior y abrirlo desde Umbrel.
+4. Comprobar que la ficha muestre **0.1.0-preview.5** o posterior y abrirlo desde Umbrel.
 
 Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda antes de reintentar. Si Umbrel conserva la instalación fallida y sigue solicitando la imagen antigua, elimina únicamente la instalación fallida de **Mostro Community Manager** y vuelve a instalarla. La instalación independiente de Mostro no forma parte de ese paquete.
 
@@ -64,6 +64,6 @@ Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin cr
 
 [Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Blueprint original](docs/reference/blueprint-v4.md)
 
-## Identidad local (posterior a preview.4)
+## Importar la identidad existente
 
-El código fuente incorpora una importación interactiva de `nsec`, con comprobación del `npub` esperado, permisos privados y protección contra sobrescritura. Todavía no está disponible en la imagen preview.4 ni arranca Mostro. Ver [instrucciones y límites](docs/identity.md).
+Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y comprobar que corresponda al `npub` esperado. Se almacena con permisos privados, sin sobrescribir otra identidad. No inicia Mostro ni conecta LND. Ver [instrucciones y límites](docs/identity.md).

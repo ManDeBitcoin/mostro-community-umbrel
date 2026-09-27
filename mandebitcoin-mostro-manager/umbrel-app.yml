@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.4
+version: 0.1.0-preview.5
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.
@@ -13,7 +13,8 @@ description: >-
 
   Esta versión no inicia Mostro ni conecta automáticamente Bitcoin o LND.
   Utiliza datos propios y puede convivir con una instalación existente.
-  No importa claves, bases de datos ni operaciones del Mostro actual.
+  Permite importar una clave Nostr localmente por terminal, verificando su npub.
+  No importa bases de datos ni operaciones del Mostro actual.
   El arranque de mercado, las disputas y la migración todavía no están disponibles.
 developer: ManDeBitcoin
 website: https://github.com/ManDeBitcoin/mostro-community-umbrel
@@ -26,7 +27,8 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Primera vista previa instalable del Manager. Configuración persistente,
-  acceso a través de app_proxy y contenedor aislado. No ejecuta el daemon financiero.
+  Importación local de identidad Nostr con entrada oculta, validación de npub
+  y protección contra sobrescritura. Conserva la configuración persistente.
+  No ejecuta el daemon financiero.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
