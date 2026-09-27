@@ -12,7 +12,7 @@
 | Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.8 publicada y preview.7 instalada, con LND conectado y persistencia confirmada por el operador |
 | Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; lanzador privado que exige identidad y settings, probado sin LND; aún no se instala en Umbrel |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
-| Backup cifrado y arranque de mercado | Exportación cifrada y verificación de identidad/borrador premercado implementadas; restauración, DB y arranque pendientes |
+| Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración aislada en desarrollo, sin aplicación a la instancia activa; DB y arranque pendientes |
 | QR de conexión Mostro App | Pendiente de identidad pública y formato compatible verificado |
 | Trade smoke test regtest | Pendiente de fixture LND/Bitcoin/relay y cliente |
 | Órdenes, trades, disputas y chat | Pendiente |

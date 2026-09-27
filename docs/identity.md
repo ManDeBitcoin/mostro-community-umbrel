@@ -42,4 +42,8 @@ Desde preview.8, este comando pide dos veces una frase de cifrado de al menos 16
 sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-community-api export-backup
 ```
 
-El comando imprime la ruta exacta del archivo cifrado. Para verificarlo de nuevo dentro del contenedor, usa esa ruta como argumento de `verify-backup`, también con `sudo docker exec -it --user 1000:1000`. Copia luego el archivo `.age` fuera del servidor con `sudo docker cp` y guarda la frase por separado; una copia que permanece únicamente en el mismo disco no protege frente a su pérdida. La restauración automática aún no está implementada, por lo que no se debe considerar este archivo un respaldo completo de un mercado en operación.
+El comando imprime la ruta exacta del archivo cifrado. Para verificarlo de nuevo dentro del contenedor, usa esa ruta como argumento de `verify-backup`, también con `sudo docker exec -it --user 1000:1000`. Copia luego el archivo `.age` fuera del servidor con `sudo docker cp` y guarda la frase por separado; una copia que permanece únicamente en el mismo disco no protege frente a su pérdida. Este archivo no es un respaldo completo de un mercado en operación.
+
+## Restauración aislada (desarrollo posterior a preview.8)
+
+El código en desarrollo añade `restore-backup <archivo.age> <directorio-nuevo>`. Descifra y valida el backup, luego materializa `community.json` y `identity/mostro.nsec` en un directorio **nuevo y privado**. Rechaza un destino existente y no toca la configuración activa. Una prueba con identidad sintética comprobó la revisión, el npub, los permisos y la negativa a sobrescribir archivos. No se debe ejecutar sobre `/data/config`; aplicar una restauración a una instancia Umbrel y respaldar la futura base de datos Mostro serán pasos separados.
