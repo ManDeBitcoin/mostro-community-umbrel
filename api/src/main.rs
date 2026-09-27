@@ -11,6 +11,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return mostro_community_api::identity::import_interactive()
                 .map_err(|message| message.into());
         }
+        if args == ["export-backup"] {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            return mostro_community_api::backup::export_interactive(&root)
+                .map_err(|message| message.into());
+        }
+        if args.len() == 2 && args[0] == "verify-backup" {
+            return mostro_community_api::backup::verify_interactive(&PathBuf::from(&args[1]))
+                .map_err(|message| message.into());
+        }
         if args == ["lnd-tunnel"] {
             return mostro_community_api::tunnel::serve().await;
         }
@@ -33,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
         }
         return Err(
-            "Uso: mostro-community-api [import-identity|check-lnd|check-mostro|lnd-tunnel]".into(),
+            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|check-lnd|check-mostro|lnd-tunnel]".into(),
         );
     }
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());

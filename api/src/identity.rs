@@ -96,9 +96,9 @@ pub fn import_interactive() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Read only the imported identity's public key for local preflight.
-/// No secret bytes are returned, logged, or sent to the browser.
-pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
+/// Read the private identity only for local operations that require it.
+/// The returned buffer is zeroized on drop and must never be logged.
+pub(crate) fn read_private(root: &Path) -> Result<Option<Zeroizing<String>>, &'static str> {
     let directory = root.join("identity");
     let metadata = match fs::symlink_metadata(&directory) {
         Ok(metadata) => metadata,
@@ -114,11 +114,21 @@ pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("Archivo de identidad no disponible"),
     };
-    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
+    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 || metadata.len() > 256 {
         return Err("Archivo de identidad no privado");
     }
     let contents =
         Zeroizing::new(fs::read_to_string(&file).map_err(|_| "No se pudo leer la identidad")?);
+    SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
+    Ok(Some(contents))
+}
+
+/// Read only the imported identity's public key for local preflight.
+/// No secret bytes are returned, logged, or sent to the browser.
+pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
+    let Some(contents) = read_private(root)? else {
+        return Ok(None);
+    };
     let secret = SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
     Keys::new(secret)
         .public_key()

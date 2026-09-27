@@ -60,7 +60,7 @@ pub async fn report(root: &Path, integrations: &Integrations) -> Value {
         },
         "mostro":{"status":"not_installed","market_started":false},
         "can_start_market":false,
-        "detail":"Aún faltan integración financiera de Mostro, backup y prueba de ciclo completo en regtest"
+        "detail":"Aún faltan integración financiera de Mostro, restauración y prueba de ciclo completo en regtest"
     })
 }
 

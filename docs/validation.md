@@ -53,3 +53,10 @@ La primera compilación de `v0.1.0-preview.1` se detuvo porque la imagen oficial
 - `scripts/mostro-entrypoint-smoke.sh` pasa con un binario sintético: acepta identidad privada y settings presentes; rechaza permisos amplios, enlaces simbólicos, settings ausentes y el secreto pasado en el entorno de Docker.
 - La CI ahora compila la imagen final de Mostro, comprueba `--version` y exige que rechace un arranque sin archivos. La imagen no se publica ni se incorpora a la aplicación Umbrel. La construcción Docker local no se pudo ejecutar desde este entorno sin la contraseña de `sudo`; la prueba de imagen real se comprobará en CI cuando se publique un tag.
 - `scripts/verify-mostro-image.sh` permite al operador ejecutar esa misma prueba con `sudo` en el host. Se comprobó su sintaxis, el smoke del lanzador y el flujo del script con un Docker simulado; la construcción real queda pendiente de la ejecución con Docker privilegiado.
+
+El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: imagen oficial v0.18.8 y arranque protegido.` La imagen de prueba se eliminó al finalizar; no se arrancó un servicio Mostro.
+
+## Backup cifrado previo al mercado — desarrollo posterior a preview.7
+
+- La API local puede exportar la identidad y el borrador en un archivo `age` con frase interactiva y permisos privados, y verifica el descifrado antes de publicar el archivo. `verify-backup` valida versión, `npub` derivado del `nsec` y configuración sin restaurar archivos.
+- La prueba usa una identidad sintética, comprueba el viaje cifrado y descifrado, permisos de archivo/directorio y rechazo de una frase incorrecta. El mercado y LND no intervienen. La restauración de la configuración y el respaldo de la futura base de datos siguen pendientes.

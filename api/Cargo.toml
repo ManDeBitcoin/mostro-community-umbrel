@@ -18,6 +18,7 @@ nostr = { version = "0.44.4", default-features = false, features = ["std"] }
 rpassword = "7"
 zeroize = "1"
 tempfile = "3"
+age = "=0.12.1"
 
 [build-dependencies]
 tonic-build = "0.12.3"

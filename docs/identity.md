@@ -30,6 +30,16 @@ Introducir primero el npub esperado y después la clave privada cuando aparezca 
 
 - Directorio `CONFIG_DIR/identity` con permisos 0700; archivo `mostro.nsec` con permisos 0600, propiedad del usuario del proceso.
 - Escritura atómica, sin sustituir identidades existentes; se rechazan directorios enlazados o con permisos públicos.
-- La clave se guarda en texto plano protegido por permisos del sistema, **no cifrada**. El backup cifrado sigue pendiente. Conservar la copia original privada.
+- La clave de trabajo se guarda en texto plano protegido por permisos del sistema, **no cifrada**. Se dispone de una exportación cifrada previa al mercado, pero la restauración automática y el backup de la futura base de datos Mostro siguen pendientes. Conservar la copia original privada.
 - La API de configuración y sus backups de borrador no incluyen la identidad. Un backup completo del volumen sí contiene la clave y debe protegerse como tal.
 - La importación no verifica el estado de LND, no recupera operaciones anteriores, no publica en relays y no arranca el mercado.
+
+## Exportación cifrada previa al mercado
+
+En la versión que incluya `export-backup`, este comando pedirá dos veces una frase de cifrado en la terminal y escribirá un archivo `age` en `/data/config/backups/`. Incluye la identidad y el borrador guardado; **no incluye** la futura base de datos de órdenes ni datos de LND. El archivo se descifra de inmediato con la misma frase y se comprueba el `npub` antes de guardarse. No se envía al navegador.
+
+```sh
+sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-community-api export-backup
+```
+
+El comando imprime la ruta exacta del archivo cifrado. Para verificarlo de nuevo dentro del contenedor, usa esa ruta como argumento de `verify-backup`, también con `sudo docker exec -it --user 1000:1000`. Copia luego el archivo `.age` fuera del servidor con `sudo docker cp` y guarda la frase por separado; una copia que permanece únicamente en el mismo disco no protege frente a su pérdida. La restauración automática aún no está implementada, por lo que no se debe considerar este archivo un respaldo completo de un mercado en operación.
