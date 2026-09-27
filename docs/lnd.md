@@ -15,3 +15,7 @@ sudo docker exec mandebitcoin-mostro-manager_web_1 mostro-community-api check-ln
 El resultado muestra solo los campos seleccionados. Evita compartir el alias o los saldos si deseas mantenerlos privados. Si LND renueva `tls.cert` o `readonly.macaroon` mediante sustitución atómica del archivo, reinicia únicamente el Manager para renovar sus montajes de archivo; no hay que reiniciar LND.
 
 Esta integración se verificó con el LND real del operador por HTTPS y macaroon readonly: respondió mainnet, `synced_to_chain=true`, `synced_to_graph=true` y saldo de canales disponible. Las pruebas sintéticas también comprueban TLS, nombre de host, macaroon, redirecciones, límites de respuesta, estado parcial y error de permiso.
+
+## Canales abiertos desde Alby Hub
+
+En la instalación inspeccionada, Alby Hub tiene seleccionado el backend **LND** y apunta al mismo LND de Umbrel que consulta el Manager. También se comparó la clave pública del nodo mostrada por el operador con `identity_pubkey` de `GET /v1/getinfo`: coinciden. El valor de la clave no se publica aquí. Por tanto, los canales que el operador abra desde esa conexión de Alby Hub pertenecen al LND observado por el Manager. El contador cambiará cuando LND los informe como **activos**; los canales pendientes o inactivos no cuentan como activos. Si Alby Hub cambia a su backend LDK u otro nodo, esta correspondencia deja de ser válida y hay que volver a comparar las claves públicas. Abrir canales no elimina los otros requisitos para iniciar Mostro.
