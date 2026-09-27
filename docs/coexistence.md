@@ -6,9 +6,9 @@
 - Puerto del panel: `5173` a través de `app_proxy`; sin publicación directa de API/RPC.
 - Datos: solo el directorio propio `${APP_DATA_DIR}/data`.
 - Servicios: `app_proxy`, inicialización de permisos de datos y Manager (UI + API).
-- Red `manager_private` interna. Solo `app_proxy` conecta también a la red de Umbrel.
+- Red `manager_private` interna. `app_proxy` y un puente TCP de destino fijo conectan también a la red de Umbrel; la API del panel permanece en la red privada.
 
-No incluye Mostro, Bitcoin, LND, Watchdog, relay ni Push. No monta socket Docker, macaroons, nsec, configuración existente ni base de datos de Mostro. Los adaptadores quedan sin endpoints. Instalar o desinstalar el Manager no debe reiniciar ni cambiar esos otros servicios.
+No incluye Mostro, Bitcoin, LND, Watchdog, relay ni Push. No monta socket Docker, configuración existente ni base de datos de Mostro. La API lee únicamente `tls.cert` y `readonly.macaroon` de LND; el puente de red no recibe credenciales. El `nsec` importado pertenece al almacenamiento del Manager y no se expone por HTTP. Instalar o desinstalar el Manager no debe reiniciar ni cambiar esos otros servicios.
 
 La disponibilidad de `5173` se debe comprobar en cada servidor antes de instalar. Si hay un conflicto real, cambiar `port` en el manifest antes de instalar; los puertos internos 3001 de distintos contenedores no son por sí mismos un conflicto.
 

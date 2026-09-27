@@ -41,6 +41,10 @@ jobs:
         env:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
         run: ./scripts/container-smoke.sh "$IMAGE"
+      - name: Verify read-only LND TLS adapter in container
+        env:
+          IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
+        run: python3 scripts/lnd-smoke.py --image "$IMAGE"
       - name: Publish tested architecture
         env:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}

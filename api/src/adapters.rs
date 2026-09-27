@@ -9,6 +9,7 @@ pub mod rpc {
 pub struct Integrations {
     pub mostro_rpc: Option<String>,
     pub lnd_rest: Option<String>,
+    pub lnd_connect_host: Option<String>,
     pub lnd_cert: Option<PathBuf>,
     pub lnd_macaroon: Option<PathBuf>,
 }
@@ -17,6 +18,7 @@ impl Integrations {
         Self {
             mostro_rpc: std::env::var("MOSTRO_RPC_URL").ok(),
             lnd_rest: std::env::var("LND_REST_URL").ok(),
+            lnd_connect_host: std::env::var("LND_CONNECT_HOST").ok(),
             lnd_cert: std::env::var_os("LND_TLS_CERT").map(Into::into),
             lnd_macaroon: std::env::var_os("LND_READONLY_MACAROON").map(Into::into),
         }
@@ -45,51 +47,12 @@ impl Integrations {
         }
     }
     pub async fn lightning(&self) -> Value {
-        let (Some(address), Some(cert), Some(macaroon)) =
-            (&self.lnd_rest, &self.lnd_cert, &self.lnd_macaroon)
-        else {
-            return json!({"status":"unconfigured","detail":"Falta configurar la conexión de lectura a LND"});
-        };
-        async fn probe(
-            address: &str,
-            cert: &PathBuf,
-            macaroon: &PathBuf,
-        ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-            let url = url::Url::parse(address)?;
-            if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
-                return Err("LND requires HTTPS".into());
-            }
-            let cert = reqwest::Certificate::from_pem(&tokio::fs::read(cert).await?)?;
-            let bytes = tokio::fs::read(macaroon).await?;
-            let credential: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            let client = reqwest::Client::builder()
-                .add_root_certificate(cert)
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(3))
-                .build()?;
-            let response: Value = client
-                .get(url.join("/v1/getinfo")?)
-                .header("Grpc-Metadata-macaroon", credential)
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            let synced = response["synced_to_chain"]
-                .as_bool()
-                .ok_or("missing sync state")?;
-            // Whitelist: upstream responses and credentials never pass straight through to UI.
-            Ok(json!({"status":if synced {"online"} else {"warning"},
-                "detail":if synced {"LND sincronizado"} else {"LND está sincronizando"},
-                "alias":response["alias"].as_str(), "synced_to_chain":synced,
-                "num_active_channels":response["num_active_channels"].as_u64(),
-                "block_height":response["block_height"].as_u64()}))
-        }
-        match tokio::time::timeout(Duration::from_secs(5), probe(address, cert, macaroon)).await {
-            Ok(Ok(value)) => value,
-            _ => {
-                json!({"status":"offline","detail":"No se pudo verificar LND: revisa conexión, certificado y permisos"})
-            }
-        }
+        crate::lnd::status(
+            self.lnd_rest.as_deref(),
+            self.lnd_connect_host.as_deref(),
+            self.lnd_cert.as_deref(),
+            self.lnd_macaroon.as_deref(),
+        )
+        .await
     }
 }

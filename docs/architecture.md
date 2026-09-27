@@ -12,9 +12,9 @@ Las consultas de salud son reales cuando se suministran endpoints. Un `GetVersio
 
 El único cambio expuesto por HTTP guarda un borrador sin secretos en `CONFIG_DIR/community.json`. Tiene validación tipada, revisión optimista, archivo temporal, fsync y reemplazo atómico; conserva una revisión anterior. Un proceso API por directorio. Un archivo corrupto impide iniciar en vez de reiniciar silenciosamente la configuración.
 
-API local en `127.0.0.1:3001` por defecto. En contenedor, sin puerto publicado, detrás de web. Se exige JSON y cabecera personalizada para PUT; no se habilita CORS y se compara Origin/Host. En el paquete Umbrel la autenticación depende de `app_proxy`; la instalación aún debe verificarse en un Umbrel de prueba. La API/UI queda en una red interna propia a la que únicamente conecta ese proxy, sin puertos publicados ni credenciales del nodo. No hay autenticación autónoma ni soporte para exponer este prototipo a Internet. Para la distribución final se debe cerrar también el acceso entre aplicaciones en la red Docker compartida y probar sesiones/CSRF detrás del proxy.
+API local en `127.0.0.1:3001` por defecto. En contenedor, sin puerto publicado, detrás de web. Se exige JSON y cabecera personalizada para PUT; no se habilita CORS y se compara Origin/Host. En el paquete Umbrel la autenticación depende de `app_proxy`; la instalación aún debe verificarse en un Umbrel de prueba. La API/UI queda en una red interna propia, sin puertos publicados. El proxy de Umbrel entra desde su red compartida. Un puente TCP de destino fijo conecta exclusivamente con LND; el panel conserva su aislamiento de la red compartida. Solo la API monta `tls.cert` y `readonly.macaroon` de LND en modo lectura. El puente no monta credenciales y transmite TLS sin modificarlo. No hay autenticación autónoma ni soporte para exponer este prototipo a Internet. Para la distribución final se debe cerrar también el acceso entre aplicaciones en la red Docker compartida y probar sesiones/CSRF detrás del proxy.
 
-El renderer es una función interna, no un endpoint. Su resultado contiene secretos y no debe retornarse, registrarse ni aplicarse al daemon sin completar el flujo de identidad, backup, comprobación upstream y mantenimiento. La validación de monedas comprueba formato y duplicados; la disponibilidad real de cada moneda según proveedores está pendiente. La validación criptográfica de la identidad tampoco está implementada.
+El renderer es una función interna, no un endpoint. Su resultado contiene secretos y no debe retornarse, registrarse ni aplicarse al daemon sin completar el flujo de identidad, backup, comprobación upstream y mantenimiento. La validación de monedas comprueba formato y duplicados; la disponibilidad real de cada moneda según proveedores está pendiente. La importación local de identidad comprueba criptográficamente que `nsec` corresponde al `npub` indicado; el renderer de candidatos aún no aplica la configuración a Mostro.
 
 ## Fuentes comprobadas
 
@@ -33,7 +33,7 @@ Chat y resolución explícita de bonds no aparecen en el proto. Deben estudiarse
 ## Requisitos pendientes antes del primer mercado
 
 1. Identidad Nostr generada/guardada solo en servidor y exportación de backup cifrado. Resolver la tensión del blueprint entre “nunca entregar nsec al navegador” y “mostrarlo en onboarding”: preferir exportación cifrada, no texto plano.
-2. Detección directa de Bitcoin y verificación completa LND, liquidez y red; no duplicar nodos.
+2. Detección directa de Bitcoin y evaluación de capacidad de pago/recepción de LND; la consulta de saldos agregados no garantiza rutas utilizables.
 3. Validación de configuración contra binario upstream; distinguir borrador, configuración aplicada y cambios pendientes.
 4. Control de proceso sin montar Docker socket privilegiado; arranque y recuperación probados en regtest.
 5. Probar Mostro App compatible, creación/toma/cancelación/settlement y bonds en regtest.

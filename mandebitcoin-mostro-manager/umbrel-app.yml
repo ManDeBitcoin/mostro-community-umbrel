@@ -11,7 +11,8 @@ description: >-
   Permite guardar la identidad pública y el borrador de reglas del mercado:
   monedas, límites, comisiones, bonds, relays y catálogo de pagos.
 
-  Esta versión no inicia Mostro ni conecta automáticamente Bitcoin o LND.
+  Esta versión no inicia Mostro ni conecta Bitcoin. Consulta el estado de LND
+  con un macaroon de solo lectura y validación TLS.
   Utiliza datos propios y puede convivir con una instalación existente.
   Permite importar una clave Nostr localmente por terminal, verificando su npub.
   No importa bases de datos ni operaciones del Mostro actual.
@@ -20,7 +21,7 @@ developer: ManDeBitcoin
 website: https://github.com/ManDeBitcoin/mostro-community-umbrel
 repo: https://github.com/ManDeBitcoin/mostro-community-umbrel
 support: https://github.com/ManDeBitcoin/mostro-community-umbrel/issues
-dependencies: []
+dependencies: [lightning]
 gallery:
   - https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/docs/screenshots/dashboard.png
 path: ""

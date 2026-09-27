@@ -21,7 +21,7 @@ El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager
 
 ## Si ya tienes Mostro funcionando
 
-Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y no toca LND. Su contenedor usa una red interna propia; `app_proxy` es su única entrada de red.
+Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y no toca LND. La API del panel permanece en una red interna; un puente de destino fijo permite consultar LND con TLS.
 
 Esto permite probar el panel por separado. **Instalarlo no importa ni administra automáticamente el Mostro existente.** Antes de conectar esa instancia se debe inventariar versión, red, método de ejecución, estado de operaciones, identidad LND y backups. No arrancar un segundo daemon con la misma identidad, DB o estado financiero. Ver [convivencia y futura conexión](docs/coexistence.md).
 
@@ -30,7 +30,7 @@ Esto permite probar el panel por separado. **Instalarlo no importa ni administra
 - Panel React en español y API Rust/Axum.
 - Borrador persistente: comunidad, monedas, límites, comisiones, bonds, relays y catálogo de pagos.
 - Validación, revisión optimista, escritura atómica y copia de la revisión anterior.
-- Adaptadores de lectura Mostro/LND para desarrollo; no configurados en el paquete Umbrel.
+- Consulta de lectura al LND de Umbrel: sincronización, red, canales y saldos agregados, sin acceso de administración al nodo. El adaptador Mostro aún no está conectado en el paquete.
 - Contratos y renderer TOML fijados a Mostro v0.18.8; todavía sin aplicar configuraciones al daemon.
 
 Pendientes: identidad/backup cifrado, inicio de mercado, trades, disputas, Telegram, upgrades y pruebas E2E regtest. [Estado del blueprint](docs/roadmap.md).
@@ -67,3 +67,7 @@ Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin cr
 ## Importar la identidad existente
 
 Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y comprobar que corresponda al `npub` esperado. Se almacena con permisos privados, sin sobrescribir otra identidad. No inicia Mostro ni conecta LND. Ver [instrucciones y límites](docs/identity.md).
+
+## LND de Umbrel (en preparación para preview.6)
+
+La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes del LND de Umbrel. No copia ni publica sus valores. El panel muestra si la cadena y el grafo están sincronizados y, si LND lo informa, el saldo agregado de canales abiertos. Son indicadores de diagnóstico; no prueban que exista una ruta ni que Mostro pueda aceptar órdenes. El código y las pruebas están listos; preview.5 instalada aún no incluye esta integración. Ver [conexión y límites](docs/lnd.md).
