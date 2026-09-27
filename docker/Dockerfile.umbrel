@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=api /src/target/release/mostro-community-api /usr/local/bin/mostro-community-api
 COPY --from=download /mostrod /usr/local/bin/mostrod
 COPY docker/mostro-entrypoint.sh /usr/local/bin/mostro-entrypoint
+RUN chmod 755 /usr/local/bin/mostro-entrypoint
 COPY --from=web /src/dist /opt/manager/web
 ENV API_BIND=0.0.0.0:3001 CONFIG_DIR=/data/config STATIC_DIR=/opt/manager/web TERM=xterm
 USER 1000:1000
