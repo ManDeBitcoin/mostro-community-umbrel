@@ -6,12 +6,12 @@ Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de c
 
 Este repositorio también es una tienda comunitaria de una sola aplicación.
 
-**Disponible: [0.1.0-preview.5](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.5).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36305089657).
+**Disponible: [0.1.0-preview.6](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.6).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36324500916).
 
 1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
 2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
 3. Instalar **Mostro Community Manager**.
-4. Comprobar que la ficha muestre **0.1.0-preview.5** o posterior y abrirlo desde Umbrel.
+4. Comprobar que la ficha muestre **0.1.0-preview.6** o posterior y abrirlo desde Umbrel.
 
 Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda antes de reintentar. Si Umbrel conserva la instalación fallida y sigue solicitando la imagen antigua, elimina únicamente la instalación fallida de **Mostro Community Manager** y vuelve a instalarla. La instalación independiente de Mostro no forma parte de ese paquete.
 
@@ -21,7 +21,7 @@ El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager
 
 ## Si ya tienes Mostro funcionando
 
-Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y no toca LND. La API del panel permanece en una red interna; un puente de destino fijo permite consultar LND con TLS.
+Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y solo consulta LND mediante su macaroon de lectura. La API del panel permanece en una red interna; un puente de destino fijo permite consultar LND con TLS.
 
 Esto permite probar el panel por separado. **Instalarlo no importa ni administra automáticamente el Mostro existente.** Antes de conectar esa instancia se debe inventariar versión, red, método de ejecución, estado de operaciones, identidad LND y backups. No arrancar un segundo daemon con la misma identidad, DB o estado financiero. Ver [convivencia y futura conexión](docs/coexistence.md).
 
@@ -66,8 +66,8 @@ Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin cr
 
 ## Importar la identidad existente
 
-Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y comprobar que corresponda al `npub` esperado. Se almacena con permisos privados, sin sobrescribir otra identidad. No inicia Mostro ni conecta LND. Ver [instrucciones y límites](docs/identity.md).
+Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y comprobar que corresponda al `npub` esperado. Se almacena con permisos privados, sin sobrescribir otra identidad. No inicia Mostro. Ver [instrucciones y límites](docs/identity.md).
 
-## LND de Umbrel (en preparación para preview.6)
+## LND de Umbrel
 
-La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes del LND de Umbrel. No copia ni publica sus valores. El panel muestra si la cadena y el grafo están sincronizados y, si LND lo informa, el saldo agregado de canales abiertos. Son indicadores de diagnóstico; no prueban que exista una ruta ni que Mostro pueda aceptar órdenes. El código y las pruebas están listos; preview.5 instalada aún no incluye esta integración. Ver [conexión y límites](docs/lnd.md).
+La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes del LND de Umbrel. No copia ni publica sus valores. El panel muestra si la cadena y el grafo están sincronizados y, si LND lo informa, el saldo agregado de canales abiertos. Son indicadores de diagnóstico; no prueban que exista una ruta ni que Mostro pueda aceptar órdenes. Disponible desde preview.6. Ver [conexión y límites](docs/lnd.md).
