@@ -1,5 +1,5 @@
 {
-  "manager": "0.1.0-dev",
+  "manager": "0.1.0",
   "mostro": {
     "version": "0.18.8",
     "tag": "v0.18.8",
@@ -11,5 +11,9 @@
   "mostro_app_minimum_compatible": null,
   "watchdog": null,
   "push_server": null,
-  "umbrel_minimum_tested": null
+  "umbrel_minimum_tested": null,
+  "umbrel_preview": {
+    "version": "0.1.0-preview.4",
+    "image_digest": "sha256:bbf12029ceb7f3e6f41ab26a676d1579609dd98176d1db99526b834aaf176a20"
+  }
 }

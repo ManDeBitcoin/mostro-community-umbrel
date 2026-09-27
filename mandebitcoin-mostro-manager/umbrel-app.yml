@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.1
+version: 0.1.0-preview.4
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.

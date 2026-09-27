@@ -7,8 +7,8 @@
 | Renderer TOML del contrato v0.18.8 | Implementado internamente; no desplegado |
 | LND / Mostro | Adaptadores de consulta; integración real pendiente |
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |
-| Compose de desarrollo | Implementado; build Docker pendiente de comprobar |
-| Manifest / proxy Umbrel | Paquete de tienda comunitaria en `mandebitcoin-mostro-manager/`; publicación de imágenes en curso |
+| Compose de desarrollo | Implementado; imágenes nativas y smoke test Docker aprobados |
+| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; instalación final del operador pendiente |
 | Contenedor Mostro | Dockerfile con release/checksums fijados; no arrancado |
 | Identidad, backup y arranque de mercado | Pendiente |
 | QR de conexión Mostro App | Pendiente de identidad pública y formato compatible verificado |

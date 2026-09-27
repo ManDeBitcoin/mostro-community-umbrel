@@ -6,12 +6,14 @@ Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de c
 
 Este repositorio también es una tienda comunitaria de una sola aplicación.
 
-**Estado de publicación inicial:** imágenes en preparación. No instalar hasta que la release y la disponibilidad pública de la imagen estén verificadas.
+**Disponible: [0.1.0-preview.4](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.4).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36302699252).
 
 1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
 2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
 3. Instalar **Mostro Community Manager**.
-4. Abrirlo desde Umbrel y guardar el borrador de tu comunidad.
+4. Comprobar que la ficha muestre **0.1.0-preview.4** o posterior y abrirlo desde Umbrel.
+
+Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda antes de reintentar. Si Umbrel conserva la instalación fallida y sigue solicitando la imagen antigua, elimina únicamente la instalación fallida de **Mostro Community Manager** y vuelve a instalarla. La instalación independiente de Mostro no forma parte de ese paquete.
 
 ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
 
