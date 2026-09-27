@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod backup;
 pub mod config;
 pub mod connection;
+pub mod daemon;
 pub mod identity;
 pub mod lnd;
 pub mod preflight;
@@ -18,7 +19,6 @@ use axum::{
 use config::Configuration;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use store::{Document, Store};
 #[derive(Clone)]
@@ -39,6 +39,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
         .route("/api/connection", get(connection_info_handler))
+        .route("/api/daemon/status", get(daemon_status_handler))
+        .route("/api/daemon/activate", put(daemon_activate_handler))
+        .route("/api/daemon/deactivate", put(daemon_deactivate_handler))
         .route(
             "/api/{*path}",
             get(|| async { error(StatusCode::NOT_FOUND, "Endpoint no disponible") }),
@@ -49,14 +52,106 @@ pub fn router(state: AppState) -> Router {
 async fn connection_info_handler(
     State(state): State<AppState>,
 ) -> Result<Json<connection::ConnectionInfo>, Error> {
-    let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
     let store = state.store.lock().map_err(|_| {
         error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Almacenamiento no disponible",
         )
     })?;
+    let root = store.root().to_path_buf();
     Ok(Json(connection::get_connection_info(&root, &store)))
+}
+
+#[derive(Deserialize)]
+struct ActivateDaemonRequest {
+    lnd_grpc_origin: Option<String>,
+}
+
+async fn daemon_status_handler(
+    State(state): State<AppState>,
+) -> Result<Json<daemon::DaemonReport>, Error> {
+    let root = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .root()
+        .to_path_buf();
+    Ok(Json(daemon::report(&root, &state.integrations).await))
+}
+
+async fn daemon_activate_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Option<Json<ActivateDaemonRequest>>,
+) -> Result<Json<daemon::ActivationResult>, Error> {
+    if headers
+        .get("x-requested-with")
+        .and_then(|v| v.to_str().ok())
+        != Some("mostro-community")
+    {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "Falta protección de solicitud",
+        ));
+    }
+    let root = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .root()
+        .to_path_buf();
+    let default_origin = format!(
+        "https://{}:{}",
+        std::env::var("APP_LIGHTNING_NODE_IP").unwrap_or_else(|_| "10.21.21.9".into()),
+        std::env::var("APP_LIGHTNING_NODE_GRPC_PORT").unwrap_or_else(|_| "10009".into())
+    );
+    let lnd_origin = payload
+        .and_then(|p| p.0.lnd_grpc_origin)
+        .unwrap_or(default_origin);
+
+    daemon::activate(&root, &lnd_origin)
+        .map(Json)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, e))
+}
+
+async fn daemon_deactivate_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Error> {
+    if headers
+        .get("x-requested-with")
+        .and_then(|v| v.to_str().ok())
+        != Some("mostro-community")
+    {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "Falta protección de solicitud",
+        ));
+    }
+    let root = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .root()
+        .to_path_buf();
+    daemon::deactivate(&root)
+        .map(|()| Json(json!({"status": "deactivated"})))
+        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))
 }
 
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {

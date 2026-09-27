@@ -1,4 +1,17 @@
-# A single immutable image serves the static UI and API for the Umbrel preview.
+# A single immutable image serves the static UI, API and verified Mostro daemon for Umbrel.
+FROM debian:bookworm-slim AS download
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) artifact=mostrod-x86_64-unknown-linux-musl; checksum=9fa0516a79270dec2dbe074f14cf988c0311a9d56c80f0a00a98e8d579b3cf53 ;; \
+      arm64) artifact=mostrod-aarch64-unknown-linux-musl; checksum=034af649fcad9754e23bee91babdb7b2785431a9cba3ffd91c9b45ac3ccc8b3d ;; \
+      *) echo 'Unsupported architecture' >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/MostroP2P/mostro/releases/download/v0.18.8/$artifact" -o /mostrod; \
+    echo "$checksum  /mostrod" | sha256sum -c -; \
+    chmod 755 /mostrod; \
+    TERM=xterm /mostrod --version
 FROM node:22.13.0-bookworm-slim AS web
 WORKDIR /src
 COPY web/package*.json ./
@@ -15,10 +28,12 @@ RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo clipp
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/ManDeBitcoin/mostro-community-umbrel"
 LABEL org.opencontainers.image.title="Mostro Community Manager"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base && rm -rf /var/lib/apt/lists/*
 COPY --from=api /src/target/release/mostro-community-api /usr/local/bin/mostro-community-api
+COPY --from=download /mostrod /usr/local/bin/mostrod
+COPY docker/mostro-entrypoint.sh /usr/local/bin/mostro-entrypoint
 COPY --from=web /src/dist /opt/manager/web
-ENV API_BIND=0.0.0.0:3001 CONFIG_DIR=/data/config STATIC_DIR=/opt/manager/web
+ENV API_BIND=0.0.0.0:3001 CONFIG_DIR=/data/config STATIC_DIR=/opt/manager/web TERM=xterm
 USER 1000:1000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD curl -fsS http://127.0.0.1:3001/api/health || exit 1
 ENTRYPOINT ["mostro-community-api"]

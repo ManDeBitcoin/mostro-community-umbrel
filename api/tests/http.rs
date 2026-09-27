@@ -152,3 +152,52 @@ async fn imported_identity_is_not_exposed_over_http() {
         assert!(!String::from_utf8_lossy(&body).contains(&secret));
     }
 }
+
+#[tokio::test]
+async fn daemon_endpoints_enforce_protection_and_report_state() {
+    let (_dir, app) = setup();
+
+    // GET daemon status requires no CSRF header and succeeds
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/daemon/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["state"], "unconfigured");
+
+    // PUT daemon activate fails without custom header
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/daemon/activate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // PUT daemon deactivate fails without custom header
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/daemon/deactivate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

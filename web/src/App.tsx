@@ -38,6 +38,19 @@ type ConnectionInfo = {
   app_download_url: string;
   instructions: string;
 };
+type DaemonReport = {
+  state: 'unconfigured' | 'configured_standby' | 'active_ready' | 'active_running';
+  identity_present: boolean;
+  npub?: string | null;
+  draft_revision?: number | null;
+  active_revision?: number | null;
+  active_settings_hash?: string | null;
+  active_settings_path?: string | null;
+  lnd_channel_count: number;
+  lnd_synced: boolean;
+  can_activate: boolean;
+  warnings: string[];
+};
 type CommunityReply = { revision: number; config: Configuration | null };
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
@@ -84,6 +97,8 @@ function App() {
   const [page, setPage] = useState<'dashboard' | 'config'>('dashboard');
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+  const [daemon, setDaemon] = useState<DaemonReport | null>(null);
+  const [activatingDaemon, setActivatingDaemon] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState<Configuration>(blankConfig);
@@ -111,12 +126,13 @@ function App() {
     const healthPromise = api<{ status: string }>('/api/health').then((data) => setHealth(data.status === 'ok')).catch(() => setHealth(false));
     const dashboardPromise = api<Dashboard>('/api/dashboard').then(setDashboard).catch(() => setDashboard(null));
     const connectionPromise = api<ConnectionInfo>('/api/connection').then(setConnection).catch(() => setConnection(null));
+    const daemonPromise = api<DaemonReport>('/api/daemon/status').then(setDaemon).catch(() => setDaemon(null));
     const communityPromise = api<CommunityReply>('/api/community').then((data) => {
       setRevision(data.revision); setSaved(Boolean(data.config)); setDirty(false); setCommunityLoaded(true);
       const config = data.config || blankConfig(); setDraft(config);
       setFeeInputs(data.config ? { fee: percent(config.market.fee_bps), devFee: percent(config.market.dev_fee_bps), routingFee: percent(config.market.max_routing_fee_bps), bond: percent(config.safety.bond_bps) } : { fee: '', devFee: '', routingFee: '', bond: '' });
     }).catch((err: Error) => { setCommunityLoaded(false); setApiError(err.message); });
-    await Promise.all([healthPromise, dashboardPromise, connectionPromise, communityPromise]); setLoading(false);
+    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const markDirty = () => { setDirty(true); setSaved(false); };
@@ -146,6 +162,38 @@ function App() {
       setRevision(response.revision); setDraft(response.config || draft); setSaved(true); setDirty(false); setNotice('Configuración guardada.'); setApiError('');
     } catch (err) { setNotice(''); setApiError(err instanceof Error ? err.message : 'No se pudo guardar la configuración.'); }
     finally { setSaving(false); }
+  };
+  const handleActivateDaemon = async () => {
+    if (!window.confirm('¿Deseas activar la configuración para el daemon Mostro con las reglas del borrador actual?')) return;
+    setActivatingDaemon(true);
+    try {
+      await api('/api/daemon/activate', {
+        method: 'PUT',
+        headers: { 'X-Requested-With': 'mostro-community' },
+      });
+      setNotice('Configuración activa de Mostro activada con éxito.');
+      await refresh();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Error al activar el daemon');
+    } finally {
+      setActivatingDaemon(false);
+    }
+  };
+  const handleDeactivateDaemon = async () => {
+    if (!window.confirm('¿Deseas desactivar la configuración activa de Mostro?')) return;
+    setActivatingDaemon(true);
+    try {
+      await api('/api/daemon/deactivate', {
+        method: 'PUT',
+        headers: { 'X-Requested-With': 'mostro-community' },
+      });
+      setNotice('Configuración activa desactivada.');
+      await refresh();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Error al desactivar el daemon');
+    } finally {
+      setActivatingDaemon(false);
+    }
   };
   const readiness = useMemo(() => [Boolean(draft.community.name.trim()), draft.market.fiat_currencies.length > 0, draft.nostr.relays.length > 0, draft.payment_methods.some((method) => method.active)].filter(Boolean).length, [draft]);
   const statuses = dashboard ? [
@@ -230,6 +278,67 @@ function App() {
                   )}
                 </div>
               </div>
+            </div>
+          </section>
+        )}
+        {daemon && (
+          <section className="daemon-card" aria-labelledby="daemon-title">
+            <div className="daemon-heading">
+              <div>
+                <h2 id="daemon-title">Orquestación del Demonio Mostro</h2>
+                <p>Control del archivo de configuración activa y estado de arranque del motor P2P.</p>
+              </div>
+              <span className="service-status">
+                <StatusDot status={daemon.state === 'active_ready' ? 'online' : daemon.state === 'configured_standby' ? 'warning' : 'offline'} />
+                {daemon.state === 'active_ready' ? 'Preparado para Mercado' : daemon.state === 'configured_standby' ? 'En Espera de Activación' : 'Sin Configurar'}
+              </span>
+            </div>
+            {daemon.warnings.length > 0 && (
+              <div className="daemon-warnings" role="alert">
+                {daemon.warnings.map((w, idx) => (
+                  <div key={idx}>⚠ {w}</div>
+                ))}
+              </div>
+            )}
+            <div className="daemon-grid">
+              <div className="daemon-grid-item">
+                <span>Identidad Nostr del bot</span>
+                <strong>{daemon.npub ? daemon.npub.slice(0, 16) + '...' + daemon.npub.slice(-8) : 'No importada'}</strong>
+              </div>
+              <div className="daemon-grid-item">
+                <span>Revisión borrador</span>
+                <strong>{daemon.draft_revision !== null && daemon.draft_revision !== undefined ? `Revisión ${daemon.draft_revision}` : 'Sin borrador'}</strong>
+              </div>
+              <div className="daemon-grid-item">
+                <span>Configuración activa</span>
+                <strong>{daemon.active_revision ? `Revisión ${daemon.active_revision}` : 'Ninguna'}</strong>
+              </div>
+              <div className="daemon-grid-item">
+                <span>SHA-256 settings.toml</span>
+                <strong>{daemon.active_settings_hash ? daemon.active_settings_hash.slice(0, 16) + '...' : 'Inactivo'}</strong>
+              </div>
+            </div>
+            <div className="daemon-actions">
+              {daemon.can_activate && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => void handleActivateDaemon()}
+                  disabled={activatingDaemon}
+                >
+                  {activatingDaemon ? 'Activando...' : daemon.state === 'active_ready' ? 'Reactivar / Actualizar Configuración' : 'Activar Configuración de Mercado'}
+                </button>
+              )}
+              {daemon.state === 'active_ready' && (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void handleDeactivateDaemon()}
+                  disabled={activatingDaemon}
+                >
+                  Desactivar Mercado
+                </button>
+              )}
             </div>
           </section>
         )}

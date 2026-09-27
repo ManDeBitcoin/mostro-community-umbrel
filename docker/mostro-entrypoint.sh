@@ -15,6 +15,14 @@ fail() {
 }
 
 [ "${MOSTRO_NSEC_PRIVKEY+x}" != x ] || fail 'pass the identity as a mounted file, not a Docker environment value'
+
+if [ "${STANDBY_IF_UNCONFIGURED:-false}" = "true" ]; then
+    while [ ! -f "$identity_file" ] || [ ! -f "$settings_dir/settings.toml" ]; do
+        printf '%s\n' "Mostro daemon: en espera de activación por el operador en el panel de control..."
+        sleep 10
+    done
+fi
+
 [ -f "$identity_file" ] && [ ! -L "$identity_file" ] || fail 'private identity file is missing or is a symlink'
 [ "$(stat -c %u "$identity_file")" = "$(id -u)" ] || fail 'private identity file has a different owner'
 case "$(stat -c %a "$identity_file")" in

@@ -84,3 +84,14 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 - El manifiesto multi-arquitectura tiene digest `sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0`; la CI y el host verificaron acceso anónimo a los manifiestos y capas antes de fijarlo en Umbrel.
 - La versión incluye endpoint `GET /api/connection`, CLI `connection-info`, tarjeta web con QR en SVG, `nprofile` y `nostr:` URI para conexión directa con Mostro App.
 
+## Orquestación del Demonio Mostro (Módulo 1) — preview.10
+
+- 27 pruebas Rust pasan (`cargo test --workspace --locked`). Se agregaron pruebas para la máquina de estados de `daemon.rs` (`unconfigured`, `configured_standby`, `active_ready`, `active_running`), ciclo de vida completo de activación y desactivación atómica, y endpoints HTTP `/api/daemon/*` con protección contra CSRF.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 advertencias.
+- `cargo fmt --all -- --check`: correcto.
+- `npm --prefix web run build`: TypeScript y Vite compilan correctamente con los nuevos tipos y tarjeta de control de orquestación.
+- `scripts/mostro-entrypoint-smoke.sh`: pasa exitosamente validando el modo de espera `STANDBY_IF_UNCONFIGURED=true`, el rechazo de enlaces simbólicos, permisos laxos y variables de entorno con secretos.
+- `Dockerfile.umbrel` unificado: integra la descarga y comprobación de checksums SHA-256 oficiales del binario `mostrod` v0.18.8 para amd64 y arm64 (`9fa0516a...` y `034af649...`), instalando tanto el daemon Mostro como la API y la UI en la misma imagen para evitar duplicidad de repositorios en GHCR.
+- Tarjeta de control web: muestra estado en vivo, revisión activa, advertencia de falta de canales LND y acciones de activación/desactivación sin comprometer la seguridad ni revelar el `nsec`.
+
+

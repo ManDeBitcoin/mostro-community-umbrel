@@ -62,4 +62,7 @@ impl Store {
         fs::File::open(&self.root)?.sync_all()?;
         Ok(next)
     }
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
 }

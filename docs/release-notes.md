@@ -1,3 +1,8 @@
-Preview.9 añade integración de conexión para Mostro App oficial: el endpoint `GET /api/connection` y el comando `mostro-community-api connection-info` generan de forma pública la clave Nostr (`npub`), identificador hex, `nprofile` codificado con los relays configurados, URI `nostr:` y código QR en SVG nativo sin exponer la clave privada `nsec`. El Panel general incluye una tarjeta interactiva de conexión con código QR y botones de copiado rápido.
-
-Se incorpora la preparación aislada de configuración Mostro (`stage-mostro-settings`) por revisión y la restauración segura de backups en directorios nuevos protegidos (`restore-backup`). La suite completa de 23 tests automatizados valida que no existan fugas de secretos y que las configuraciones activas permanezcan intactas.
+Preview.10 implementa el Módulo 1 de orquestación y ciclo de vida del demonio Mostro (v0.18.8):
+- Módulo `daemon.rs` con máquina de estados (`unconfigured`, `configured_standby`, `active_ready`, `active_running`).
+- Endpoints `GET /api/daemon/status`, `PUT /api/daemon/activate`, `PUT /api/daemon/deactivate` y comandos CLI correspondientes (`daemon-status`, `activate-daemon`, `deactivate-daemon`).
+- Generación segura y activación atómica de `active/settings.toml` (modo 0600) con digest criptográfico SHA-256 sin filtrar claves privadas ni macaroons.
+- Incorporación del binario oficial upstream verificado de Mostro v0.18.8 (SHA-256 verificado en amd64 y arm64) y lanzador protegido en la imagen unificada.
+- Modo de espera protegida (`STANDBY_IF_UNCONFIGURED=true`) para el demonio en Compose sin causar bucles de reinicio antes de la activación.
+- Tarjeta de control de orquestación en el Panel Web con indicadores en vivo, advertencias de canales LND y botones de activación.
+- Suite de pruebas ampliada a 27 tests automatizados con 0 advertencias de Clippy.

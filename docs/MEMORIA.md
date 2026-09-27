@@ -44,7 +44,8 @@ UMBREL APP STACK:
 | --- | --- | --- |
 | **preview.1 a preview.7** | Desplegado | Configuración de comunidad, monedas fiat, métodos de pago, bonds, límites, fees; LND readonly REST/TLS; Docker multi-arch en GHCR. |
 | **preview.8** (`v0.1.0-preview.8`) | Desplegado previamente | - Importación segura de identidad Nostr por CLI (`import-identity`).<br>- Identidad activa del operador importada y verificada: `npub1qqdagara05n9ahlrh5ah9xvgv9r2mpgd2yy4lemmwc7ryq2kskuswt0t3x`.<br>- LND en línea y sincronizado (0 canales activos).<br>- Exportación y verificación de backup pre-mercado cifrado con `age`: `/data/config/backups/pre-market-rev4-1790526552.age`.<br>- Verificación de imagen oficial Mostro v0.18.8 en host mediante `scripts/verify-mostro-image.sh` con `sudo` aprobada. |
-| **preview.9** (`v0.1.0-preview.9`) | **Publicado y Promovido** | - Manifiesto multi-arquitectura verificado: `sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0`.<br>- Módulo `connection.rs`, endpoint `GET /api/connection`, CLI `connection-info`.<br>- Generación nativa de QR en SVG, URI `nostr:`, y `nprofile` con relays para Mostro App.<br>- Staging inerte de `settings.toml` (`stage-mostro-settings`) y restauración protegida en nuevo directorio (`restore-backup`).<br>- Suite de 23 tests aprobada con 0 advertencias de clippy y 0 fugas de secretos. |
+| **preview.9** (`v0.1.0-preview.9`) | Desplegado previamente | - Manifiesto multi-arquitectura verificado: `sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0`.<br>- Módulo `connection.rs`, endpoint `GET /api/connection`, CLI `connection-info`.<br>- Generación nativa de QR en SVG, URI `nostr:`, y `nprofile` con relays para Mostro App.<br>- Staging inerte de `settings.toml` (`stage-mostro-settings`) y restauración protegida en nuevo directorio (`restore-backup`).<br>- Suite de 23 tests aprobada con 0 advertencias de clippy y 0 fugas de secretos. |
+| **preview.10** (`v0.1.0-preview.10`) | **Módulo 1 Completado** | - Módulo `daemon.rs` con máquina de estados (`unconfigured`, `configured_standby`, `active_ready`, `active_running`).<br>- Endpoints `GET /api/daemon/status`, `PUT /api/daemon/activate`, `PUT /api/daemon/deactivate` y CLI `daemon-status`, `activate-daemon`, `deactivate-daemon`.<br>- Activación atómica con `active/settings.toml` (0600) y digest SHA-256 sin filtrar credenciales.<br>- Imagen unificada Dockerfile.umbrel con binario oficial `mostrod` v0.18.8 verificado por SHA-256 (amd64 y arm64).<br>- Lanzador con espera pasiva `STANDBY_IF_UNCONFIGURED=true` en Compose evitando bucles de reinicio.<br>- Tarjeta UI de control del daemon con telemetría en vivo, alerta de falta de canales LND y acciones de activación.<br>- Suite ampliada a 27 tests automáticos, 0 advertencias de Clippy. |
 
 ---
 
@@ -70,6 +71,7 @@ UMBREL APP STACK:
 
 ## 4. Próximos Pasos Técnicos Inmediatos
 
-1. Preparar fixture regtest y entorno de pruebas sintéticas para el ciclo completo de órdenes P2P de Mostro.
-2. Evaluar y fijar permisos mínimos para el montaje financiero del daemon Mostro sin comprometer el Manager.
-3. Smoke test de ciclo de vida completo (creación de orden, hold invoice, aceptación, liberación y resolución de disputas) en regtest antes del despliegue final.
+1. Taggear y publicar `v0.1.0-preview.10` en GitHub y verificar build multi-arquitectura en GitHub Actions.
+2. Promover `v0.1.0-preview.10` al repositorio de aplicaciones Umbrel incorporando el servicio `mostro` en Compose.
+3. Iniciar **Módulo 2 (Fixture Regtest & Simulación del Ciclo Completo P2P)**: entorno de pruebas con Bitcoin Core regtest, 2 nodos LND locales, relay Nostr sintético y cliente de órdenes simulado para verificar hold invoices, bonds, pagos y resolución de disputas.
+
