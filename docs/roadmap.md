@@ -9,7 +9,7 @@
 | Mostro | Adaptador RPC de lectura disponible; daemon y conexión pendientes |
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |
 | Compose de desarrollo | Implementado; imágenes nativas y smoke test Docker aprobados |
-| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.6 instalada; LND conectado y persistencia confirmada por el operador |
+| Manifest / proxy Umbrel | Publicado en `mandebitcoin-mostro-manager/`, imagen multi-arquitectura pública y fijada por digest; preview.7 publicada; preview.6 instalada con LND conectado y persistencia confirmada por el operador |
 | Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; verificación en CI, no arrancado |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
 | Backup cifrado y arranque de mercado | Pendiente |
