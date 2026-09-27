@@ -1,0 +1,63 @@
+# Mostro Community Manager for Umbrel
+
+Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de configuración; todavía no inicia mercados ni gestiona operaciones financieras.
+
+## Instalar en Umbrel
+
+Este repositorio también es una tienda comunitaria de una sola aplicación.
+
+**Estado de publicación inicial:** imágenes en preparación. No instalar hasta que la release y la disponibilidad pública de la imagen estén verificadas.
+
+1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
+2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
+3. Instalar **Mostro Community Manager**.
+4. Abrirlo desde Umbrel y guardar el borrador de tu comunidad.
+
+ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
+
+El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. No depende de Lightning o Bitcoin en esta vista previa, porque no los conecta ni opera todavía.
+
+## Si ya tienes Mostro funcionando
+
+Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y no toca LND. Su contenedor usa una red interna propia; `app_proxy` es su única entrada de red.
+
+Esto permite probar el panel por separado. **Instalarlo no importa ni administra automáticamente el Mostro existente.** Antes de conectar esa instancia se debe inventariar versión, red, método de ejecución, estado de operaciones, identidad LND y backups. No arrancar un segundo daemon con la misma identidad, DB o estado financiero. Ver [convivencia y futura conexión](docs/coexistence.md).
+
+## Incluye
+
+- Panel React en español y API Rust/Axum.
+- Borrador persistente: comunidad, monedas, límites, comisiones, bonds, relays y catálogo de pagos.
+- Validación, revisión optimista, escritura atómica y copia de la revisión anterior.
+- Adaptadores de lectura Mostro/LND para desarrollo; no configurados en el paquete Umbrel.
+- Contratos y renderer TOML fijados a Mostro v0.18.8; todavía sin aplicar configuraciones al daemon.
+
+Pendientes: identidad/backup cifrado, inicio de mercado, trades, disputas, Telegram, upgrades y pruebas E2E regtest. [Estado del blueprint](docs/roadmap.md).
+
+## Desarrollo local
+
+Requisitos: Rust 1.94+, Node 22.13+ y npm. En dos terminales desde la raíz:
+
+```sh
+cargo run --locked -p mostro-community-api
+```
+
+```sh
+npm --prefix web ci
+npm --prefix web run dev
+```
+
+Abrir `http://127.0.0.1:5173`. Los datos locales se guardan en `var/config/`, ignorado por Git. `.env.example` documenta las variables opcionales; no se carga automáticamente. No se necesitan nodos ni claves para editar el borrador.
+
+## Compilar y verificar
+
+```sh
+./scripts/check.sh
+docker build -f docker/Dockerfile.umbrel -t mostro-community:preview .
+./scripts/container-smoke.sh mostro-community:preview
+```
+
+El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y persistencia tras reinicio. El workflow [`publish.yml`](.github/workflows/publish.yml) compila y prueba imágenes nativas amd64 y arm64 al publicar un tag `v*`, después genera el manifiesto multi-arquitectura en GHCR y una release. La tienda debe fijar ese manifiesto por digest.
+
+Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin credenciales. La visibilidad del repositorio no convierte automáticamente sus paquetes en públicos.
+
+[Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Blueprint original](docs/reference/blueprint-v4.md)

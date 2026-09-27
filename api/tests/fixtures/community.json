@@ -1,0 +1,7 @@
+{
+  "community":{"name":"Comunidad de prueba","about":"Mercado local","website":"","contact":"","language":"es"},
+  "market":{"fiat_currencies":["EUR"],"min_trade_sats":100,"max_trade_sats":50000,"fee_bps":60,"dev_fee_bps":3000,"max_routing_fee_bps":20},
+  "safety":{"bond_enabled":true,"bond_bps":300,"base_bond_sats":1000,"bond_apply_to":"both","automatic_timeout_slash":false,"pow":0,"pow_first_contact":16},
+  "nostr":{"relays":["wss://relay.example.com"]},
+  "payment_methods":[{"id":"bank_transfer","label":"Transferencia","category":"Banco","active":true}]
+}

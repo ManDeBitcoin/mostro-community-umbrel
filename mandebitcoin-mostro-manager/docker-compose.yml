@@ -1,0 +1,36 @@
+version: "3.7"
+services:
+  app_proxy:
+    environment:
+      APP_HOST: mandebitcoin-mostro-manager_web_1
+      APP_PORT: 3001
+    networks:
+      - default
+      - manager_private
+  init:
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.1
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /data/config && chown 1000:1000 /data/config && chmod 700 /data/config"]
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    networks: [manager_private]
+    restart: "no"
+    security_opt: ["no-new-privileges:true"]
+  web:
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.1
+    user: "1000:1000"
+    restart: on-failure
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    networks: [manager_private]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+networks:
+  manager_private:
+    internal: true

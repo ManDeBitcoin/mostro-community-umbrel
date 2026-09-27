@@ -1,0 +1,12 @@
+FROM rust:1.94.0-bookworm AS builder
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY api ./api
+COPY config ./config
+RUN cargo build --locked --release -p mostro-community-api
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /src/target/release/mostro-community-api /usr/local/bin/
+USER 1000:1000
+ENV API_BIND=0.0.0.0:3001 CONFIG_DIR=/data/config
+ENTRYPOINT ["mostro-community-api"]

@@ -1,0 +1,24 @@
+# Development packaging only. No financial daemon starts in this stack.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    image: mostro-community-web:0.1.0-dev
+    ports:
+      - "127.0.0.1:5173:8080"
+    depends_on:
+      - api
+    security_opt: ["no-new-privileges:true"]
+    networks: [admin]
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    image: mostro-community-api:0.1.0-dev
+    volumes:
+      - ./var:/data
+    security_opt: ["no-new-privileges:true"]
+    networks: [admin]
+networks:
+  admin: {}
