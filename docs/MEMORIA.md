@@ -45,7 +45,8 @@ UMBREL APP STACK:
 | **preview.1 a preview.7** | Desplegado | Configuración de comunidad, monedas fiat, métodos de pago, bonds, límites, fees; LND readonly REST/TLS; Docker multi-arch en GHCR. |
 | **preview.8** (`v0.1.0-preview.8`) | **Instalado y Operativo en Umbrel** | - Importación segura de identidad Nostr por CLI (`import-identity`).<br>- Identidad activa del operador importada y verificada: `npub1qqdagara05n9ahlrh5ah9xvgv9r2mpgd2yy4lemmwc7ryq2kskuswt0t3x`.<br>- LND en línea y sincronizado (0 canales activos).<br>- Exportación y verificación de backup pre-mercado cifrado con `age`: `/data/config/backups/pre-market-rev4-1790526552.age`.<br>- Verificación de imagen oficial Mostro v0.18.8 en host mediante `scripts/verify-mostro-image.sh` con `sudo` aprobada. |
 | **Post-preview.8 (Commit b75becc)** | En repositorio | Restauración aislada de backups en nuevos directorios sin sobreescribir la instancia activa. |
-| **Staging de configuración Mostro** | Validado localmente | Módulo `staging.rs` y comando `stage-mostro-settings`: genera `settings.toml` inerte por revisión en directorio privado `0700/0600`. Pasa suite completa de 21 tests Rust, clippy y smoke. |
+| **Staging de configuración Mostro** | Implementado | Módulo `staging.rs` y comando `stage-mostro-settings`: genera `settings.toml` inerte por revisión en directorio privado `0700/0600`. |
+| **Conexión y QR Mostro App** | Implementado | Módulo `connection.rs`, endpoint `GET /api/connection`, CLI `connection-info`, generación nativa de QR en SVG, URI Nostr con `nprofile` y tarjeta en UI web sin exposición de secretos. Suite completa de 23 tests aprobada. |
 
 ---
 
@@ -71,6 +72,6 @@ UMBREL APP STACK:
 
 ## 4. Próximos Pasos Técnicos Inmediatos
 
-1. Integrar y commitear el módulo de preparación aislada de configuración Mostro (`staging.rs`).
-2. Implementar la generación de datos de conexión y código QR para Mostro App (Mostro pubkey, relays configurados y formato deep link/QR público).
-3. Preparar el entorno y fixtures de prueba regtest para validación de ciclo completo de órdenes.
+1. Preparar fixture regtest y entorno de pruebas sintéticas para el ciclo completo de órdenes P2P de Mostro.
+2. Evaluar y fijar permisos mínimos para el montaje financiero del daemon Mostro sin comprometer el Manager.
+3. Smoke test de ciclo de vida completo (creación de orden, hold invoice, aceptación, liberación y resolución de disputas) en regtest antes del despliegue final.

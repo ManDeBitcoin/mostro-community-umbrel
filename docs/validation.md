@@ -78,3 +78,11 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 - No monta el macaroon financiero ni lee la identidad ni toca el daemon Mostro.
 - `./scripts/check.sh` pasa con 21 pruebas Rust (incluyendo 2 de staging), Clippy sin advertencias, build web, validación Compose y smoke del lanzador.
 
+## Información de conexión y código QR para Mostro App — desarrollo posterior a preview.8
+
+- Se implementó el módulo `connection.rs`, el comando CLI `mostro-community-api connection-info` y el endpoint `GET /api/connection`.
+- Expone exclusivamente datos públicos: `npub`, clave pública en hexadecimal, `nprofile` codificado con los relays configurados, `nostr:` URI y código QR en SVG generado de forma nativa con `qrcode`.
+- Las pruebas en `api/tests/connection.rs` y `api/tests/http.rs` verifican que la identidad privada (`nsec`), contraseñas o macaroons nunca se exponen, serializan ni filtran sobre la red.
+- Se integró en la interfaz web con tarjeta informativa en el Panel general, visualización del código QR en SVG y botones de copiado para `npub`, hex y URI.
+- `./scripts/check.sh` pasa con 23 pruebas Rust, Clippy sin advertencias, compilación de interfaz web y smoke del contenedor.
+

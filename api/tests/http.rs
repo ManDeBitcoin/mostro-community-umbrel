@@ -136,6 +136,7 @@ async fn imported_identity_is_not_exposed_over_http() {
     for path in [
         "/api/community",
         "/api/dashboard",
+        "/api/connection",
         "/api/identity",
         "/api/identity/mostro.nsec",
     ] {

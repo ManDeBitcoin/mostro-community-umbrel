@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod backup;
 pub mod config;
+pub mod connection;
 pub mod identity;
 pub mod lnd;
 pub mod preflight;
@@ -17,6 +18,7 @@ use axum::{
 use config::Configuration;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use store::{Document, Store};
 #[derive(Clone)]
@@ -36,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
+        .route("/api/connection", get(connection_info_handler))
         .route(
             "/api/{*path}",
             get(|| async { error(StatusCode::NOT_FOUND, "Endpoint no disponible") }),
@@ -43,6 +46,19 @@ pub fn router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(state)
 }
+async fn connection_info_handler(
+    State(state): State<AppState>,
+) -> Result<Json<connection::ConnectionInfo>, Error> {
+    let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
+    let store = state.store.lock().map_err(|_| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Almacenamiento no disponible",
+        )
+    })?;
+    Ok(Json(connection::get_connection_info(&root, &store)))
+}
+
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {
     let (mostro, lightning) =
         tokio::join!(state.integrations.mostro(), state.integrations.lightning());

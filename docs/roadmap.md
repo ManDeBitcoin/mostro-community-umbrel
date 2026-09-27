@@ -13,7 +13,7 @@
 | Contenedor Mostro | Dockerfile con release/checksums fijados, TERM y terminfo; lanzador privado que exige identidad y settings, probado sin LND; aún no se instala en Umbrel |
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
 | Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración y preparación TOML aisladas en desarrollo, sin aplicación a la instancia activa; DB y arranque pendientes |
-| QR de conexión Mostro App | Pendiente de identidad pública y formato compatible verificado |
+| QR de conexión Mostro App | Implementado; generación pública de npub, hex, nprofile con relays y código QR SVG; probado en API `/api/connection` y CLI `connection-info`, integrado en UI |
 | Trade smoke test regtest | Pendiente de fixture LND/Bitcoin/relay y cliente |
 | Órdenes, trades, disputas y chat | Pendiente |
 | Notificaciones, backups cifrados, updates y red | Pendiente |

@@ -123,18 +123,22 @@ pub(crate) fn read_private(root: &Path) -> Result<Option<Zeroizing<String>>, &'s
     Ok(Some(contents))
 }
 
-/// Read only the imported identity's public key for local preflight.
+/// Read only the imported identity's public key object.
 /// No secret bytes are returned, logged, or sent to the browser.
-pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
+pub fn inspect_public_key(root: &Path) -> Result<Option<PublicKey>, &'static str> {
     let Some(contents) = read_private(root)? else {
         return Ok(None);
     };
     let secret = SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
-    Keys::new(secret)
-        .public_key()
-        .to_bech32()
-        .map(Some)
-        .map_err(|_| "Identidad inválida")
+    Ok(Some(Keys::new(secret).public_key()))
+}
+
+/// Read only the imported identity's public key for local preflight.
+/// No secret bytes are returned, logged, or sent to the browser.
+pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
+    inspect_public_key(root)?
+        .map(|pk| pk.to_bech32().map_err(|_| "Identidad inválida"))
+        .transpose()
 }
 
 #[cfg(test)]

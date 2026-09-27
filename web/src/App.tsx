@@ -27,6 +27,17 @@ type Dashboard = {
   bitcoin: ServiceInfo;
   market_started: false;
 };
+type ConnectionInfo = {
+  status: string;
+  npub?: string | null;
+  pubkey_hex?: string | null;
+  relays: string[];
+  nprofile?: string | null;
+  nostr_uri?: string | null;
+  qr_svg?: string | null;
+  app_download_url: string;
+  instructions: string;
+};
 type CommunityReply = { revision: number; config: Configuration | null };
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
@@ -72,6 +83,8 @@ function Toggle({ checked, onChange, label, note }: { checked: boolean; onChange
 function App() {
   const [page, setPage] = useState<'dashboard' | 'config'>('dashboard');
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState<Configuration>(blankConfig);
   const [saved, setSaved] = useState(false);
@@ -86,16 +99,24 @@ function App() {
   const [relayInput, setRelayInput] = useState('');
   const [feeInputs, setFeeInputs] = useState({ fee: '', devFee: '', routingFee: '', bond: '' });
 
+  const copyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(label);
+      setTimeout(() => setCopiedField(null), 2000);
+    });
+  };
+
   const refresh = useCallback(async () => {
     setLoading(true); setApiError('');
     const healthPromise = api<{ status: string }>('/api/health').then((data) => setHealth(data.status === 'ok')).catch(() => setHealth(false));
     const dashboardPromise = api<Dashboard>('/api/dashboard').then(setDashboard).catch(() => setDashboard(null));
+    const connectionPromise = api<ConnectionInfo>('/api/connection').then(setConnection).catch(() => setConnection(null));
     const communityPromise = api<CommunityReply>('/api/community').then((data) => {
       setRevision(data.revision); setSaved(Boolean(data.config)); setDirty(false); setCommunityLoaded(true);
       const config = data.config || blankConfig(); setDraft(config);
       setFeeInputs(data.config ? { fee: percent(config.market.fee_bps), devFee: percent(config.market.dev_fee_bps), routingFee: percent(config.market.max_routing_fee_bps), bond: percent(config.safety.bond_bps) } : { fee: '', devFee: '', routingFee: '', bond: '' });
     }).catch((err: Error) => { setCommunityLoaded(false); setApiError(err.message); });
-    await Promise.all([healthPromise, dashboardPromise, communityPromise]); setLoading(false);
+    await Promise.all([healthPromise, dashboardPromise, connectionPromise, communityPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const markDirty = () => { setDirty(true); setSaved(false); };
@@ -153,6 +174,65 @@ function App() {
         <div className="section-title-row"><div><h2>Servicios</h2><p>Conectividad reportada por la instancia local.</p></div><span className="updated-label">{loading ? 'Consultando…' : health ? 'API disponible' : 'API sin conexión'}</span></div>
         <div className="service-grid">{statuses.length ? statuses.map(({ title, icon, data }) => <article className="service-card" key={title}><div className="service-top"><span className="service-icon"><Icon name={icon}/></span><span className="service-status"><StatusDot status={data.status}/>{({ online: 'Conectado', offline: 'Sin conexión', unconfigured: 'Sin configurar', unknown: 'Desconocido', warning: 'Revisar' } as Record<string, string>)[data.status] || 'Desconocido'}</span></div><h3>{title}</h3><p>{data.detail || 'Sin detalles disponibles'}</p><div className="service-meta">{title === 'Mostro' && data.version ? <span>v{data.version}</span> : null}{title === 'Lightning' && data.alias ? <span>{data.alias}</span> : null}{title === 'Lightning' && typeof data.num_active_channels === 'number' ? <span>{data.num_active_channels} canales activos</span> : null}{title === 'Bitcoin' && typeof data.block_height === 'number' ? <span>Bloque {data.block_height.toLocaleString('es')}</span> : null}<Icon name="arrow" size={15}/></div></article>) : <div className="service-card unavailable"><div className="service-top"><span className="service-icon"><Icon name="grid"/></span><span className="service-status"><StatusDot/>Desconocido</span></div><h3>Servicios no disponibles</h3><p>{apiError || 'La API aún no informa el estado de los servicios.'}</p><div className="service-meta"><span>Reintenta cuando el servidor esté disponible</span></div></div>}</div>
         {dashboard?.lightning && <section className="lightning-details" aria-labelledby="lightning-details-title"><div className="lightning-heading"><div><h2 id="lightning-details-title">Detalles de Lightning</h2><p>Información reportada por el nodo.</p></div>{dashboard.lightning.network && <span className="network-tag">Red {dashboard.lightning.network}</span>}</div>{dashboard.lightning.num_active_channels === 0 && <p className="lightning-capacity-note" role="status">LND está conectado, pero no tiene canales activos. El mercado no tiene capacidad de intercambio Lightning.</p>}<div className="lightning-stats"><div><span>Sincronización de cadena</span><strong>{dashboard.lightning.synced_to_chain === true ? 'Sincronizado' : dashboard.lightning.synced_to_chain === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Sincronización del grafo</span><strong>{dashboard.lightning.synced_to_graph === true ? 'Sincronizado' : dashboard.lightning.synced_to_graph === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Canales activos</span><strong>{typeof dashboard.lightning.num_active_channels === 'number' ? dashboard.lightning.num_active_channels : 'Desconocido'}</strong></div><div><span>Canales pendientes</span><strong>{typeof dashboard.lightning.num_pending_channels === 'number' ? dashboard.lightning.num_pending_channels : 'Desconocido'}</strong></div><div><span>Canales inactivos</span><strong>{typeof dashboard.lightning.num_inactive_channels === 'number' ? dashboard.lightning.num_inactive_channels : 'Desconocido'}</strong></div></div><div className="liquidity-row"><div><span>Liquidez local</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.local_balance_sats !== null ? `${dashboard.lightning.liquidity.local_balance_sats} sats` : 'Desconocida'}</strong></div><div><span>Liquidez remota</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.remote_balance_sats !== null ? `${dashboard.lightning.liquidity.remote_balance_sats} sats` : 'Desconocida'}</strong></div><p>{dashboard.lightning.liquidity?.status === 'unavailable' ? dashboard.lightning.liquidity.detail || 'El nodo no informa la liquidez.' : 'Los datos de canales y liquidez no garantizan que una ruta o una operación esté disponible.'}</p></div></section>}
+        {connection && connection.status === 'ready' && (
+          <section className="connection-card" aria-labelledby="connection-title">
+            <div className="connection-heading">
+              <div>
+                <h2 id="connection-title">Conexión con Mostro App</h2>
+                <p>Datos públicos para que los usuarios conecten su cliente oficial Mostro a este nodo.</p>
+              </div>
+              <a href={connection.app_download_url} target="_blank" rel="noreferrer" className="button button-secondary download-link">
+                Mostro App ↗
+              </a>
+            </div>
+            <div className="connection-body">
+              {connection.qr_svg && (
+                <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_svg }} title="Escanea con Mostro App" />
+              )}
+              <div className="connection-details">
+                <div className="connection-row">
+                  <span className="field-label">Clave pública Nostr (npub)</span>
+                  <div className="copy-box">
+                    <code>{connection.npub}</code>
+                    <button type="button" className="copy-button" onClick={() => copyText(connection.npub || '', 'npub')}>
+                      {copiedField === 'npub' ? 'Copiado ✓' : 'Copiar'}
+                    </button>
+                  </div>
+                </div>
+                <div className="connection-row">
+                  <span className="field-label">Identificador hex del nodo</span>
+                  <div className="copy-box">
+                    <code>{connection.pubkey_hex}</code>
+                    <button type="button" className="copy-button" onClick={() => copyText(connection.pubkey_hex || '', 'hex')}>
+                      {copiedField === 'hex' ? 'Copiado ✓' : 'Copiar'}
+                    </button>
+                  </div>
+                </div>
+                {connection.nostr_uri && (
+                  <div className="connection-row">
+                    <span className="field-label">Nostr URI (nprofile con relays)</span>
+                    <div className="copy-box">
+                      <code>{connection.nostr_uri}</code>
+                      <button type="button" className="copy-button" onClick={() => copyText(connection.nostr_uri || '', 'uri')}>
+                        {copiedField === 'uri' ? 'Copiado ✓' : 'Copiar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="connection-relays-row">
+                  <span className="field-label">Relays Nostr:</span>
+                  {connection.relays.length > 0 ? (
+                    <div className="chips">
+                      {connection.relays.map((r) => <span key={r} className="chip">{r}</span>)}
+                    </div>
+                  ) : (
+                    <span className="empty-hint">Sin relays guardados en el borrador</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
         <div className="dashboard-lower"><article className="setup-card"><div className="card-heading"><div><span className="card-kicker">PUESTA EN MARCHA</span><h2>Prepara tu comunidad</h2><p>Configura los datos esenciales antes de iniciar el mercado.</p></div><div className="progress-ring"><span>{readiness}<small>/4</small></span></div></div><progress className="setup-progress" value={readiness} max={4} aria-label="Preparación de la comunidad"/><div className="setup-checks"><span className={draft.community.name ? 'complete' : ''}><i>{draft.community.name ? <Icon name="check" size={12}/> : '1'}</i>Identidad</span><span className={draft.market.fiat_currencies.length ? 'complete' : ''}><i>{draft.market.fiat_currencies.length ? <Icon name="check" size={12}/> : '2'}</i>Monedas</span><span className={draft.nostr.relays.length ? 'complete' : ''}><i>{draft.nostr.relays.length ? <Icon name="check" size={12}/> : '3'}</i>Relays Nostr</span><span className={draft.payment_methods.some((m) => m.active) ? 'complete' : ''}><i>{draft.payment_methods.some((m) => m.active) ? <Icon name="check" size={12}/> : '4'}</i>Pagos</span></div><button className="button button-primary" onClick={() => setPage('config')}>Abrir configuración <Icon name="arrow" size={15}/></button></article>
           <article className="market-card"><div className="market-card-top"><span className="market-symbol"><Icon name="bolt" size={19}/></span><span className="market-tag"><i/> AÚN NO INICIADO</span></div><div className="market-empty"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><span>₿</span></div></div><div className="market-copy"><h3>Mercado en desarrollo</h3><p>Este prototipo permite guardar los parámetros de la comunidad. El inicio del mercado aún no está disponible.</p><span className="market-note"><Icon name="alert" size={14}/> Operaciones aún no consultadas</span></div></article></div>
         <div className="bottom-note"><span className="secure-icon"><Icon name="check" size={13}/></span><span>Configuración local</span><span className="note-separator">·</span><span>Los cambios se guardan en el servidor de esta instancia</span><span className="note-spacer"/><span className="api-indicator"><StatusDot status={health ? 'ok' : ''}/>{health ? 'API conectada' : 'API no disponible'}</span></div>
