@@ -4,12 +4,14 @@ set -euo pipefail
 IMAGE="${1:?Supply the freshly built image}"
 SMOKE_DATA="$(mktemp -d)"
 SMOKE_NAME="mostro-manager-smoke-${RANDOM}"
+SMOKE_OWNER="$(id -u):$(id -g)"
 cleanup() {
   local result=$?
   if [ "$result" -ne 0 ]; then docker logs "$SMOKE_NAME" 2>&1 || true; fi
   docker rm -f "$SMOKE_NAME" >/dev/null 2>&1 || true
-  docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'chmod -R a+rwX /data' >/dev/null 2>&1 || true
+  docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'chown -R "$1" /data' sh "$SMOKE_OWNER" >/dev/null 2>&1 || true
   rm -rf -- "$SMOKE_DATA"
+  return "$result"
 }
 trap cleanup EXIT
 docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'mkdir -p /data/config && chown 1000:1000 /data /data/config && chmod 700 /data /data/config'
@@ -17,7 +19,7 @@ docker run --detach --name "$SMOKE_NAME" --read-only --tmpfs /tmp --cap-drop ALL
 SMOKE_PORT="$(docker port "$SMOKE_NAME" 3001/tcp | cut -d: -f2)"
 export SMOKE_URL="http://127.0.0.1:$SMOKE_PORT"
 for attempt in $(seq 1 30); do
-  if curl --fail --silent "$SMOKE_URL/api/health" >/dev/null; then break; fi
+  if curl --max-time 2 --fail --silent "$SMOKE_URL/api/health" >/dev/null; then break; fi
   sleep 1
 done
 python3 - <<'PY'
@@ -34,8 +36,11 @@ with urllib.request.urlopen(base+'/api/dashboard') as r:
  assert data['market_started'] is False and data['mostro']['status']=='unconfigured'
 PY
 docker restart "$SMOKE_NAME" >/dev/null
+# Docker may assign a different ephemeral host port when restarting the container.
+SMOKE_PORT="$(docker port "$SMOKE_NAME" 3001/tcp | cut -d: -f2)"
+export SMOKE_URL="http://127.0.0.1:$SMOKE_PORT"
 for attempt in $(seq 1 30); do
-  if curl --fail --silent "$SMOKE_URL/api/health" >/dev/null; then break; fi
+  if curl --max-time 2 --fail --silent "$SMOKE_URL/api/health" >/dev/null; then break; fi
   sleep 1
 done
 python3 - <<'PY'
