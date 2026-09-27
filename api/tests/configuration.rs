@@ -38,8 +38,6 @@ fn renderer_escapes_text_and_maps_percentage_units() {
     c.community.name = "A\"\n[rpc]\nenabled=false".into();
     let result = render_settings(
         &c,
-        "nsec1test-only",
-        &"t".repeat(32),
         "https://lnd:10009",
         "/lnd/tls.cert",
         "/lnd/admin.macaroon",
@@ -58,13 +56,47 @@ fn renderer_escapes_text_and_maps_percentage_units() {
         Some(false)
     );
     assert_eq!(doc["rpc"]["listen_address"].as_str(), Some("127.0.0.1"));
-    assert_eq!(doc["rpc"]["enabled"].as_bool(), Some(true));
+    assert_eq!(doc["rpc"]["enabled"].as_bool(), Some(false));
+    assert_eq!(doc["nostr"]["nsec_privkey"].as_str(), Some(""));
+    assert!(doc["rpc"].get("auth_token").is_none());
+    assert_eq!(doc["lightning"]["allow_node_change"].as_bool(), Some(false));
+    assert_eq!(
+        doc["lightning"]["escrow_deadline_margin_blocks"].as_integer(),
+        Some(24)
+    );
+    assert_eq!(doc["mostro"]["transport"].as_str(), Some("nip44"));
     assert_eq!(
         doc["mostro"]["fiat_currencies_accepted"][0].as_str(),
         Some("EUR")
     );
     assert!(!doc.as_table().unwrap().contains_key("payment_methods"));
-    assert!(render_settings(&c, "nsec1test-only", "weak", "", "", "").is_err());
+    assert!(
+        render_settings(
+            &c,
+            "http://lnd:10009",
+            "/lnd/tls.cert",
+            "/lnd/admin.macaroon"
+        )
+        .is_err()
+    );
+    assert!(
+        render_settings(
+            &c,
+            "https://user:pass@lnd:10009",
+            "/lnd/tls.cert",
+            "/lnd/admin.macaroon"
+        )
+        .is_err()
+    );
+    assert!(
+        render_settings(
+            &c,
+            "https://lnd:10009",
+            "relative/tls.cert",
+            "/lnd/admin.macaroon"
+        )
+        .is_err()
+    );
 }
 #[test]
 fn persistence_survives_restart_and_keeps_previous_revision() {

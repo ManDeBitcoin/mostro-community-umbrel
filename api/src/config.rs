@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+};
 use url::Url;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -151,19 +154,35 @@ impl Configuration {
     }
 }
 
-/// Backend-only renderer. Output contains secrets: never return through HTTP or log it.
-/// This iteration produces candidates; it does not apply them to a live daemon.
+/// Render an inert candidate from the pinned upstream template. The imported nsec
+/// stays in its own file; Mostro will receive it via MOSTRO_NSEC_PRIVKEY only when
+/// a separate, tested daemon launcher exists. RPC remains disabled here.
 pub fn render_settings(
     config: &Configuration,
-    nsec: &str,
-    rpc_token: &str,
     lnd_host: &str,
     cert: &str,
     macaroon: &str,
 ) -> Result<String, String> {
     config.validate().map_err(str::to_owned)?;
-    if !nsec.starts_with("nsec1") || rpc_token.len() < 32 {
-        return Err("Faltan secretos válidos".into());
+    let host = Url::parse(lnd_host).map_err(|_| "Host LND inválido")?;
+    if host.scheme() != "https"
+        || host.host_str().is_none()
+        || !host.username().is_empty()
+        || host.password().is_some()
+        || host.path() != "/"
+        || host.query().is_some()
+        || host.fragment().is_some()
+    {
+        return Err("Host LND debe ser un origen HTTPS sin credenciales".into());
+    }
+    if [cert, macaroon].iter().any(|value| {
+        let path = Path::new(value);
+        !path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir))
+    }) {
+        return Err("Las rutas de credenciales LND deben ser absolutas".into());
     }
     let mut doc: toml::Value =
         toml::from_str(include_str!("../../config/upstream/settings.v0.18.8.toml"))
@@ -171,7 +190,7 @@ pub fn render_settings(
     doc["lightning"]["lnd_grpc_host"] = lnd_host.into();
     doc["lightning"]["lnd_cert_file"] = cert.into();
     doc["lightning"]["lnd_macaroon_file"] = macaroon.into();
-    doc["nostr"]["nsec_privkey"] = nsec.into();
+    doc["nostr"]["nsec_privkey"] = "".into();
     doc["nostr"]["relays"] =
         toml::Value::try_from(&config.nostr.relays).map_err(|_| "Relays inválidos")?;
     for (key, value) in [
@@ -200,12 +219,9 @@ pub fn render_settings(
         "pow_first_contact".into(),
         i64::from(config.safety.pow_first_contact).into(),
     );
-    doc["rpc"]["enabled"] = true.into();
-    // Private loopback: future sidecar must share Mostro's network namespace.
-    doc["rpc"]
-        .as_table_mut()
-        .unwrap()
-        .insert("auth_token".into(), rpc_token.into());
+    doc["rpc"]["enabled"] = false.into();
+    doc["rpc"]["listen_address"] = "127.0.0.1".into();
+    doc["rpc"].as_table_mut().unwrap().remove("auth_token");
     let bond = toml::toml! {
         enabled = (config.safety.bond_enabled)
         amount_pct = (f64::from(config.safety.bond_bps) / 10_000.0)

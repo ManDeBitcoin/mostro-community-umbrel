@@ -4,7 +4,7 @@
 | --- | --- |
 | API Axum y UI React local | Implementada |
 | Configuración de comunidad, monedas, límites, fees, bonds, relays y catálogo | Borrador persistente; sin aplicar al daemon |
-| Renderer TOML del contrato v0.18.8 | Implementado internamente; no desplegado |
+| Renderer TOML del contrato v0.18.8 | Candidato sin nsec ni token RPC, RPC apagado; implementado internamente, no desplegado |
 | LND | Consulta real de lectura de estado, red, canales y saldo agregado; TLS y macaroon readonly; no habilita operaciones |
 | Mostro | Adaptador RPC de lectura disponible; daemon y conexión pendientes |
 | Dashboard | Estados reales o explícitamente desconocidos; sin métricas ficticias |

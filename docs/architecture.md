@@ -14,7 +14,7 @@ El único cambio expuesto por HTTP guarda un borrador sin secretos en `CONFIG_DI
 
 API local en `127.0.0.1:3001` por defecto. En contenedor, sin puerto publicado, detrás de web. Se exige JSON y cabecera personalizada para PUT; no se habilita CORS y se compara Origin/Host. En el paquete Umbrel la autenticación depende de `app_proxy`; la instalación aún debe verificarse en un Umbrel de prueba. La API/UI queda en una red interna propia, sin puertos publicados. El proxy de Umbrel entra desde su red compartida. Un puente TCP de destino fijo conecta exclusivamente con LND; el panel conserva su aislamiento de la red compartida. Solo la API monta `tls.cert` y `readonly.macaroon` de LND en modo lectura. El puente no monta credenciales y transmite TLS sin modificarlo. No hay autenticación autónoma ni soporte para exponer este prototipo a Internet. Para la distribución final se debe cerrar también el acceso entre aplicaciones en la red Docker compartida y probar sesiones/CSRF detrás del proxy.
 
-El renderer es una función interna, no un endpoint. Su resultado contiene secretos y no debe retornarse, registrarse ni aplicarse al daemon sin completar el flujo de identidad, backup, comprobación upstream y mantenimiento. La validación de monedas comprueba formato y duplicados; la disponibilidad real de cada moneda según proveedores está pendiente. La importación local de identidad comprueba criptográficamente que `nsec` corresponde al `npub` indicado; el renderer de candidatos aún no aplica la configuración a Mostro.
+El renderer es una función interna, no un endpoint. Produce un candidato TOML con `nsec_privkey` vacío y RPC deshabilitado; no duplica el `nsec` importado ni un token RPC. Mostro v0.18.8 puede recibir el `nsec` mediante `MOSTRO_NSEC_PRIVKEY`, pero el lanzador aislado que leerá el archivo de identidad y el flujo de backup todavía no están implementados. El candidato no se aplica al daemon. La validación de monedas comprueba formato y duplicados; la disponibilidad real de cada moneda según proveedores está pendiente. La importación local de identidad comprueba criptográficamente que `nsec` corresponde al `npub` indicado.
 
 ## Fuentes comprobadas
 
@@ -26,7 +26,7 @@ El renderer es una función interna, no un endpoint. Su resultado contiene secre
 - [Exports Lightning de Umbrel](https://github.com/getumbrel/umbrel-apps/blob/master/lightning/exports.sh).
 - [Integración LND en LNbits](https://github.com/getumbrel/umbrel-apps/blob/master/lnbits/docker-compose.yml).
 
-`GetVersion` y `GetMaintenanceStatus` están presentes. Las mutaciones llevan `authorization: Bearer <token>`; `SetMaintenanceMode` además indica restricción loopback. La topología futura debe respetarla, por ejemplo compartiendo namespace de red API/Mostro. El renderer conserva RPC en loopback y agrega token; no lo publica en `0.0.0.0`.
+`GetVersion` y `GetMaintenanceStatus` están presentes. Las mutaciones llevan `authorization: Bearer <token>`; `SetMaintenanceMode` además indica restricción loopback. La topología futura debe respetarla, por ejemplo compartiendo namespace de red API/Mostro. El candidato conserva la dirección RPC en loopback, pero deja RPC apagado; su activación exigirá un token privado y una topología verificada.
 
 Chat y resolución explícita de bonds no aparecen en el proto. Deben estudiarse en el protocolo administrativo Nostr, con compatibilidad de cliente comprobada antes de exponerlos. No hay matriz de compatibilidad probada de Mostro App; se guarda `null` en vez de inventar una versión mínima.
 
