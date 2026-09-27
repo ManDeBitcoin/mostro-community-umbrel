@@ -46,14 +46,7 @@ jobs:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
         run: python3 scripts/lnd-smoke.py --image "$IMAGE"
       - name: Verify optional Mostro image without starting daemon
-        run: |
-          sh scripts/mostro-entrypoint-smoke.sh
-          docker build --platform linux/${{ matrix.arch }} --file docker/Dockerfile.mostro --tag mostro-upstream-check:${{ matrix.arch }} .
-          docker run --rm --network none mostro-upstream-check:${{ matrix.arch }} --version
-          if docker run --rm --network none mostro-upstream-check:${{ matrix.arch }}; then
-            echo "Mostro image must refuse to start without settings and identity" >&2
-            exit 1
-          fi
+        run: bash scripts/verify-mostro-image.sh
       - name: Publish tested architecture
         env:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
