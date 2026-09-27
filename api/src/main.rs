@@ -92,10 +92,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Configuración activa de Mostro desactivada.");
             return Ok(());
         }
+        if !args.is_empty() && args[0] == "simulate-trade" {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            let store = Store::open(root.clone())?;
+            let config = store
+                .document
+                .config
+                .as_ref()
+                .ok_or("Falta configurar la comunidad antes de simular")?;
+            let npub: Option<String> = mostro_community_api::identity::inspect_public_key(&root)
+                .ok()
+                .flatten()
+                .and_then(|k| {
+                    use nostr::ToBech32;
+                    k.to_bech32().ok()
+                });
+            let scenario = match args.get(1).map(|s| s.as_str()) {
+                Some("dispute-buyer") => {
+                    mostro_community_api::simulation::SimulationScenario::DisputeSettledForBuyer
+                }
+                Some("dispute-seller") => {
+                    mostro_community_api::simulation::SimulationScenario::DisputeRefundedToSeller
+                }
+                Some("cancel") => {
+                    mostro_community_api::simulation::SimulationScenario::SellerCancellation
+                }
+                _ => mostro_community_api::simulation::SimulationScenario::HappyPath,
+            };
+            let trade_sats = args.get(2).and_then(|s| s.parse::<u64>().ok());
+            let report = mostro_community_api::simulation::run_simulation(
+                config,
+                npub.as_deref(),
+                scenario,
+                trade_sats,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
         return Err(
-            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
+            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|simulate-trade [happy-path|dispute-buyer|dispute-seller|cancel] [sats]|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
         );
     }
+
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());
     let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
     let state = AppState {

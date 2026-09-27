@@ -6,6 +6,7 @@ pub mod daemon;
 pub mod identity;
 pub mod lnd;
 pub mod preflight;
+pub mod simulation;
 pub mod staging;
 pub mod store;
 pub mod tunnel;
@@ -14,9 +15,10 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, put},
+    routing::{get, post, put},
 };
 use config::Configuration;
+use nostr::ToBech32;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -43,12 +45,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/daemon/activate", put(daemon_activate_handler))
         .route("/api/daemon/deactivate", put(daemon_deactivate_handler))
         .route(
+            "/api/simulation/scenarios",
+            get(simulation_scenarios_handler),
+        )
+        .route("/api/simulation/run", post(simulation_run_handler))
+        .route(
             "/api/{*path}",
             get(|| async { error(StatusCode::NOT_FOUND, "Endpoint no disponible") }),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(state)
 }
+
 async fn connection_info_handler(
     State(state): State<AppState>,
 ) -> Result<Json<connection::ConnectionInfo>, Error> {
@@ -152,6 +160,95 @@ async fn daemon_deactivate_handler(
     daemon::deactivate(&root)
         .map(|()| Json(json!({"status": "deactivated"})))
         .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+#[derive(Deserialize)]
+pub struct SimulationRunRequest {
+    pub scenario: Option<simulation::SimulationScenario>,
+    pub trade_sats: Option<u64>,
+}
+
+async fn simulation_scenarios_handler() -> Json<Value> {
+    Json(json!([
+        {
+            "id": "happy_path",
+            "label": "Intercambio Completo Exitoso (Happy Path)",
+            "name": "Intercambio Completo Exitoso (Happy Path)",
+            "description": "Vendedor publica orden de venta, comprador acepta, bloquean garantías, se transfiere fiat y se liberan los satoshis.",
+            "is_default": true
+        },
+        {
+            "id": "dispute_settled_for_buyer",
+            "label": "Disputa Resuelta a Favor del Comprador",
+            "name": "Disputa Resuelta a Favor del Comprador",
+            "description": "Vendedor abre disputa alegando no recibir fondos; el mediador verifica comprobante bancario legítimo y liquida al comprador.",
+            "is_default": false
+        },
+        {
+            "id": "dispute_refunded_to_seller",
+            "label": "Disputa Resuelta con Devolución al Vendedor",
+            "name": "Disputa Resuelta con Devolución al Vendedor",
+            "description": "Comprador marcó envío fiat falso; el mediador confirma falta de pago y devuelve los satoshis al vendedor.",
+            "is_default": false
+        },
+        {
+            "id": "seller_cancellation",
+            "label": "Cancelación Previa por el Vendedor",
+            "name": "Cancelación Previa por el Vendedor",
+            "description": "Vendedor publica orden pero la cancela voluntariamente antes de ser tomada; la Hold Invoice se anula sin penalización.",
+            "is_default": false
+        }
+    ]))
+}
+
+async fn simulation_run_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Option<Json<SimulationRunRequest>>,
+) -> Result<Json<simulation::SimulationReport>, Error> {
+    if headers
+        .get("x-requested-with")
+        .and_then(|v| v.to_str().ok())
+        != Some("mostro-community")
+    {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "Falta protección de solicitud",
+        ));
+    }
+
+    let store = state.store.lock().map_err(|_| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Almacenamiento no disponible",
+        )
+    })?;
+
+    let root = store.root().to_path_buf();
+    let npub: Option<String> = identity::inspect_public_key(&root)
+        .ok()
+        .flatten()
+        .and_then(|k| k.to_bech32().ok());
+
+    let (scenario, trade_sats) = match payload {
+        Some(Json(p)) => (
+            p.scenario
+                .unwrap_or(simulation::SimulationScenario::HappyPath),
+            p.trade_sats,
+        ),
+        None => (simulation::SimulationScenario::HappyPath, None),
+    };
+
+    let config = store.document.config.as_ref().ok_or_else(|| {
+        error(
+            StatusCode::BAD_REQUEST,
+            "Falta configurar la comunidad antes de simular",
+        )
+    })?;
+
+    simulation::run_simulation(config, npub.as_deref(), scenario, trade_sats)
+        .map(Json)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, e))
 }
 
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {

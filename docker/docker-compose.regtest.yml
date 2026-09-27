@@ -1,0 +1,104 @@
+services:
+  bitcoind:
+    image: ruimarinho/bitcoin-core:26
+    container_name: mostro-regtest-bitcoind
+    restart: unless-stopped
+    command:
+      - -regtest=1
+      - -server=1
+      - -rpcuser=mostro
+      - -rpcpassword=mostropass
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -fallbackfee=0.0002
+      - -txindex=1
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+      - -listen=1
+    ports:
+      - "18443:18443"
+      - "28332:28332"
+      - "28333:28333"
+    volumes:
+      - bitcoind_data:/root/.bitcoin
+    networks:
+      - regtest_net
+
+  relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: mostro-regtest-relay
+    restart: unless-stopped
+    ports:
+      - "7777:8080"
+    volumes:
+      - nostr_data:/usr/src/app/db
+    networks:
+      - regtest_net
+
+  lnd-alice:
+    image: lightninglabs/lnd:v0.18.5-beta
+    container_name: mostro-regtest-alice
+    restart: unless-stopped
+    depends_on:
+      - bitcoind
+    command:
+      - --noseedbackup
+      - --bitcoin.active
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind:18443
+      - --bitcoind.rpcuser=mostro
+      - --bitcoind.rpcpass=mostropass
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --alias=alice-mostro-node
+    ports:
+      - "10009:10009"
+      - "8081:8080"
+      - "9735:9735"
+    volumes:
+      - lnd_alice_data:/root/.lnd
+    networks:
+      - regtest_net
+
+  lnd-bob:
+    image: lightninglabs/lnd:v0.18.5-beta
+    container_name: mostro-regtest-bob
+    restart: unless-stopped
+    depends_on:
+      - bitcoind
+    command:
+      - --noseedbackup
+      - --bitcoin.active
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind:18443
+      - --bitcoind.rpcuser=mostro
+      - --bitcoind.rpcpass=mostropass
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
+      - --rpclisten=0.0.0.0:10010
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9736
+      - --alias=bob-peer-node
+    ports:
+      - "10010:10010"
+      - "8082:8080"
+      - "9736:9736"
+    volumes:
+      - lnd_bob_data:/root/.lnd
+    networks:
+      - regtest_net
+
+networks:
+  regtest_net:
+    driver: bridge
+
+volumes:
+  bitcoind_data:
+  nostr_data:
+  lnd_alice_data:
+  lnd_bob_data:

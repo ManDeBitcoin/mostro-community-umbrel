@@ -14,9 +14,9 @@
 | Identidad y preflight | Identidad importada y comprobada con npub; preflight de solo lectura implementado |
 | Backup cifrado y arranque de mercado | Exportación y verificación premercado en preview.8; restauración protegida y activación en preview.10; DB y ciclo regtest en Módulo 2 |
 | QR de conexión Mostro App | Implementado; generación pública de npub, hex, nprofile con relays y código QR SVG; probado en API `/api/connection` y CLI `connection-info`, integrado en UI |
-| Trade smoke test regtest | Módulo 2: fixture LND/Bitcoin/relay y simulación de ciclo completo P2P |
-| Órdenes, trades, disputas y chat | Pendiente |
-| Notificaciones, backups cifrados, updates y red | Pendiente |
+| Trade smoke test regtest | Implementado en preview.11 (Módulo 2): motor de simulación P2P (`api/src/simulation.rs`), endpoints `/api/simulation/*`, CLI `simulate-trade`, UI interactiva en React (`web/src/App.tsx`), fixture Docker Regtest (`docker/docker-compose.regtest.yml`) y smoke test automatizado (`scripts/regtest-smoke.sh`) |
+| Órdenes, trades, disputas y chat | Módulo 3: monitor en vivo de órdenes activas, chat cifrado y resolución de disputas |
+| Notificaciones, backups automáticos offsite y red | Pendiente (Módulo 4 y fase final de operador) |
 
-Siguiente hito: Módulo 2 (Fixture Regtest & Simulación del Ciclo Completo P2P). Tras completar la orquestación del demonio Mostro en preview.10, se implementará el entorno de pruebas regtest con Bitcoin Core, 2 nodos LND locales, relay Nostr sintético y clientes simulados para comprobar la creación de órdenes, hold invoices, depósitos de garantía (bonds), liberación y resolución de disputas antes de la puesta en marcha con fondos reales en mainnet. La identidad del operador y el backup pre-mercado permanecen intactos y protegidos bajo permisos 0700/0600.
+Siguiente hito: Módulo 3 (Monitor de Órdenes P2P en Vivo, Chat Cifrado y Resolución Asistida de Disputas). Con la simulación y el fixture regtest completamente verificados en preview.11, el siguiente paso es conectar el visor de estado en tiempo real para las órdenes públicas en relays (Kind 38383), los mensajes directos cifrados NIP-04/NIP-44 y la consola de arbitraje para el mediador (Solver). Las tareas manuales del operador (canales Alby Hub y SCP backup externo) permanecen diferidas al final del proyecto, garantizando cero riesgo financiero y máxima seguridad de claves.
 

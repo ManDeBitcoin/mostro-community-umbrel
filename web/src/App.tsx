@@ -51,13 +51,60 @@ type DaemonReport = {
   can_activate: boolean;
   warnings: string[];
 };
+type SimulationScenarioInfo = {
+  id: string;
+  label: string;
+  description: string;
+};
+type SimulationStep = {
+  step_number: number;
+  action_code: string;
+  title: string;
+  actor: 'seller' | 'buyer' | 'mostro' | 'solver';
+  order_status: string;
+  description: string;
+  nostr_event?: {
+    kind: number;
+    event_id: string;
+    sender: string;
+    recipient?: string | null;
+    summary: string;
+  } | null;
+  lightning_action?: {
+    action: string;
+    amount_sats: number;
+    payment_hash: string;
+    status: string;
+  } | null;
+};
+type SimulationReport = {
+  scenario: string;
+  order_id: string;
+  bot_npub: string;
+  payment_method: string;
+  financials: {
+    trade_amount_sats: number;
+    fiat_currency: string;
+    fiat_amount: string;
+    seller_bond_sats: number;
+    buyer_bond_sats: number;
+    fee_sats: number;
+    seller_total_locked_sats: number;
+    buyer_total_locked_sats: number;
+  };
+  steps: SimulationStep[];
+  final_status: string;
+  is_success: boolean;
+  duration_simulated_ms: number;
+  timestamp_unix: number;
+};
 type CommunityReply = { revision: number; config: Configuration | null };
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
   market: { fiat_currencies: [], min_trade_sats: 1000, max_trade_sats: 1000000, fee_bps: 0, dev_fee_bps: 0, max_routing_fee_bps: 0 },
   safety: { bond_enabled: false, bond_bps: 0, base_bond_sats: 0, bond_apply_to: 'both', automatic_timeout_slash: false, pow: 0, pow_first_contact: 0 },
   nostr: { relays: [] },
-    payment_methods: [],
+  payment_methods: [],
 });
 const percent = (bps: number) => (bps / 100).toString();
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -79,6 +126,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     arrow: <><path d="M7 17 17 7M7 7h10v10"/></>,
     save: <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></>,
     alert: <><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
+    play: <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>,
   };
   return <svg {...common}>{paths[name] || paths.grid}</svg>;
 }
@@ -93,8 +141,17 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function Toggle({ checked, onChange, label, note }: { checked: boolean; onChange: (value: boolean) => void; label: string; note?: string }) {
   return <div className="toggle-row"><div><strong>{label}</strong>{note && <span>{note}</span>}</div><button type="button" role="switch" aria-label={label} aria-checked={checked} className={`toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><i /></button></div>;
 }
+function ActorBadge({ actor }: { actor: string }) {
+  switch (actor) {
+    case 'seller': return <span className="sim-actor-badge seller">Vendedor</span>;
+    case 'buyer': return <span className="sim-actor-badge buyer">Comprador</span>;
+    case 'mostro': return <span className="sim-actor-badge mostro">Mostro</span>;
+    case 'solver': return <span className="sim-actor-badge solver">Mediador</span>;
+    default: return <span className="sim-actor-badge">{actor}</span>;
+  }
+}
 function App() {
-  const [page, setPage] = useState<'dashboard' | 'config'>('dashboard');
+  const [page, setPage] = useState<'dashboard' | 'config' | 'simulation'>('dashboard');
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
   const [daemon, setDaemon] = useState<DaemonReport | null>(null);
@@ -114,6 +171,14 @@ function App() {
   const [relayInput, setRelayInput] = useState('');
   const [feeInputs, setFeeInputs] = useState({ fee: '', devFee: '', routingFee: '', bond: '' });
 
+  // Simulation states
+  const [simScenarios, setSimScenarios] = useState<SimulationScenarioInfo[]>([]);
+  const [selectedScenario, setSelectedScenario] = useState('happy_path');
+  const [simSatsInput, setSimSatsInput] = useState('50000');
+  const [simulating, setSimulating] = useState(false);
+  const [simulationReport, setSimulationReport] = useState<SimulationReport | null>(null);
+  const [simError, setSimError] = useState('');
+
   const copyText = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedField(label);
@@ -127,14 +192,39 @@ function App() {
     const dashboardPromise = api<Dashboard>('/api/dashboard').then(setDashboard).catch(() => setDashboard(null));
     const connectionPromise = api<ConnectionInfo>('/api/connection').then(setConnection).catch(() => setConnection(null));
     const daemonPromise = api<DaemonReport>('/api/daemon/status').then(setDaemon).catch(() => setDaemon(null));
+    const simScenariosPromise = api<SimulationScenarioInfo[]>('/api/simulation/scenarios').then((data) => {
+      setSimScenarios(data);
+    }).catch(() => setSimScenarios([]));
     const communityPromise = api<CommunityReply>('/api/community').then((data) => {
       setRevision(data.revision); setSaved(Boolean(data.config)); setDirty(false); setCommunityLoaded(true);
       const config = data.config || blankConfig(); setDraft(config);
       setFeeInputs(data.config ? { fee: percent(config.market.fee_bps), devFee: percent(config.market.dev_fee_bps), routingFee: percent(config.market.max_routing_fee_bps), bond: percent(config.safety.bond_bps) } : { fee: '', devFee: '', routingFee: '', bond: '' });
     }).catch((err: Error) => { setCommunityLoaded(false); setApiError(err.message); });
-    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise]); setLoading(false);
+    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  const handleRunSimulation = async (scenarioOverride?: string) => {
+    setSimulating(true);
+    setSimError('');
+    const targetScenario = scenarioOverride || selectedScenario;
+    const sats = Number(simSatsInput) || 50000;
+    try {
+      const report = await api<SimulationReport>('/api/simulation/run', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'mostro-community' },
+        body: JSON.stringify({
+          scenario: targetScenario,
+          trade_sats: sats,
+        }),
+      });
+      setSimulationReport(report);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : 'Error al ejecutar la simulación');
+    } finally {
+      setSimulating(false);
+    }
+  };
   const markDirty = () => { setDirty(true); setSaved(false); };
   const refreshSafely = () => { if (dirty && !window.confirm('Hay cambios sin guardar. ¿Descartarlos y recargar la configuración?')) return; void refresh(); };
   const updateCommunity = (key: keyof Configuration['community'], value: string) => { markDirty(); setDraft((old) => ({ ...old, community: { ...old.community, [key]: value } })); };
@@ -209,14 +299,16 @@ function App() {
       <div className="nav-label">GENERAL</div>
       <nav className="nav-list" aria-label="Navegación principal">
         <button className={`nav-item ${page === 'dashboard' ? 'active' : ''}`} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Panel general</span>{page === 'dashboard' && <span className="nav-active-mark"/>}</button>
+        <button className={`nav-item ${page === 'simulation' ? 'active' : ''}`} onClick={() => setPage('simulation')}><Icon name="play"/><span>Simulador P2P</span>{page === 'simulation' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'config' ? 'active' : ''}`} onClick={() => setPage('config')}><Icon name="sliders"/><span>Configuración</span>{page === 'config' && <span className="nav-active-mark"/>}</button>
       </nav>
       <div className="sidebar-spacer" />
       <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>Modo desarrollo</b><span>Mercado sin iniciar</span></div><span className="mode-dot"/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
-      {page === 'dashboard' ? <section className="content dashboard-page">
+      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'simulation' ? 'Simulador P2P' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
+      {page === 'dashboard' && (
+        <section className="content dashboard-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div>
         <div className="dev-banner"><div className="banner-icon"><Icon name="alert" size={18}/></div><div><b>Entorno de desarrollo</b><span>Prototipo de configuración: el mercado aún no está iniciado y no se puede iniciar desde este panel.</span></div><div className="banner-status"><i/> MERCADO INACTIVO</div></div>
         <div className="section-title-row"><div><h2>Servicios</h2><p>Conectividad reportada por la instancia local.</p></div><span className="updated-label">{loading ? 'Consultando…' : health ? 'API disponible' : 'API sin conexión'}</span></div>
@@ -342,10 +434,253 @@ function App() {
             </div>
           </section>
         )}
+        <section className="sim-card" aria-labelledby="sim-title">
+          <div className="sim-heading">
+            <div>
+              <h2 id="sim-title">Simulador de Ciclo P2P (Regtest)</h2>
+              <p>Simulación interactiva de órdenes, retención Lightning (Hold Invoices), mensajes Nostr y resolución de disputas.</p>
+            </div>
+            <button className="button button-secondary" onClick={() => setPage('simulation')}>
+              Abrir Simulador Completo <Icon name="arrow" size={14}/>
+            </button>
+          </div>
+          <div className="sim-controls">
+            <div className="sim-control-group">
+              <label>Escenario de prueba</label>
+              <select value={selectedScenario} onChange={(e) => setSelectedScenario(e.target.value)}>
+                {simScenarios.length > 0 ? simScenarios.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                )) : (
+                  <>
+                    <option value="happy_path">Intercambio Exitoso (Happy Path)</option>
+                    <option value="dispute_settled_for_buyer">Disputa Resuelta a Favor del Comprador</option>
+                    <option value="dispute_refunded_to_seller">Disputa con Reembolso al Vendedor</option>
+                    <option value="seller_cancellation">Cancelación de Orden por el Vendedor</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div className="sim-control-group">
+              <label>Monto de la orden (satoshis)</label>
+              <input type="number" min="1000" step="1000" value={simSatsInput} onChange={(e) => setSimSatsInput(e.target.value)} />
+            </div>
+            <div style={{ marginTop: 'auto', display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void handleRunSimulation()}
+                disabled={simulating}
+              >
+                <Icon name="play" size={14}/> {simulating ? 'Simulando ciclo...' : 'Ejecutar Simulación'}
+              </button>
+            </div>
+          </div>
+          {simError && <div className="form-message error">{simError}</div>}
+          {simulationReport && (
+            <div>
+              <div className="sim-complete-banner">
+                <span>✓ Simulación ejecutada: {simulationReport.scenario} (Orden: {simulationReport.order_id})</span>
+                <span>Estado final: <code>{simulationReport.final_status}</code> ({simulationReport.duration_simulated_ms} ms)</span>
+              </div>
+              <div className="sim-financials">
+                <div className="sim-financial-item">
+                  <span>Monto Orden</span>
+                  <strong>{simulationReport.financials.trade_amount_sats.toLocaleString()} sats</strong>
+                  <small>≈ {simulationReport.financials.fiat_amount} {simulationReport.financials.fiat_currency}</small>
+                </div>
+                <div className="sim-financial-item">
+                  <span>Fianza Vendedor</span>
+                  <strong>{simulationReport.financials.seller_bond_sats.toLocaleString()} sats</strong>
+                  <small>Garantía de cumplimiento</small>
+                </div>
+                <div className="sim-financial-item">
+                  <span>Fianza Comprador</span>
+                  <strong>{simulationReport.financials.buyer_bond_sats.toLocaleString()} sats</strong>
+                  <small>Garantía anti-spam</small>
+                </div>
+                <div className="sim-financial-item">
+                  <span>Comisión Mostro</span>
+                  <strong>{simulationReport.financials.fee_sats.toLocaleString()} sats</strong>
+                  <small>{draft.market.fee_bps / 100}% de la orden</small>
+                </div>
+                <div className="sim-financial-item">
+                  <span>Bloqueado Vendedor</span>
+                  <strong>{simulationReport.financials.seller_total_locked_sats.toLocaleString()} sats</strong>
+                  <small>Orden + fianza + comisión</small>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', marginTop: '6px' }}>
+                <button type="button" className="button button-secondary" onClick={() => setPage('simulation')}>
+                  Ver los {simulationReport.steps.length} pasos detallados en el Simulador →
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
         <div className="dashboard-lower"><article className="setup-card"><div className="card-heading"><div><span className="card-kicker">PUESTA EN MARCHA</span><h2>Prepara tu comunidad</h2><p>Configura los datos esenciales antes de iniciar el mercado.</p></div><div className="progress-ring"><span>{readiness}<small>/4</small></span></div></div><progress className="setup-progress" value={readiness} max={4} aria-label="Preparación de la comunidad"/><div className="setup-checks"><span className={draft.community.name ? 'complete' : ''}><i>{draft.community.name ? <Icon name="check" size={12}/> : '1'}</i>Identidad</span><span className={draft.market.fiat_currencies.length ? 'complete' : ''}><i>{draft.market.fiat_currencies.length ? <Icon name="check" size={12}/> : '2'}</i>Monedas</span><span className={draft.nostr.relays.length ? 'complete' : ''}><i>{draft.nostr.relays.length ? <Icon name="check" size={12}/> : '3'}</i>Relays Nostr</span><span className={draft.payment_methods.some((m) => m.active) ? 'complete' : ''}><i>{draft.payment_methods.some((m) => m.active) ? <Icon name="check" size={12}/> : '4'}</i>Pagos</span></div><button className="button button-primary" onClick={() => setPage('config')}>Abrir configuración <Icon name="arrow" size={15}/></button></article>
           <article className="market-card"><div className="market-card-top"><span className="market-symbol"><Icon name="bolt" size={19}/></span><span className="market-tag"><i/> AÚN NO INICIADO</span></div><div className="market-empty"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><span>₿</span></div></div><div className="market-copy"><h3>Mercado en desarrollo</h3><p>Este prototipo permite guardar los parámetros de la comunidad. El inicio del mercado aún no está disponible.</p><span className="market-note"><Icon name="alert" size={14}/> Operaciones aún no consultadas</span></div></article></div>
         <div className="bottom-note"><span className="secure-icon"><Icon name="check" size={13}/></span><span>Configuración local</span><span className="note-separator">·</span><span>Los cambios se guardan en el servidor de esta instancia</span><span className="note-spacer"/><span className="api-indicator"><StatusDot status={health ? 'ok' : ''}/>{health ? 'API conectada' : 'API no disponible'}</span></div>
-      </section> : <section className="content config-page">
+      </section>
+      )}
+      {page === 'simulation' && (
+        <section className="content simulation-page">
+          <div className="page-heading">
+            <div>
+              <div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> PROTOCOLO P2P</div>
+              <h1>Simulador de Ciclo P2P (Regtest)</h1>
+              <p>Simula órdenes de compraventa, facturas retenidas (Hold Invoices), mensajes cifrados Nostr y resolución de disputas.</p>
+            </div>
+            <button className="button button-secondary" onClick={() => void handleRunSimulation()} disabled={simulating}>
+              <span className={simulating ? 'spin' : ''}>↻</span> {simulating ? 'Simulando...' : 'Reejecutar Simulación'}
+            </button>
+          </div>
+
+          <div className="sim-card">
+            <div className="sim-heading">
+              <div>
+                <h2>Parámetros del Ciclo de Prueba</h2>
+                <p>Elige el escenario de prueba y la cantidad de satoshis a transaccionar.</p>
+              </div>
+            </div>
+            <div className="sim-controls">
+              <div className="sim-control-group" style={{ flex: '1 1 280px' }}>
+                <label>Escenario de prueba</label>
+                <select value={selectedScenario} onChange={(e) => setSelectedScenario(e.target.value)}>
+                  {simScenarios.length > 0 ? simScenarios.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  )) : (
+                    <>
+                      <option value="happy_path">Intercambio Exitoso (Happy Path)</option>
+                      <option value="dispute_settled_for_buyer">Disputa Resuelta a Favor del Comprador</option>
+                      <option value="dispute_refunded_to_seller">Disputa con Reembolso al Vendedor</option>
+                      <option value="seller_cancellation">Cancelación de Orden por el Vendedor</option>
+                    </>
+                  )}
+                </select>
+              </div>
+              <div className="sim-control-group">
+                <label>Monto de la orden (sats)</label>
+                <input
+                  type="number"
+                  min="1000"
+                  step="1000"
+                  value={simSatsInput}
+                  onChange={(e) => setSimSatsInput(e.target.value)}
+                />
+              </div>
+              <div style={{ marginTop: 'auto' }}>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => void handleRunSimulation()}
+                  disabled={simulating}
+                >
+                  <Icon name="play" size={14}/> {simulating ? 'Simulando ciclo...' : 'Ejecutar Simulación'}
+                </button>
+              </div>
+            </div>
+
+            {simError && <div className="form-message error">{simError}</div>}
+
+            {simulationReport ? (
+              <>
+                <div className="sim-complete-banner">
+                  <div>
+                    <strong>Escenario:</strong> {simulationReport.scenario} · <strong>Orden:</strong> <code>{simulationReport.order_id}</code>
+                  </div>
+                  <div>
+                    <span>Estado: <code>{simulationReport.final_status}</code></span> · <span>{simulationReport.duration_simulated_ms} ms</span>
+                  </div>
+                </div>
+
+                <div className="sim-financials">
+                  <div className="sim-financial-item">
+                    <span>Monto Orden</span>
+                    <strong>{simulationReport.financials.trade_amount_sats.toLocaleString()} sats</strong>
+                    <small>≈ {simulationReport.financials.fiat_amount} {simulationReport.financials.fiat_currency}</small>
+                  </div>
+                  <div className="sim-financial-item">
+                    <span>Fianza Vendedor</span>
+                    <strong>{simulationReport.financials.seller_bond_sats.toLocaleString()} sats</strong>
+                    <small>Garantía de cumplimiento</small>
+                  </div>
+                  <div className="sim-financial-item">
+                    <span>Fianza Comprador</span>
+                    <strong>{simulationReport.financials.buyer_bond_sats.toLocaleString()} sats</strong>
+                    <small>Garantía anti-spam</small>
+                  </div>
+                  <div className="sim-financial-item">
+                    <span>Comisión Mostro</span>
+                    <strong>{simulationReport.financials.fee_sats.toLocaleString()} sats</strong>
+                    <small>Tarifa por intermediación</small>
+                  </div>
+                  <div className="sim-financial-item">
+                    <span>Bloqueado Vendedor</span>
+                    <strong>{simulationReport.financials.seller_total_locked_sats.toLocaleString()} sats</strong>
+                    <small>Total en Hold Invoice</small>
+                  </div>
+                  <div className="sim-financial-item">
+                    <span>Bloqueado Comprador</span>
+                    <strong>{simulationReport.financials.buyer_total_locked_sats.toLocaleString()} sats</strong>
+                    <small>Fianza + tarifa</small>
+                  </div>
+                </div>
+
+                <div className="section-title-row" style={{ marginTop: '20px' }}>
+                  <div>
+                    <h2>Secuencia de Pasos ({simulationReport.steps.length} eventos)</h2>
+                    <p>Traza criptográfica de eventos Nostr y transacciones Lightning en cada fase de la operación.</p>
+                  </div>
+                </div>
+
+                <div className="sim-timeline">
+                  {simulationReport.steps.map((st) => (
+                    <article className="sim-step" key={st.step_number}>
+                      <span className="sim-step-node" />
+                      <div className="sim-step-header">
+                        <span className="sim-step-num">Paso {st.step_number}</span>
+                        <ActorBadge actor={st.actor} />
+                        <span className="sim-step-title">{st.title}</span>
+                        <span className="sim-status-tag">{st.order_status}</span>
+                      </div>
+                      <p className="sim-step-desc">{st.description}</p>
+                      {(st.nostr_event || st.lightning_action) && (
+                        <div className="sim-details-row">
+                          {st.nostr_event && (
+                            <div className="sim-pill">
+                              <div className="sim-pill-head">
+                                <span>NOSTR (Kind {st.nostr_event.kind})</span>
+                              </div>
+                              <code>id: {st.nostr_event.event_id}</code>
+                              <span className="sim-pill-sub">{st.nostr_event.summary}</span>
+                            </div>
+                          )}
+                          {st.lightning_action && (
+                            <div className="sim-pill">
+                              <div className="sim-pill-head">
+                                <span>LIGHTNING: {st.lightning_action.action}</span>
+                              </div>
+                              <code>hash: {st.lightning_action.payment_hash}</code>
+                              <span className="sim-pill-sub">
+                                Estado: <strong>{st.lightning_action.status}</strong> · {st.lightning_action.amount_sats.toLocaleString()} sats
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '30px', color: '#88988e' }}>
+                <p>Haz clic en "Ejecutar Simulación" para calcular las finanzas y ver el flujo paso a paso en tiempo real.</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      {page === 'config' && <section className="content config-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span><button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
         <div className="config-layout"><nav className="config-nav"><a href="#identity">Identidad</a><a href="#market">Mercado</a><a href="#safety">Seguridad</a><a href="#nostr">Nostr</a><a href="#payments">Métodos de pago</a></nav>
           <form className="config-form" onSubmit={saveConfig}>

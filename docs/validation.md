@@ -94,4 +94,16 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 - `Dockerfile.umbrel` unificado: integra la descarga y comprobación de checksums SHA-256 oficiales del binario `mostrod` v0.18.8 para amd64 y arm64 (`9fa0516a...` y `034af649...`), instalando tanto el daemon Mostro como la API y la UI en la misma imagen para evitar duplicidad de repositorios en GHCR.
 - Tarjeta de control web: muestra estado en vivo, revisión activa, advertencia de falta de canales LND y acciones de activación/desactivación sin comprometer la seguridad ni revelar el `nsec`.
 
+## Simulación de Ciclo Completo P2P y Fixture Regtest (Módulo 2) — preview.11
+
+- 31 pruebas Rust pasan (`cargo test --workspace --locked`): 10 unitarias en lib, 4 de configuración, 2 de conexión, 3 de daemon/orquestación, 6 de HTTP, 2 de staging y 4 nuevas pruebas de integración de simulación (`api/tests/simulation.rs`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 advertencias.
+- `cargo fmt --all -- --check`: correcto.
+- `npm --prefix web run build`: TypeScript y Vite compilan correctamente con la interfaz del Simulador P2P, desglose financiero satoshi/fiat, actor badges y trazabilidad cronológica.
+- Motor de simulación (`api/src/simulation.rs`): soporta 4 escenarios clave (`HappyPath`, `DisputeSettledForBuyer`, `DisputeRefundedToSeller`, `SellerCancellation`), cálculo matemático exacto de fees (`fee_bps`) y bonds (`bond_bps` + `base_bond_sats`, según `BondApply`), eventos Nostr cifrados (Kind 4 / Kind 38383) y ciclo de facturas Lightning Hold Invoices (`OPEN` -> `ACCEPTED` -> `SETTLED` / `CANCELED`).
+- Endpoints HTTP seguros: `GET /api/simulation/scenarios` y `POST /api/simulation/run` protegidos con validación de cabecera `X-Requested-With: mostro-community`.
+- CLI `simulate-trade`: permite ejecutar simulaciones locales parametrizadas desde terminal (`happy-path`, `dispute-buyer`, `dispute-seller`, `cancel`) con desglose satoshi completo.
+- Fixture Docker Regtest (`docker/docker-compose.regtest.yml`): composición aislada para pruebas locales que integra Bitcoin Core 26 (regtest), Nostr RS Relay (puerto 7777), LND Alice (Mostro) y LND Bob (contraparte) en red bridge privada sin colisionar con Umbrel.
+- Smoke test automatizado (`scripts/regtest-smoke.sh`): ejecuta validación de Compose, las 4 simulaciones CLI, las 4 suites de tests Rust y el build de frontend en un único script reproducible.
+
 

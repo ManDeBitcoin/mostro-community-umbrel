@@ -4,19 +4,17 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.10
+version: 0.1.0-preview.11
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.
   Permite guardar la identidad pública y el borrador de reglas del mercado:
   monedas, límites, comisiones, bonds, relays y catálogo de pagos.
 
-  Esta versión incorpora el demonio oficial Mostro (v0.18.8) con orquestación
-  y activación atómica en espera pasiva (Módulo 1). Consulta el estado de LND
-  con un macaroon de solo lectura y validación TLS.
-  Permite generar nprofile y QR SVG para conexión directa con Mostro App.
-  La activación del demonio está protegida y en espera hasta la confirmación
-  explícita por el operador en el panel web.
+  Esta versión incorpora el motor de simulación de ciclo completo P2P y
+  fixture Regtest (Módulo 2): simulación de órdenes, retención de fondos
+  mediante Lightning Hold Invoices, eventos Nostr y resolución de disputas.
+  Incluye estudio interactivo en el panel web y CLI simulate-trade.
 developer: ManDeBitcoin
 website: https://github.com/ManDeBitcoin/mostro-community-umbrel
 repo: https://github.com/ManDeBitcoin/mostro-community-umbrel
@@ -28,9 +26,10 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Orquestación del demonio Mostro (Módulo 1): máquina de estados con activación
-  atómica, modo de espera protegido en Compose (sin bucles de reinicio), imagen
-  unificada v0.18.8 y panel de control web con telemetría en vivo.
+  Módulo 2: Simulador interactivo del ciclo completo P2P (Happy Path, disputas
+  y cancelaciones), cálculo exacto de bonds y comisiones, eventos Nostr Kind 4/38383,
+  Hold Invoices Lightning, vista interactiva en dashboard y fixture Docker Regtest.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
+
 
