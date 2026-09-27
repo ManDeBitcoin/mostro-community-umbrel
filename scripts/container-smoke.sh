@@ -5,12 +5,14 @@ IMAGE="${1:?Supply the freshly built image}"
 SMOKE_DATA="$(mktemp -d)"
 SMOKE_NAME="mostro-manager-smoke-${RANDOM}"
 cleanup() {
+  local result=$?
+  if [ "$result" -ne 0 ]; then docker logs "$SMOKE_NAME" 2>&1 || true; fi
   docker rm -f "$SMOKE_NAME" >/dev/null 2>&1 || true
-  docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'chmod -R a+rwX /data/config' >/dev/null 2>&1 || true
+  docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'chmod -R a+rwX /data' >/dev/null 2>&1 || true
   rm -rf -- "$SMOKE_DATA"
 }
 trap cleanup EXIT
-docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'mkdir -p /data/config && chown 1000:1000 /data/config && chmod 700 /data/config'
+docker run --rm --user 0:0 --entrypoint sh -v "$SMOKE_DATA:/data" "$IMAGE" -c 'mkdir -p /data/config && chown 1000:1000 /data /data/config && chmod 700 /data /data/config'
 docker run --detach --name "$SMOKE_NAME" --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true -v "$SMOKE_DATA:/data" -p 127.0.0.1::3001 "$IMAGE"
 SMOKE_PORT="$(docker port "$SMOKE_NAME" 3001/tcp | cut -d: -f2)"
 export SMOKE_URL="http://127.0.0.1:$SMOKE_PORT"
