@@ -4,19 +4,19 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.9
+version: 0.1.0-preview.10
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.
   Permite guardar la identidad pública y el borrador de reglas del mercado:
   monedas, límites, comisiones, bonds, relays y catálogo de pagos.
 
-  Esta versión no inicia Mostro ni conecta Bitcoin. Consulta el estado de LND
+  Esta versión incorpora el demonio oficial Mostro (v0.18.8) con orquestación
+  y activación atómica en espera pasiva (Módulo 1). Consulta el estado de LND
   con un macaroon de solo lectura y validación TLS.
-  Utiliza datos propios y puede convivir con una instalación existente.
-  Permite importar una clave Nostr localmente por terminal, verificando su npub.
-  No importa bases de datos ni operaciones del Mostro actual.
-  El arranque de mercado, las disputas y la migración todavía no están disponibles.
+  Permite generar nprofile y QR SVG para conexión directa con Mostro App.
+  La activación del demonio está protegida y en espera hasta la confirmación
+  explícita por el operador en el panel web.
 developer: ManDeBitcoin
 website: https://github.com/ManDeBitcoin/mostro-community-umbrel
 repo: https://github.com/ManDeBitcoin/mostro-community-umbrel
@@ -28,8 +28,9 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Añade endpoint y tarjeta de conexión Mostro App con nprofile Nostr y
-  código QR escaneable. Permite preparar la identidad y relays del bot
-  para su conexión con clientes Mostro P2P sin alterar el nodo.
+  Orquestación del demonio Mostro (Módulo 1): máquina de estados con activación
+  atómica, modo de espera protegido en Compose (sin bucles de reinicio), imagen
+  unificada v0.18.8 y panel de control web con telemetría en vivo.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
+

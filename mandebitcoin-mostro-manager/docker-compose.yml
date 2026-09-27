@@ -8,7 +8,7 @@ services:
       - default
       - manager_private
   init:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.9@sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.10@sha256:cbcdce7358e397374f3f85b27e583a177a359da3731dbc871d5469280ed704d3
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command: ["mkdir -p /data/config && chown 1000:1000 /data /data/config && chmod 700 /data /data/config"]
@@ -18,7 +18,7 @@ services:
     restart: "no"
     security_opt: ["no-new-privileges:true"]
   lnd_bridge:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.9@sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.10@sha256:cbcdce7358e397374f3f85b27e583a177a359da3731dbc871d5469280ed704d3
     entrypoint: ["mostro-community-api", "lnd-tunnel"]
     healthcheck:
       disable: true
@@ -32,7 +32,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
   web:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.9@sha256:c0c14d416ecea7940f1ac11e5bdcc8bf6b2111bef87c6e5eb01b69f96107f2d0
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.10@sha256:cbcdce7358e397374f3f85b27e583a177a359da3731dbc871d5469280ed704d3
     user: "1000:1000"
     restart: on-failure
     depends_on:
@@ -64,6 +64,36 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+  mostro:
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.10@sha256:cbcdce7358e397374f3f85b27e583a177a359da3731dbc871d5469280ed704d3
+    entrypoint: ["mostro-entrypoint"]
+    user: "1000:1000"
+    restart: on-failure
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+      - type: bind
+        source: ${APP_LIGHTNING_NODE_DATA_DIR}/tls.cert
+        target: /lnd/tls.cert
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APP_LIGHTNING_NODE_DATA_DIR}/data/chain/bitcoin/${APP_BITCOIN_NETWORK}/admin.macaroon
+        target: /lnd/mostro.macaroon
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      STANDBY_IF_UNCONFIGURED: "true"
+      MOSTRO_SETTINGS_DIR: /data/config/active
+      MOSTRO_IDENTITY_FILE: /data/config/identity/mostro.nsec
+    networks:
+      - default
+    security_opt: ["no-new-privileges:true"]
+
 networks:
   manager_private:
     internal: true
