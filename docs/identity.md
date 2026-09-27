@@ -36,7 +36,7 @@ Introducir primero el npub esperado y después la clave privada cuando aparezca 
 
 ## Exportación cifrada previa al mercado
 
-En la versión que incluya `export-backup`, este comando pedirá dos veces una frase de cifrado en la terminal y escribirá un archivo `age` en `/data/config/backups/`. Incluye la identidad y el borrador guardado; **no incluye** la futura base de datos de órdenes ni datos de LND. El archivo se descifra de inmediato con la misma frase y se comprueba el `npub` antes de guardarse. No se envía al navegador.
+Desde preview.8, este comando pide dos veces una frase de cifrado de al menos 16 caracteres en la terminal y escribe un archivo `age` en `/data/config/backups/`. Incluye la identidad y el borrador guardado; **no incluye** la futura base de datos de órdenes ni datos de LND. El archivo se descifra de inmediato con la misma frase y se comprueba el `npub` antes de guardarse. No se envía al navegador.
 
 ```sh
 sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-community-api export-backup

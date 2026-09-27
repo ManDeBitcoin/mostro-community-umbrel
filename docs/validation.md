@@ -60,3 +60,8 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 
 - La API local puede exportar la identidad y el borrador en un archivo `age` con frase interactiva y permisos privados, y verifica el descifrado antes de publicar el archivo. `verify-backup` valida versión, `npub` derivado del `nsec` y configuración sin restaurar archivos.
 - La prueba usa una identidad sintética, comprueba el viaje cifrado y descifrado, permisos de archivo/directorio y rechazo de una frase incorrecta. El mercado y LND no intervienen. La restauración de la configuración y el respaldo de la futura base de datos siguen pendientes.
+
+## Publicación de preview.8
+
+- [GitHub Actions aprobó](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36331949528) las imágenes nativas amd64 y arm64, las pruebas Rust, smoke de persistencia, conexión LND sintética y arranque protegido de la imagen opcional de Mostro.
+- El manifiesto multi-arquitectura de Manager tiene digest `sha256:09834e540a209147e23040acdcbf1752f74b690cbce7420e004095813bab6aca`; la CI verificó acceso anónimo a los manifiestos y capas antes de crear la release.

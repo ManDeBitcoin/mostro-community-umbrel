@@ -8,7 +8,7 @@ services:
       - default
       - manager_private
   init:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.7@sha256:1e2b6b5ea7b15eea3cd354ce72d079016a65c937211cc2c88db3d007d9efbb7f
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.8@sha256:09834e540a209147e23040acdcbf1752f74b690cbce7420e004095813bab6aca
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command: ["mkdir -p /data/config && chown 1000:1000 /data /data/config && chmod 700 /data /data/config"]
@@ -18,7 +18,7 @@ services:
     restart: "no"
     security_opt: ["no-new-privileges:true"]
   lnd_bridge:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.7@sha256:1e2b6b5ea7b15eea3cd354ce72d079016a65c937211cc2c88db3d007d9efbb7f
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.8@sha256:09834e540a209147e23040acdcbf1752f74b690cbce7420e004095813bab6aca
     entrypoint: ["mostro-community-api", "lnd-tunnel"]
     healthcheck:
       disable: true
@@ -32,7 +32,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
   web:
-    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.7@sha256:1e2b6b5ea7b15eea3cd354ce72d079016a65c937211cc2c88db3d007d9efbb7f
+    image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.8@sha256:09834e540a209147e23040acdcbf1752f74b690cbce7420e004095813bab6aca
     user: "1000:1000"
     restart: on-failure
     depends_on:

@@ -6,12 +6,12 @@ Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de c
 
 Este repositorio también es una tienda comunitaria de una sola aplicación.
 
-**Disponible: [0.1.0-preview.7](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.7).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36328059895).
+**Disponible: [0.1.0-preview.8](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.8).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36331949528).
 
 1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
 2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
 3. Instalar **Mostro Community Manager**.
-4. Comprobar que la ficha muestre **0.1.0-preview.7** o posterior y abrirlo desde Umbrel.
+4. Comprobar que la ficha muestre **0.1.0-preview.8** o posterior y abrirlo desde Umbrel.
 
 Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda antes de reintentar. Si Umbrel conserva la instalación fallida y sigue solicitando la imagen antigua, elimina únicamente la instalación fallida de **Mostro Community Manager** y vuelve a instalarla. La instalación independiente de Mostro no forma parte de ese paquete.
 
@@ -75,3 +75,5 @@ La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes d
 ## Preparación de Mostro (en desarrollo)
 
 Desde preview.7, `mostro-community-api check-mostro` revisa localmente el borrador, la identidad y LND sin arrancar el daemon. La instalación inspeccionada tiene cero canales Lightning activos: aunque LND está conectado, todavía no hay capacidad para intercambios. La imagen oficial de Mostro se verifica por checksum y versión; el despliegue y las operaciones financieras siguen pendientes. Ver [preflight y requisitos](docs/mostro-preflight.md).
+
+Desde preview.8, `mostro-community-api export-backup` cifra la identidad y el borrador previo al mercado en un archivo age privado y verifica el descifrado antes de guardarlo. `verify-backup` comprueba ese archivo sin restaurar datos. La futura base de datos Mostro y la restauración automática siguen pendientes. Ver [exportación e instrucciones](docs/identity.md#exportación-cifrada-previa-al-mercado).
