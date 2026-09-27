@@ -1,5 +1,3 @@
-Conexión de lectura al LND de Umbrel mediante certificado TLS y macaroon readonly. El panel muestra sincronización de cadena y grafo, red, canales y saldo agregado local/remoto. Los fallos de consulta se muestran como datos no disponibles. El Manager conserva su red privada y utiliza un puente TCP de destino fijo sin acceso a claves.
+Añade una comprobación de solo lectura para Mostro: borrador guardado, identidad pública importada y estado de LND. El panel señala explícitamente cuando LND no tiene canales activos. La imagen oficial de Mostro v0.18.8 se comprueba por checksum y versión durante la publicación, pero el daemon no se instala ni inicia.
 
-La imagen se prueba en amd64 y arm64, incluyendo un servidor LND HTTPS sintético con casos de certificados incorrectos, redirecciones y respuestas parciales. La instalación conserva el borrador y la identidad importada de preview.5.
-
-Esta versión no inicia Mostro ni habilita pedidos. El backup cifrado de la identidad y las pruebas del ciclo financiero siguen pendientes.
+El operador debe preparar capacidad Lightning local y remota antes de operaciones reales. El backup cifrado, la conexión financiera de Mostro y las pruebas regtest siguen pendientes. Se conservan la configuración y la identidad importada.

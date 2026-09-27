@@ -14,6 +14,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args == ["lnd-tunnel"] {
             return mostro_community_api::tunnel::serve().await;
         }
+        if args == ["check-mostro"] {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            let report =
+                mostro_community_api::preflight::report(&root, &Integrations::from_env()).await;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
         if args == ["check-lnd"] {
             let status = Integrations::from_env().lightning().await;
             println!("{}", serde_json::to_string_pretty(&status)?);
@@ -23,7 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err("No se pudo verificar LND".into())
             };
         }
-        return Err("Uso: mostro-community-api [import-identity|check-lnd|lnd-tunnel]".into());
+        return Err(
+            "Uso: mostro-community-api [import-identity|check-lnd|check-mostro|lnd-tunnel]".into(),
+        );
     }
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());
     let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));

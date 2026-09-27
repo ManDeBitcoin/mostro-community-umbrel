@@ -45,6 +45,8 @@ jobs:
         env:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
         run: python3 scripts/lnd-smoke.py --image "$IMAGE"
+      - name: Verify official Mostro binary without starting daemon
+        run: docker build --platform linux/${{ matrix.arch }} --file docker/Dockerfile.mostro --target download --tag mostro-upstream-check:${{ matrix.arch }} .
       - name: Publish tested architecture
         env:
           IMAGE: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}

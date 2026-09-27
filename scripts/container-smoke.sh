@@ -35,6 +35,7 @@ with urllib.request.urlopen(base+'/api/dashboard') as r:
  data=json.load(r)
  assert data['market_started'] is False and data['mostro']['status']=='unconfigured'
 PY
+docker exec "$SMOKE_NAME" mostro-community-api check-mostro | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["draft"]["status"] == "valid" and data["identity"]["status"] == "missing" and data["can_start_market"] is False'
 docker restart "$SMOKE_NAME" >/dev/null
 # Docker may assign a different ephemeral host port when restarting the container.
 SMOKE_PORT="$(docker port "$SMOKE_NAME" 3001/tcp | cut -d: -f2)"

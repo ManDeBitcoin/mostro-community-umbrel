@@ -96,6 +96,37 @@ pub fn import_interactive() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Read only the imported identity's public key for local preflight.
+/// No secret bytes are returned, logged, or sent to the browser.
+pub fn inspect(root: &Path) -> Result<Option<String>, &'static str> {
+    let directory = root.join("identity");
+    let metadata = match fs::symlink_metadata(&directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Directorio de identidad no disponible"),
+    };
+    if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err("Directorio de identidad no privado");
+    }
+    let file = directory.join("mostro.nsec");
+    let metadata = match fs::symlink_metadata(&file) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Archivo de identidad no disponible"),
+    };
+    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err("Archivo de identidad no privado");
+    }
+    let contents =
+        Zeroizing::new(fs::read_to_string(&file).map_err(|_| "No se pudo leer la identidad")?);
+    let secret = SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
+    Keys::new(secret)
+        .public_key()
+        .to_bech32()
+        .map(Some)
+        .map_err(|_| "Identidad inválida")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

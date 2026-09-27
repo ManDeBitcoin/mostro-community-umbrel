@@ -71,3 +71,7 @@ Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y com
 ## LND de Umbrel
 
 La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes del LND de Umbrel. No copia ni publica sus valores. El panel muestra si la cadena y el grafo están sincronizados y, si LND lo informa, el saldo agregado de canales abiertos. Son indicadores de diagnóstico; no prueban que exista una ruta ni que Mostro pueda aceptar órdenes. Disponible desde preview.6. Ver [conexión y límites](docs/lnd.md).
+
+## Preparación de Mostro (en desarrollo)
+
+Una comprobación local de solo lectura revisa borrador, identidad y LND sin arrancar el daemon. La instalación inspeccionada tiene cero canales Lightning activos: aunque LND está conectado, todavía no hay capacidad para intercambios. La imagen oficial de Mostro se verifica por checksum y versión; el despliegue y las operaciones financieras siguen pendientes. Ver [preflight y requisitos](docs/mostro-preflight.md).

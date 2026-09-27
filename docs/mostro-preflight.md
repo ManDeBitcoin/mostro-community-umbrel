@@ -1,0 +1,9 @@
+# Preparación de Mostro sin arrancar el mercado
+
+El comando `mostro-community-api check-mostro` consulta solamente el borrador guardado, la identidad importada y el LND de lectura. Devuelve el `npub`, estados y número de canales activos; no devuelve el `nsec`, los macaroons ni los saldos. La respuesta `can_start_market: false` es intencional mientras no se haya integrado y probado el daemon financiero.
+
+Una conexión LND `online` significa que respondió por HTTPS y está sincronizado. No garantiza capacidad de pago o recepción. El preflight separa `capacity: no_active_channels`, `no_local_liquidity`, `no_remote_liquidity`, `balances_observed` y `unknown`. Incluso `balances_observed` no prueba que exista una ruta usable.
+
+La instalación inspeccionada informó **cero canales activos** el 2026-09-27. Antes de operaciones reales se necesitará capacidad Lightning local y remota, además de pruebas de ruta, del nodo y del flujo completo de Mostro. Abrir o financiar canales modifica el nodo y requiere una decisión operativa separada del desarrollo de esta app.
+
+La [documentación upstream de Mostro v0.18.8](https://github.com/MostroP2P/mostro/blob/v0.18.8/docs/LIGHTNING_OPS.md) describe sus facturas retenidas y pagos salientes. El daemon necesita credenciales con permisos financieros, que **no** se montan en el Manager. La imagen oficial de Mostro se comprueba por SHA-256 y con `--version` en CI, pero todavía no se instala ni ejecuta en Umbrel. El binario v0.18.8 llama a `clearscreen` incluso antes de procesar `--help`; su imagen necesita `TERM=xterm` y `ncurses-base` para arrancar sin TTY. También requiere un `settings.toml` válido antes de iniciar en modo no interactivo. El proceso de preparación de ese archivo, el backup de secretos, la conexión de LND con permisos mínimos y las pruebas regtest siguen pendientes.
