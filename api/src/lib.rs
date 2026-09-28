@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod backup;
+pub mod chat;
 pub mod config;
 pub mod connection;
 pub mod daemon;
@@ -18,6 +19,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
 };
+use chat::SharedChatCache;
 use config::Configuration;
 use orders::SharedOrders;
 use serde::Deserialize;
@@ -29,6 +31,7 @@ pub struct AppState {
     pub store: Arc<Mutex<Store>>,
     pub integrations: Integrations,
     pub orders: SharedOrders,
+    pub chat: SharedChatCache,
     pub monitor_tx: tokio::sync::watch::Sender<orders::MonitorCommand>,
 }
 type Error = (StatusCode, Json<Value>);
@@ -53,6 +56,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/simulation/run", post(simulation_run_handler))
         .route("/api/orders", get(orders::get_orders_handler))
+        .route("/api/chat/{order_id}", get(chat::get_chat_handler))
         .route(
             "/api/{*path}",
             get(|| async { error(StatusCode::NOT_FOUND, "Endpoint no disponible") }),

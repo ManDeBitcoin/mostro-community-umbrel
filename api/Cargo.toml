@@ -14,7 +14,7 @@ reqwest = { version = "0.12.28", default-features = false, features = ["native-t
 tonic = { version = "0.12.3", features = ["transport"] }
 prost = "0.13.5"
 tower-http = { version = "0.6.11", features = ["fs", "set-header"] }
-nostr = { version = "0.44.4", default-features = false, features = ["std"] }
+nostr = { version = "0.44.4", default-features = false, features = ["std", "nip04", "nip44", "nip59"] }
 rpassword = "7"
 zeroize = "1"
 tempfile = "3"

@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.12
+version: 0.1.0-preview.13
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.
@@ -26,8 +26,8 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Módulo 3A: Monitor de órdenes públicas y cálculo corregido de simulador.
-  Se implementó un monitor WebSocket de solo lectura en la interfaz para mostrar las órdenes públicas Nostr del nodo en tiempo real, resolviendo estados dinámicos. Corrección de aritmética del simulador para el exacto 50/50 split de comisiones Mostro.
+  Módulo 3B: Chat Cifrado y Consola de Arbitraje Asistido.
+  Descifrado y almacenamiento seguro local de mensajes Nostr NIP-04 y NIP-44/59 para mediadores. Inclusión de la interfaz de Consola de Mediación. Monitor de órdenes ahora completamente probado con Mocks E2E y sin filtraciones de red.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
 

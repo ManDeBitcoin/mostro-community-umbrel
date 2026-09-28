@@ -139,4 +139,33 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
   - `/tmp/mostro-final-smoke.log` (salida 0)
   - `/tmp/mostro-final-playwright.log` (salida 0)
 
+## Chat Cifrado y Consola de Arbitraje Asistido (Módulo 3B) — Desarrollo Actual
+
+- **57 pruebas Rust automáticas aprobadas** (`cargo test --workspace --locked`):
+  - 11 unitarias en `src/lib.rs` (permisos y symlinks en `mostro.pub`, validación de pares de claves, balances LND sin inventar ceros, túnel TCP bidireccional, backups cifrados).
+  - 8 de integración hermética de chat cifrado (`tests/chat.rs`):
+    - `test_kind4_nip04_valid_decryption_and_cache`: descifrado hermético de eventos NIP-04 Kind 4 con tag `["e", order_id]` y verificación en caché en memoria.
+    - `test_kind4_nip44_decryption`: soporte y descifrado de payloads NIP-44.
+    - `test_kind1059_gift_wrap_decryption`: desempaquetado hermético de NIP-59 GiftWrap (Kind 1059), verificación de seal y rumor interno.
+    - `test_kind4_nip04_sent_by_community`: manejo correcto de mensajes originados por la identidad de la comunidad (`is_from_me = true`).
+    - `test_invalid_events_are_rejected`: rechazo de eventos con firmas inválidas, autores no coincidentes o payloads corruptos.
+    - `test_chat_cache_ordering_and_limits`: ordenación cronológica por `created_at`, deduplicación por ID de evento y límites acotados de capacidad en memoria.
+    - `test_http_chat_endpoint_contract`: endpoint protegido `GET /api/chat/:order_id` con validación UUID estricta y cabecera CSRF `X-Requested-With: mostro-community`.
+    - `test_chat_worker_with_mock_relay`: suscripción WebSocket en background con relay mock local enviando eventos Kind 4 y validando recepción sin redes externas.
+  - 4 de configuración (`tests/configuration.rs`).
+  - 2 de conexión e identidad (`tests/connection.rs`).
+  - 3 de orquestación del daemon (`tests/daemon.rs`).
+  - 13 de contratos HTTP (`tests/http.rs`).
+  - 7 de integración real WebSocket del monitor (`tests/orders.rs`).
+  - 7 de simulación matemática de comisiones y Hold Invoices (`tests/simulation.rs`).
+  - 2 de staging (`tests/staging.rs`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 errores, 0 advertencias.
+- `cargo fmt --all -- --check`: formato verificado y limpio (código de salida 0).
+- `npm --prefix web run build`: compilación de TypeScript y Vite exitosa con 0 errores (código de salida 0).
+- Consola de Mediación en UI React (`web/src/App.tsx`):
+  - Nueva vista accesible desde navegación lateral (`Mediación`), topbar y enlace directo desde el Monitor de Órdenes (`Ir a Consola de Mediación` o botón `Mediar` en órdenes en estado `dispute`).
+  - Visualización del historial de chat descifrado con identificación de remitente (`Comprador`, `Vendedor`, `Mediador`, `Mostro`, o `Comunidad`), marcas de tiempo y etiquetas de cifrado (`NIP-04`, `NIP-59 / NIP-44`).
+  - Selector y buscador rápido por UUID de disputa y chips de disputas activas.
+  - Bosquejo interactivo de acciones de arbitraje asistido (`adm-settle` para liquidar a favor del comprador y `adm-refund` para devolver al vendedor).
+- Reporte detallado generado en `/tmp/mostro-gemini-module3b-report.md`.
 

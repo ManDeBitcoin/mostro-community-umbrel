@@ -168,16 +168,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let orders_cache = Arc::new(tokio::sync::RwLock::new(
         mostro_community_api::orders::OrdersCache::new(),
     ));
+    let chat_cache = Arc::new(tokio::sync::RwLock::new(
+        mostro_community_api::chat::ChatCache::new(),
+    ));
     let (monitor_tx, monitor_rx) =
         tokio::sync::watch::channel(mostro_community_api::orders::MonitorCommand {
             config: initial_config,
             npub: initial_npub,
         });
 
-    // Tarea de red en segundo plano (Monitor WS)
+    // Tarea de red en segundo plano (Monitor WS de órdenes)
     tokio::spawn(mostro_community_api::orders::monitor_worker(
         orders_cache.clone(),
         monitor_rx,
+        mostro_community_api::orders::MonitorTiming::default(),
+    ));
+
+    // Tarea de red en segundo plano (Chat / Mensajería cifrada)
+    tokio::spawn(mostro_community_api::chat::chat_worker(
+        chat_cache.clone(),
+        root.clone(),
+        monitor_tx.subscribe(),
         mostro_community_api::orders::MonitorTiming::default(),
     ));
 
@@ -185,6 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         store,
         integrations: Integrations::from_env(),
         orders: orders_cache,
+        chat: chat_cache,
         monitor_tx,
     };
     let listener = tokio::net::TcpListener::bind(&bind).await?;

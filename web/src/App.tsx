@@ -134,6 +134,25 @@ type OrdersSnapshot = {
   relays?: RelayStatus[];
   orders: OrderSummary[];
 };
+
+type ChatMessage = {
+  id: string;
+  order_id: string;
+  sender: string;
+  recipient?: string | null;
+  created_at: number;
+  kind: number;
+  action?: string | null;
+  content: string;
+  is_from_me: boolean;
+};
+
+type ChatHistory = {
+  order_id: string;
+  messages: ChatMessage[];
+  count: number;
+};
+
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
   market: { fiat_currencies: [], min_trade_sats: 1000, max_trade_sats: 1000000, fee_bps: 0, dev_fee_bps: 0, max_routing_fee_bps: 0 },
@@ -143,7 +162,14 @@ const blankConfig = (): Configuration => ({
 });
 const percent = (bps: number) => (bps / 100).toString();
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { ...(init?.headers || {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}) } });
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      'X-Requested-With': 'mostro-community',
+      ...(init?.headers || {}),
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {})
+    }
+  });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.error || `Error del servidor (${response.status})`);
   return data as T;
@@ -162,6 +188,8 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     save: <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></>,
     alert: <><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
     play: <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>,
+    shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>,
+    message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>,
   };
   return <svg {...common}>{paths[name] || paths.grid}</svg>;
 }
@@ -185,7 +213,7 @@ function ActorBadge({ actor }: { actor: string }) {
     default: return <span className="sim-actor-badge">{actor}</span>;
   }
 }
-function OrdersPage() {
+function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) => void }) {
   const [snapshot, setSnapshot] = useState<OrdersSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [filterKind, setFilterKind] = useState<'all' | 'buy' | 'sell'>('all');
@@ -251,6 +279,32 @@ function OrdersPage() {
           <span>Los eventos históricos presentados en este monitor no garantizan liquidez, confirmación de fondos ni que el daemon de Mostro esté en ejecución. Este panel no permite realizar pagos, tomar órdenes ni ejecutar arbitrajes.</span>
         </div>
       </div>
+
+      {orders.some((o) => o.status === 'dispute') && (
+        <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.1)', border: '1px solid rgba(235, 115, 29, 0.3)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <strong style={{ color: '#eb731d', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Icon name="shield" size={15} /> Disputas activas detectadas
+            </strong>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#9ba3af' }}>
+              Hay órdenes en estado de disputa que disponen de un canal de chat cifrado para arbitraje.
+            </p>
+          </div>
+          {onSelectDispute && (
+            <button
+              type="button"
+              className="button button-primary"
+              style={{ fontSize: '11px', height: '32px' }}
+              onClick={() => {
+                const firstDispute = orders.find((o) => o.status === 'dispute');
+                if (firstDispute) onSelectDispute(firstDispute.id);
+              }}
+            >
+              Ir a Consola de Mediación →
+            </button>
+          )}
+        </div>
+      )}
       
       <div className="section-title-row">
         <div><h2>Estado de Conexión</h2><p>{stateLabels[state]}</p></div>
@@ -312,6 +366,7 @@ function OrdersPage() {
                   <th>Cantidad (Sats)</th>
                   <th>Precio (Fiat)</th>
                   <th>Estado</th>
+                  <th>Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,6 +384,21 @@ function OrdersPage() {
                       <span style={{ fontSize: '11px', color: '#88988e' }}>{o.premium !== 0 ? `Premium: ${o.premium}%` : 'Precio de mercado'}</span>
                     </td>
                     <td><span className="sim-actor-badge">{o.status}</span></td>
+                    <td>
+                      {o.status === 'dispute' && onSelectDispute ? (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          style={{ padding: '3px 8px', fontSize: '11px' }}
+                          onClick={() => onSelectDispute(o.id)}
+                          title="Abrir historial de mediación para esta disputa"
+                        >
+                          <Icon name="shield" size={13} /> Mediar
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#68776e' }}>—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -340,8 +410,317 @@ function OrdersPage() {
   );
 }
 
+function MediationConsole({
+  initialOrderId = '',
+  onSelectOrder,
+}: {
+  initialOrderId?: string;
+  onSelectOrder?: (orderId: string) => void;
+}) {
+  const [selectedOrderId, setSelectedOrderId] = useState<string>(initialOrderId);
+  const [inputOrderId, setInputOrderId] = useState<string>(initialOrderId);
+  const [history, setHistory] = useState<ChatHistory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>('');
+  const [actionNotice, setActionNotice] = useState<string>('');
+  const [ordersSnapshot, setOrdersSnapshot] = useState<OrdersSnapshot | null>(null);
+
+  useEffect(() => {
+    if (initialOrderId && initialOrderId !== selectedOrderId) {
+      setSelectedOrderId(initialOrderId);
+      setInputOrderId(initialOrderId);
+    }
+  }, [initialOrderId]);
+
+  useEffect(() => {
+    api<OrdersSnapshot>('/api/orders')
+      .then((data) => {
+        setOrdersSnapshot(data);
+        if (!selectedOrderId && data.orders.length > 0) {
+          const firstDispute = data.orders.find((o) => o.status === 'dispute');
+          if (firstDispute) {
+            setSelectedOrderId(firstDispute.id);
+            setInputOrderId(firstDispute.id);
+            if (onSelectOrder) onSelectOrder(firstDispute.id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchChat = useCallback(async (orderId: string) => {
+    if (!orderId.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api<ChatHistory>(`/api/chat/${orderId.trim()}`);
+      setHistory(data);
+    } catch (err) {
+      setHistory(null);
+      setError(err instanceof Error ? err.message : 'Error al obtener mensajes cifrados');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedOrderId) {
+      void fetchChat(selectedOrderId);
+      const interval = setInterval(() => {
+        void fetchChat(selectedOrderId);
+      }, 4000);
+      return () => clearInterval(interval);
+    }
+  }, [selectedOrderId, fetchChat]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = inputOrderId.trim();
+    if (id) {
+      setSelectedOrderId(id);
+      if (onSelectOrder) onSelectOrder(id);
+      void fetchChat(id);
+    }
+  };
+
+  const handleAction = (type: 'adm-settle' | 'adm-refund') => {
+    const actionName = type === 'adm-settle' ? 'adm-settle (liquidación al comprador)' : 'adm-refund (reembolso al vendedor)';
+    setActionNotice(
+      `Acción de arbitraje bosquejada para Módulo 3B: [${actionName}] registrada para la orden ${selectedOrderId}. En la siguiente fase se firmará y transmitirá el evento administrativo Kind 4/NIP-44 con el bot Mostro.`
+    );
+  };
+
+  const disputeOrders = ordersSnapshot?.orders.filter((o) => o.status === 'dispute') || [];
+  const selectedOrder = ordersSnapshot?.orders.find((o) => o.id === selectedOrderId);
+
+  return (
+    <section className="content mediation-page">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">CONSOLA DE MEDIACIÓN Y ARBITRAJE · MÓDULO 3B</div>
+          <h1>Consola de Mediación</h1>
+          <p>Supervisión de canales cifrados de disputa y resolución asistida de conflictos.</p>
+        </div>
+        <button
+          className="button button-secondary"
+          onClick={() => selectedOrderId && void fetchChat(selectedOrderId)}
+          disabled={loading || !selectedOrderId}
+        >
+          <span className={loading ? 'spin' : ''}>↻</span> Actualizar chat
+        </button>
+      </div>
+
+      <div className="dev-banner">
+        <div className="banner-icon"><Icon name="shield" size={18} /></div>
+        <div>
+          <b>Cifrado Punto a Punto Hermético (NIP-04 y NIP-44 / GiftWrap NIP-59)</b>
+          <span>
+            Los mensajes de mediación dirigidos a la identidad de la comunidad se descifran exclusivamente en memoria con la clave privada local aislada. Las acciones administrativas de resolución están preparadas en modo asistido.
+          </span>
+        </div>
+        <div className="banner-status"><i /> PROTOCOLO SEGURO</div>
+      </div>
+
+      <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: '1 1 320px', alignItems: 'center' }}>
+          <div className="sim-control-group" style={{ flex: 1, minWidth: '220px' }}>
+            <label>ID de la orden (UUID)</label>
+            <input
+              type="text"
+              placeholder="Ej. edbd72f6-0bb0-4740-8b1c-7f51b6ad72ba"
+              value={inputOrderId}
+              onChange={(e) => setInputOrderId(e.target.value)}
+            />
+          </div>
+          <button type="submit" className="button button-primary" style={{ marginTop: 'auto', height: '32px' }}>
+            Cargar Chat
+          </button>
+        </form>
+
+        {disputeOrders.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: '#88988e' }}>Disputas activas:</span>
+            {disputeOrders.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className={`chip ${o.id === selectedOrderId ? 'complete' : ''}`}
+                style={{ cursor: 'pointer', padding: '4px 10px' }}
+                onClick={() => {
+                  setSelectedOrderId(o.id);
+                  setInputOrderId(o.id);
+                  if (onSelectOrder) onSelectOrder(o.id);
+                }}
+              >
+                <span className="dispute-badge">⚠ {o.id.slice(0, 8)}...</span>
+                <span>{o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {actionNotice && (
+        <div className="action-feedback-banner" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <strong>✓ Notificación Administrativa</strong>
+            <p style={{ margin: '4px 0 0', fontSize: '11px' }}>{actionNotice}</p>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary"
+            style={{ height: '28px', fontSize: '10px' }}
+            onClick={() => setActionNotice('')}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
+
+      {error && <div className="form-message error">{error}</div>}
+
+      <div className="mediation-grid">
+        <div className="chat-window">
+          <div className="chat-window-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icon name="message" size={16} />
+              <h3>
+                {selectedOrderId ? (
+                  <>Historial de Chat · <code>{selectedOrderId.slice(0, 8)}...</code></>
+                ) : (
+                  'Historial de Mensajes Cifrados'
+                )}
+              </h3>
+            </div>
+            {history && (
+              <span className="updated-label">
+                {history.count} mensaje{history.count === 1 ? '' : 's'} descifrado{history.count === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+
+          <div className="chat-messages-list">
+            {!selectedOrderId ? (
+              <div className="chat-empty">
+                <Icon name="shield" size={32} />
+                <b>No hay orden seleccionada</b>
+                <p>Ingresa un ID de orden o selecciona una disputa activa para consultar los mensajes cifrados.</p>
+              </div>
+            ) : loading && !history ? (
+              <div className="chat-empty">
+                <span className="spin" style={{ fontSize: '24px' }}>↻</span>
+                <p>Descifrando mensajes cifrados en memoria...</p>
+              </div>
+            ) : !history || history.messages.length === 0 ? (
+              <div className="chat-empty">
+                <Icon name="message" size={32} />
+                <b>Sin mensajes para la orden {selectedOrderId.slice(0, 8)}...</b>
+                <p>
+                  No se han registrado mensajes NIP-04 o NIP-44/59 para esta orden todavía. Cuando las partes o el bot envíen eventos a los relays, se sincronizarán y aparecerán aquí.
+                </p>
+              </div>
+            ) : (
+              history.messages.map((msg) => {
+                const isFromCommunity = msg.is_from_me;
+                const bubbleClass = isFromCommunity ? 'chat-bubble from-me' : 'chat-bubble from-other';
+                const formattedTime = new Date(msg.created_at * 1000).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                });
+                return (
+                  <div key={msg.id} className={bubbleClass}>
+                    <div className="chat-meta">
+                      <span className="chat-sender">
+                        {isFromCommunity ? 'Comunidad (Tú)' : (
+                          <ActorBadge actor={msg.sender} />
+                        )}
+                      </span>
+                      <span className="chat-time">{formattedTime}</span>
+                      <span className={`chat-tag ${msg.kind === 1059 ? 'dispute' : ''}`}>
+                        {msg.kind === 1059 ? 'NIP-59 / NIP-44' : msg.kind === 4 ? 'NIP-04' : `Kind ${msg.kind}`}
+                      </span>
+                      {msg.action && <span className="chat-tag dispute">{msg.action}</span>}
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px' }}>
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="dispute-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h3>Arbitraje Asistido</h3>
+            {selectedOrder ? (
+              <span className="dispute-badge">{selectedOrder.status}</span>
+            ) : (
+              <span className="chat-tag">Consola</span>
+            )}
+          </div>
+
+          <p style={{ margin: 0, fontSize: '11px', color: '#9ba3af', lineHeight: 1.4 }}>
+            Herramientas para resolver disputas entre comprador y vendedor conforme a las pruebas aportadas en el chat y las confirmaciones bancarias/fiat.
+          </p>
+
+          {selectedOrder && (
+            <div style={{ background: '#0e1412', border: '1px solid #1f2b24', borderRadius: '7px', padding: '10px 12px', fontSize: '11px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ color: '#829288' }}>Monto:</span>
+                <strong>{selectedOrder.amount_sats.toLocaleString()} sats ({selectedOrder.fiat_amount_range[0] || '0'} {selectedOrder.fiat_code.toUpperCase()})</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ color: '#829288' }}>Tipo:</span>
+                <span>{selectedOrder.kind === 'sell' ? 'Venta' : 'Compra'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#829288' }}>Publicada:</span>
+                <span>{new Date(selectedOrder.created_at * 1000).toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="action-box settle">
+            <h4>Liberar Fondos al Comprador (adm-settle)</h4>
+            <p>
+              Instruye al bot Mostro para liquidar el Hold Invoice de garantía a favor del comprador una vez verificado el pago fiat.
+            </p>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={!selectedOrderId}
+              onClick={() => handleAction('adm-settle')}
+            >
+              <Icon name="check" size={14} /> Bosquejar adm-settle
+            </button>
+          </div>
+
+          <div className="action-box refund">
+            <h4>Reembolsar al Vendedor (adm-refund)</h4>
+            <p>
+              Instruye al bot Mostro para cancelar la orden y devolver los satoshis en custodia al vendedor si el comprador no pagó.
+            </p>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={!selectedOrderId}
+              onClick={() => handleAction('adm-refund')}
+            >
+              <Icon name="arrow" size={14} /> Bosquejar adm-refund
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function App() {
-  const [page, setPage] = useState<'dashboard' | 'orders' | 'config' | 'simulation'>('dashboard');
+  const [page, setPage] = useState<'dashboard' | 'orders' | 'mediation' | 'simulation' | 'config'>('dashboard');
+  const [selectedDisputeOrderId, setSelectedDisputeOrderId] = useState<string>('');
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
   const [daemon, setDaemon] = useState<DaemonReport | null>(null);
@@ -490,6 +869,7 @@ function App() {
       <nav className="nav-list" aria-label="Navegación principal">
         <button className={`nav-item ${page === 'dashboard' ? 'active' : ''}`} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Panel general</span>{page === 'dashboard' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'orders' ? 'active' : ''}`} onClick={() => setPage('orders')}><Icon name="bolt"/><span>Órdenes públicas</span>{page === 'orders' && <span className="nav-active-mark"/>}</button>
+        <button className={`nav-item ${page === 'mediation' ? 'active' : ''}`} onClick={() => setPage('mediation')}><Icon name="shield"/><span>Mediación</span>{page === 'mediation' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'simulation' ? 'active' : ''}`} onClick={() => setPage('simulation')}><Icon name="play"/><span>Simulador P2P</span>{page === 'simulation' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'config' ? 'active' : ''}`} onClick={() => setPage('config')}><Icon name="sliders"/><span>Configuración</span>{page === 'config' && <span className="nav-active-mark"/>}</button>
       </nav>
@@ -497,7 +877,7 @@ function App() {
       <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>Modo desarrollo</b><span>Mercado sin iniciar</span></div><span className="mode-dot"/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'orders' ? 'Órdenes públicas' : page === 'simulation' ? 'Simulador P2P' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
+      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'orders' ? 'Órdenes públicas' : page === 'mediation' ? 'Consola de mediación' : page === 'simulation' ? 'Simulador P2P' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir mediación" onClick={() => setPage('mediation')}><Icon name="shield" size={17}/></button><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
       {page === 'dashboard' && (
         <section className="content dashboard-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div>
@@ -886,7 +1266,20 @@ function App() {
           </div>
         </section>
       )}
-      {page === 'orders' && <OrdersPage />}
+      {page === 'orders' && (
+        <OrdersPage
+          onSelectDispute={(orderId) => {
+            setSelectedDisputeOrderId(orderId);
+            setPage('mediation');
+          }}
+        />
+      )}
+      {page === 'mediation' && (
+        <MediationConsole
+          initialOrderId={selectedDisputeOrderId}
+          onSelectOrder={(orderId) => setSelectedDisputeOrderId(orderId)}
+        />
+      )}
       {page === 'config' && <section className="content config-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span><button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
         <div className="config-layout"><nav className="config-nav"><a href="#identity">Identidad</a><a href="#market">Mercado</a><a href="#safety">Seguridad</a><a href="#nostr">Nostr</a><a href="#payments">Métodos de pago</a></nav>

@@ -116,29 +116,43 @@ pub fn calculate_financials(
     // round(X / 20000) = (X + 10000) / 20000
     let fee_bps_u128 = config.market.fee_bps as u128;
     let trade_sats_u128 = trade_sats as u128;
-    let fee_per_side_sats = ((trade_sats_u128
-        .saturating_mul(fee_bps_u128)
-        .saturating_add(10_000))
-        / 20_000) as u64;
+
+    // Checked arithmetic without silent overflow
+    let fee_per_side_sats = trade_sats_u128
+        .checked_mul(fee_bps_u128)
+        .unwrap_or(0)
+        .checked_add(10_000)
+        .unwrap_or(0)
+        .checked_div(20_000)
+        .unwrap_or(0) as u64;
 
     // Real total fee retained by Mostro node is exactly 2 * fee_per_side
-    let total_mostro_fee_sats = fee_per_side_sats.saturating_mul(2);
+    let total_mostro_fee_sats = fee_per_side_sats.checked_mul(2).unwrap_or(0);
 
-    // Upstream dev_fee is a share of the total Mostro fee collected:
-    // dev_fee = (total_mostro_fee as f64) * percentage; dev_fee.round() as i64
+    // Dev fee is calculated/rounded on the real total fee (participation)
     let dev_fee_bps_u128 = config.market.dev_fee_bps as u128;
-    let dev_fee_sats = (((total_mostro_fee_sats as u128)
-        .saturating_mul(dev_fee_bps_u128)
-        .saturating_add(5_000))
-        / 10_000) as u64;
+    let dev_fee_sats = (total_mostro_fee_sats as u128)
+        .checked_mul(dev_fee_bps_u128)
+        .unwrap_or(0)
+        .checked_add(5_000)
+        .unwrap_or(0)
+        .checked_div(10_000)
+        .unwrap_or(0) as u64;
 
     let bond_sats = if config.safety.bond_enabled {
         let bond_bps_u128 = config.safety.bond_bps as u128;
-        let variable_bond = ((trade_sats_u128
-            .saturating_mul(bond_bps_u128)
-            .saturating_add(5_000))
-            / 10_000) as u64;
-        config.safety.base_bond_sats.saturating_add(variable_bond)
+        let variable_bond = trade_sats_u128
+            .checked_mul(bond_bps_u128)
+            .unwrap_or(0)
+            .checked_add(5_000)
+            .unwrap_or(0)
+            .checked_div(10_000)
+            .unwrap_or(0) as u64;
+        config
+            .safety
+            .base_bond_sats
+            .checked_add(variable_bond)
+            .unwrap_or(0)
     } else {
         0
     };

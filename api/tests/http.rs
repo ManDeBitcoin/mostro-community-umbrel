@@ -20,6 +20,9 @@ fn setup() -> (tempfile::TempDir, axum::Router) {
         orders: Arc::new(tokio::sync::RwLock::new(
             mostro_community_api::orders::OrdersCache::new(),
         )),
+        chat: Arc::new(tokio::sync::RwLock::new(
+            mostro_community_api::chat::ChatCache::new(),
+        )),
         monitor_tx: tx,
     });
     (dir, app)

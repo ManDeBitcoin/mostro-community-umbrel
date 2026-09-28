@@ -172,6 +172,16 @@ pub(crate) fn read_private(root: &Path) -> Result<Option<Zeroizing<String>>, &'s
     Ok(Some(contents))
 }
 
+/// Safely load the full keypair only for local cryptographic operations (such as chat decryption).
+/// Secret material is never exposed over HTTP or in logs.
+pub fn load_identity_keys(root: &Path) -> Result<Option<Keys>, &'static str> {
+    let Some(contents) = read_private(root)? else {
+        return Ok(None);
+    };
+    let secret = SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
+    Ok(Some(Keys::new(secret)))
+}
+
 /// Read the public key sidecar safely without reading or exposing nsec.
 /// Validates permissions (0600 on file, 0700 on dir), rejects symlinks,
 /// and validates npub format before returning. Falls back to MOSTRO_PUBLIC_KEY env var if file is absent.
