@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Prepara tu comunidad P2P con Mostro
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.11
+version: 0.1.0-preview.12
 port: 5173
 description: >-
   Vista previa del panel administrativo de comunidades Mostro.
@@ -26,9 +26,8 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Módulo 2: Simulador interactivo del ciclo completo P2P (Happy Path, disputas
-  y cancelaciones), cálculo exacto de bonds y comisiones, eventos Nostr Kind 4/38383,
-  Hold Invoices Lightning, vista interactiva en dashboard y fixture Docker Regtest.
+  Módulo 3A: Monitor de órdenes públicas y cálculo corregido de simulador.
+  Se implementó un monitor WebSocket de solo lectura en la interfaz para mostrar las órdenes públicas Nostr del nodo en tiempo real, resolviendo estados dinámicos. Corrección de aritmética del simulador para el exacto 50/50 split de comisiones Mostro.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
 
