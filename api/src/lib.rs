@@ -5,6 +5,7 @@ pub mod connection;
 pub mod daemon;
 pub mod identity;
 pub mod lnd;
+pub mod orders;
 pub mod preflight;
 pub mod simulation;
 pub mod staging;
@@ -18,7 +19,7 @@ use axum::{
     routing::{get, post, put},
 };
 use config::Configuration;
-use nostr::ToBech32;
+use orders::SharedOrders;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,8 @@ use store::{Document, Store};
 pub struct AppState {
     pub store: Arc<Mutex<Store>>,
     pub integrations: Integrations,
+    pub orders: SharedOrders,
+    pub monitor_tx: tokio::sync::watch::Sender<orders::MonitorCommand>,
 }
 type Error = (StatusCode, Json<Value>);
 fn error(status: StatusCode, message: &str) -> Error {
@@ -49,6 +52,7 @@ pub fn router(state: AppState) -> Router {
             get(simulation_scenarios_handler),
         )
         .route("/api/simulation/run", post(simulation_run_handler))
+        .route("/api/orders", get(orders::get_orders_handler))
         .route(
             "/api/{*path}",
             get(|| async { error(StatusCode::NOT_FOUND, "Endpoint no disponible") }),
@@ -92,11 +96,7 @@ async fn daemon_status_handler(
     Ok(Json(daemon::report(&root, &state.integrations).await))
 }
 
-async fn daemon_activate_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    payload: Option<Json<ActivateDaemonRequest>>,
-) -> Result<Json<daemon::ActivationResult>, Error> {
+fn verify_protection(headers: &HeaderMap) -> Result<(), Error> {
     if headers
         .get("x-requested-with")
         .and_then(|v| v.to_str().ok())
@@ -107,6 +107,32 @@ async fn daemon_activate_handler(
             "Falta protección de solicitud",
         ));
     }
+    if let Some(origin) = headers.get("origin") {
+        let host = headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let permitted = origin
+            .to_str()
+            .ok()
+            .and_then(|s| url::Url::parse(s).ok())
+            .is_some_and(|u| {
+                ["http", "https"].contains(&u.scheme())
+                    && u[url::Position::BeforeHost..url::Position::AfterPort] == *host
+            });
+        if !permitted {
+            return Err(error(StatusCode::FORBIDDEN, "Origen no permitido"));
+        }
+    }
+    Ok(())
+}
+
+async fn daemon_activate_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Option<Json<ActivateDaemonRequest>>,
+) -> Result<Json<daemon::ActivationResult>, Error> {
+    verify_protection(&headers)?;
     let root = state
         .store
         .lock()
@@ -136,16 +162,7 @@ async fn daemon_deactivate_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
-    if headers
-        .get("x-requested-with")
-        .and_then(|v| v.to_str().ok())
-        != Some("mostro-community")
-    {
-        return Err(error(
-            StatusCode::FORBIDDEN,
-            "Falta protección de solicitud",
-        ));
-    }
+    verify_protection(&headers)?;
     let root = state
         .store
         .lock()
@@ -163,6 +180,7 @@ async fn daemon_deactivate_handler(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulationRunRequest {
     pub scenario: Option<simulation::SimulationScenario>,
     pub trade_sats: Option<u64>,
@@ -174,28 +192,28 @@ async fn simulation_scenarios_handler() -> Json<Value> {
             "id": "happy_path",
             "label": "Intercambio Completo Exitoso (Happy Path)",
             "name": "Intercambio Completo Exitoso (Happy Path)",
-            "description": "Vendedor publica orden de venta, comprador acepta, bloquean garantías, se transfiere fiat y se liberan los satoshis.",
+            "description": "Modelo sintético de orden de venta, aceptación, bloqueo de fianza/garantía, transferencia fiat simulada y liberación de satoshis.",
             "is_default": true
         },
         {
             "id": "dispute_settled_for_buyer",
             "label": "Disputa Resuelta a Favor del Comprador",
             "name": "Disputa Resuelta a Favor del Comprador",
-            "description": "Vendedor abre disputa alegando no recibir fondos; el mediador verifica comprobante bancario legítimo y liquida al comprador.",
+            "description": "Modelo sintético donde el mediador valida comprobante de pago legítimo y liquida la garantía al comprador.",
             "is_default": false
         },
         {
             "id": "dispute_refunded_to_seller",
             "label": "Disputa Resuelta con Devolución al Vendedor",
             "name": "Disputa Resuelta con Devolución al Vendedor",
-            "description": "Comprador marcó envío fiat falso; el mediador confirma falta de pago y devuelve los satoshis al vendedor.",
+            "description": "Modelo sintético donde el mediador confirma falta de pago fiat y devuelve los satoshis al vendedor.",
             "is_default": false
         },
         {
             "id": "seller_cancellation",
             "label": "Cancelación Previa por el Vendedor",
             "name": "Cancelación Previa por el Vendedor",
-            "description": "Vendedor publica orden pero la cancela voluntariamente antes de ser tomada; la Hold Invoice se anula sin penalización.",
+            "description": "Modelo sintético donde el vendedor cancela su orden antes de ser tomada, anulando la Hold Invoice sin penalizaciones.",
             "is_default": false
         }
     ]))
@@ -204,16 +222,34 @@ async fn simulation_scenarios_handler() -> Json<Value> {
 async fn simulation_run_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    payload: Option<Json<SimulationRunRequest>>,
+    body: axum::body::Bytes,
 ) -> Result<Json<simulation::SimulationReport>, Error> {
-    if headers
-        .get("x-requested-with")
-        .and_then(|v| v.to_str().ok())
-        != Some("mostro-community")
-    {
+    verify_protection(&headers)?;
+
+    let payload: Option<SimulationRunRequest> = if body.is_empty() {
+        None
+    } else {
+        Some(serde_json::from_slice(&body).map_err(|e| {
+            error(
+                StatusCode::BAD_REQUEST,
+                &format!("Cuerpo de solicitud inválido: {e}"),
+            )
+        })?)
+    };
+
+    let (scenario, trade_sats) = match payload {
+        Some(p) => (
+            p.scenario
+                .unwrap_or(simulation::SimulationScenario::HappyPath),
+            p.trade_sats,
+        ),
+        None => (simulation::SimulationScenario::HappyPath, None),
+    };
+
+    if let Some(0) = trade_sats {
         return Err(error(
-            StatusCode::FORBIDDEN,
-            "Falta protección de solicitud",
+            StatusCode::BAD_REQUEST,
+            "Monto de intercambio debe ser mayor a cero",
         ));
     }
 
@@ -224,21 +260,6 @@ async fn simulation_run_handler(
         )
     })?;
 
-    let root = store.root().to_path_buf();
-    let npub: Option<String> = identity::inspect_public_key(&root)
-        .ok()
-        .flatten()
-        .and_then(|k| k.to_bech32().ok());
-
-    let (scenario, trade_sats) = match payload {
-        Some(Json(p)) => (
-            p.scenario
-                .unwrap_or(simulation::SimulationScenario::HappyPath),
-            p.trade_sats,
-        ),
-        None => (simulation::SimulationScenario::HappyPath, None),
-    };
-
     let config = store.document.config.as_ref().ok_or_else(|| {
         error(
             StatusCode::BAD_REQUEST,
@@ -246,7 +267,8 @@ async fn simulation_run_handler(
         )
     })?;
 
-    simulation::run_simulation(config, npub.as_deref(), scenario, trade_sats)
+    // Synthetic dry-run: never reads mostro.nsec or macaroons
+    simulation::run_simulation(config, None, scenario, trade_sats)
         .map(Json)
         .map_err(|e| error(StatusCode::BAD_REQUEST, e))
 }
@@ -279,53 +301,41 @@ async fn save_community(
     Json(request): Json<SaveRequest>,
 ) -> Result<Json<Document>, Error> {
     // Custom header + no CORS: browsers must pass same-origin preflight before mutation.
-    if headers
-        .get("x-requested-with")
-        .and_then(|v| v.to_str().ok())
-        != Some("mostro-community")
-    {
-        return Err(error(
-            StatusCode::FORBIDDEN,
-            "Falta protección de solicitud",
-        ));
-    }
-    if let Some(origin) = headers.get("origin") {
-        let host = headers
-            .get("host")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let permitted = origin
-            .to_str()
-            .ok()
-            .and_then(|s| url::Url::parse(s).ok())
-            .is_some_and(|u| {
-                ["http", "https"].contains(&u.scheme())
-                    && u[url::Position::BeforeHost..url::Position::AfterPort] == *host
-            });
-        if !permitted {
-            return Err(error(StatusCode::FORBIDDEN, "Origen no permitido"));
-        }
-    }
+    verify_protection(&headers)?;
     request
         .config
         .validate()
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    let mut store = state.store.lock().map_err(|_| {
-        error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Almacenamiento no disponible",
-        )
-    })?;
-    if request.revision != store.document.revision {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "La configuración cambió; recarga antes de guardar",
-        ));
+    let (result, root) = {
+        let mut store = state.store.lock().map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?;
+        if request.revision != store.document.revision {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "La configuración cambió; recarga antes de guardar",
+            ));
+        }
+        let root = store.root.clone();
+        let save_res = store.save(request.config.clone()).map(Json).map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No se pudo guardar la configuración",
+            )
+        });
+        (save_res, root)
+    };
+
+    if result.is_ok() {
+        let npub = identity::read_public_key(&root).ok().flatten();
+        let _ = state.monitor_tx.send(orders::MonitorCommand {
+            config: request.config,
+            npub,
+        });
     }
-    store.save(request.config).map(Json).map_err(|_| {
-        error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "No se pudo guardar la configuración",
-        )
-    })
+
+    result
 }

@@ -61,10 +61,26 @@ pub struct FinancialBreakdown {
     pub fiat_amount: String,
     pub seller_bond_sats: u64,
     pub buyer_bond_sats: u64,
+    pub total_mostro_fee_sats: u64,
+    pub fee_per_side_sats: u64,
+    pub dev_fee_sats: u64,
+    #[serde(default)]
     pub fee_sats: u64,
     pub seller_total_locked_sats: u64,
     pub buyer_total_locked_sats: u64,
 }
+
+pub const SYNTHETIC_BOT_NPUB: &str =
+    "npub1synthet1c0mostro0bot0community0dryrun000000000000000000000000";
+pub const SYNTHETIC_SELLER_NPUB: &str =
+    "npub1synthet1c0seller00000000000000000000000000000000000000000001";
+pub const SYNTHETIC_BUYER_NPUB: &str =
+    "npub1synthet1c0buyer000000000000000000000000000000000000000000002";
+pub const SYNTHETIC_SOLVER_NPUB: &str =
+    "npub1synthet1c0solver00000000000000000000000000000000000000000003";
+
+pub const SIMULATION_MODE_LABEL: &str = "synthetic_dry_run";
+pub const SIMULATION_DISCLAIMER: &str = "Simulación sintética en memoria: no ejecuta regtest ni interactúa con nodos Bitcoin/Lightning o relays Nostr reales; eventos y transacciones son modelos para verificación previa; equivalencia fiat referencial sin oráculo en tiempo real; no valida conformidad de cliente upstream.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SimulationReport {
@@ -78,6 +94,8 @@ pub struct SimulationReport {
     pub is_success: bool,
     pub duration_simulated_ms: u64,
     pub timestamp_unix: u64,
+    pub simulation_mode: String,
+    pub disclaimer: String,
 }
 
 fn hash_hex(input: &str) -> String {
@@ -92,12 +110,35 @@ pub fn calculate_financials(
     fiat_code: &str,
     fiat_amount: &str,
 ) -> FinancialBreakdown {
-    let fee_sats = (trade_sats.saturating_mul(config.market.fee_bps as u64)) / 10_000;
+    // Upstream Mostro v0.18.8 src/util.rs calculates:
+    // split_fee = (mostro_settings.fee * amount as f64) / 2.0; split_fee.round() as i64
+    // Using checked u128 integer arithmetic with exact rounding:
+    // round(X / 20000) = (X + 10000) / 20000
+    let fee_bps_u128 = config.market.fee_bps as u128;
+    let trade_sats_u128 = trade_sats as u128;
+    let fee_per_side_sats = ((trade_sats_u128
+        .saturating_mul(fee_bps_u128)
+        .saturating_add(10_000))
+        / 20_000) as u64;
+
+    // Real total fee retained by Mostro node is exactly 2 * fee_per_side
+    let total_mostro_fee_sats = fee_per_side_sats.saturating_mul(2);
+
+    // Upstream dev_fee is a share of the total Mostro fee collected:
+    // dev_fee = (total_mostro_fee as f64) * percentage; dev_fee.round() as i64
+    let dev_fee_bps_u128 = config.market.dev_fee_bps as u128;
+    let dev_fee_sats = (((total_mostro_fee_sats as u128)
+        .saturating_mul(dev_fee_bps_u128)
+        .saturating_add(5_000))
+        / 10_000) as u64;
+
     let bond_sats = if config.safety.bond_enabled {
-        config
-            .safety
-            .base_bond_sats
-            .saturating_add((trade_sats.saturating_mul(config.safety.bond_bps as u64)) / 10_000)
+        let bond_bps_u128 = config.safety.bond_bps as u128;
+        let variable_bond = ((trade_sats_u128
+            .saturating_mul(bond_bps_u128)
+            .saturating_add(5_000))
+            / 10_000) as u64;
+        config.safety.base_bond_sats.saturating_add(variable_bond)
     } else {
         0
     };
@@ -110,8 +151,8 @@ pub fn calculate_financials(
 
     let seller_total_locked = trade_sats
         .saturating_add(seller_bond)
-        .saturating_add(fee_sats);
-    let buyer_total_locked = buyer_bond.saturating_add(fee_sats);
+        .saturating_add(fee_per_side_sats);
+    let buyer_total_locked = buyer_bond.saturating_add(fee_per_side_sats);
 
     FinancialBreakdown {
         trade_amount_sats: trade_sats,
@@ -119,7 +160,10 @@ pub fn calculate_financials(
         fiat_amount: fiat_amount.to_string(),
         seller_bond_sats: seller_bond,
         buyer_bond_sats: buyer_bond,
-        fee_sats,
+        total_mostro_fee_sats,
+        fee_per_side_sats,
+        dev_fee_sats,
+        fee_sats: total_mostro_fee_sats,
         seller_total_locked_sats: seller_total_locked,
         buyer_total_locked_sats: buyer_total_locked,
     }
@@ -136,7 +180,7 @@ pub fn run_simulation(
 
     let trade_sats = match custom_trade_sats {
         Some(sats) => {
-            if sats < min_sats || sats > max_sats {
+            if sats == 0 || sats < min_sats || sats > max_sats {
                 return Err("Monto de intercambio fuera de los límites de la comunidad");
             }
             sats
@@ -173,11 +217,10 @@ pub fn run_simulation(
 
     let financials = calculate_financials(config, trade_sats, fiat_code, fiat_amount);
 
-    let bot =
-        bot_npub.unwrap_or("npub1mostrocommunitysimulatedbot000000000000000000000000000000000");
-    let seller_npub = "npub1seller00000000000000000000000000000000000000000000000000000001";
-    let buyer_npub = "npub1buyer000000000000000000000000000000000000000000000000000000002";
-    let solver_npub = "npub1solver00000000000000000000000000000000000000000000000000000003";
+    let bot = bot_npub.unwrap_or(SYNTHETIC_BOT_NPUB);
+    let seller_npub = SYNTHETIC_SELLER_NPUB;
+    let buyer_npub = SYNTHETIC_BUYER_NPUB;
+    let solver_npub = SYNTHETIC_SOLVER_NPUB;
 
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -230,11 +273,11 @@ pub fn run_simulation(
         actor: Actor::Mostro,
         order_status: "waiting_payment".into(),
         description: format!(
-            "Mostro genera Hold Invoice de {} sats ({} trade + {} fianza + {} fee). Vendedor la paga para activar la orden.",
+            "Mostro genera Hold Invoice de {} sats ({} trade + {} fianza + {} fee/2). Vendedor la paga para activar la orden.",
             financials.seller_total_locked_sats,
             financials.trade_amount_sats,
             financials.seller_bond_sats,
-            financials.fee_sats
+            financials.fee_per_side_sats
         ),
         nostr_event: Some(NostrEventSummary {
             kind: 4,
@@ -310,6 +353,8 @@ pub fn run_simulation(
             is_success: true,
             duration_simulated_ms: 1250,
             timestamp_unix: now_unix,
+            simulation_mode: SIMULATION_MODE_LABEL.into(),
+            disclaimer: SIMULATION_DISCLAIMER.into(),
         });
     }
 
@@ -343,8 +388,10 @@ pub fn run_simulation(
         actor: Actor::Buyer,
         order_status: "waiting_buyer_invoice".into(),
         description: format!(
-            "El comprador paga la factura de fianza ({} sats bond + {} fee = {} sats total).",
-            financials.buyer_bond_sats, financials.fee_sats, financials.buyer_total_locked_sats
+            "El comprador paga la factura de fianza ({} sats bond + {} fee/2 = {} sats total).",
+            financials.buyer_bond_sats,
+            financials.fee_per_side_sats,
+            financials.buyer_total_locked_sats
         ),
         nostr_event: Some(NostrEventSummary {
             kind: 4,
@@ -449,11 +496,12 @@ pub fn run_simulation(
                 actor: Actor::Mostro,
                 order_status: "success".into(),
                 description: format!(
-                    "Mostro paga {} sats a la factura del comprador, devuelve {} sats de fianza al vendedor y {} sats al comprador. Comisión de {} sats recaudada.",
+                    "Mostro paga {} sats a la factura del comprador, devuelve {} sats de fianza al vendedor y {} sats al comprador. Comisión de {} sats recaudada (Dev fee: {} sats).",
                     financials.trade_amount_sats,
                     financials.seller_bond_sats,
                     financials.buyer_bond_sats,
-                    financials.fee_sats.saturating_mul(2)
+                    financials.total_mostro_fee_sats,
+                    financials.dev_fee_sats
                 ),
                 nostr_event: Some(NostrEventSummary {
                     kind: 38383,
@@ -481,6 +529,8 @@ pub fn run_simulation(
                 is_success: true,
                 duration_simulated_ms: 2400,
                 timestamp_unix: now_unix,
+                simulation_mode: SIMULATION_MODE_LABEL.into(),
+                disclaimer: SIMULATION_DISCLAIMER.into(),
             })
         }
         SimulationScenario::DisputeSettledForBuyer => {
@@ -563,6 +613,8 @@ pub fn run_simulation(
                 is_success: true,
                 duration_simulated_ms: 3800,
                 timestamp_unix: now_unix,
+                simulation_mode: SIMULATION_MODE_LABEL.into(),
+                disclaimer: SIMULATION_DISCLAIMER.into(),
             })
         }
         SimulationScenario::DisputeRefundedToSeller => {
@@ -607,6 +659,26 @@ pub fn run_simulation(
                     status: "CANCELED".into(),
                 }),
             });
+            step_count += 1;
+
+            steps.push(SimulationStep {
+                step_number: step_count,
+                action_code: "buyer_bond_slashed".into(),
+                title: "Ejecución de Penalización de Fianza del Comprador".into(),
+                actor: Actor::Mostro,
+                order_status: "canceled".into(),
+                description: format!(
+                    "Mostro ejecuta la penalización dictada por el mediador: liquida la factura de fianza del comprador ({} sats) reteniendo los fondos por incumplimiento.",
+                    financials.buyer_total_locked_sats
+                ),
+                nostr_event: None,
+                lightning_action: Some(LightningActionSummary {
+                    action: "BuyerBondHoldInvoiceSettled".into(),
+                    amount_sats: financials.buyer_total_locked_sats,
+                    payment_hash: buyer_hash,
+                    status: "SETTLED".into(),
+                }),
+            });
 
             Ok(SimulationReport {
                 scenario,
@@ -619,8 +691,75 @@ pub fn run_simulation(
                 is_success: true,
                 duration_simulated_ms: 3600,
                 timestamp_unix: now_unix,
+                simulation_mode: SIMULATION_MODE_LABEL.into(),
+                disclaimer: SIMULATION_DISCLAIMER.into(),
             })
         }
         SimulationScenario::SellerCancellation => unreachable!(),
     }
+}
+
+/// Runs a simulation invoked via CLI, performing strict validation on all arguments.
+/// Never defaults silently when explicit invalid scenarios or amounts are supplied.
+pub fn run_cli_simulation(
+    root: &std::path::Path,
+    args: &[String],
+) -> Result<SimulationReport, String> {
+    if args.len() > 2 {
+        return Err(
+            "Demasiados argumentos para simulate-trade. Uso: simulate-trade [escenario] [sats]"
+                .into(),
+        );
+    }
+
+    let scenario = if args.is_empty() {
+        SimulationScenario::HappyPath
+    } else {
+        match args[0].as_str() {
+            "happy-path" | "happy_path" => SimulationScenario::HappyPath,
+            "dispute-buyer" | "dispute_settled_for_buyer" => {
+                SimulationScenario::DisputeSettledForBuyer
+            }
+            "dispute-seller" | "dispute_refunded_to_seller" => {
+                SimulationScenario::DisputeRefundedToSeller
+            }
+            "cancel" | "seller_cancellation" => SimulationScenario::SellerCancellation,
+            other => {
+                return Err(format!(
+                    "Escenario de simulación no válido: '{other}'. Escenarios soportados: happy-path, dispute-buyer, dispute-seller, cancel"
+                ));
+            }
+        }
+    };
+
+    let store = crate::store::Store::open(root.to_path_buf())
+        .map_err(|e| format!("Error al abrir almacenamiento: {e}"))?;
+    let config = store
+        .document
+        .config
+        .as_ref()
+        .ok_or_else(|| "Falta configurar la comunidad antes de simular".to_string())?;
+
+    let custom_trade_sats = if args.len() == 2 {
+        let raw = &args[1];
+        let sats: u64 = raw.parse::<u64>().map_err(|_| {
+            format!(
+                "Monto de intercambio inválido: '{raw}'. Debe ser un número entero de satoshis positivo sin decimales ni desbordamiento"
+            )
+        })?;
+        if sats == 0 {
+            return Err("Monto de intercambio inválido: debe ser mayor a cero".into());
+        }
+        if sats < config.market.min_trade_sats || sats > config.market.max_trade_sats {
+            return Err(format!(
+                "Monto de intercambio {sats} sats fuera de los límites de la comunidad (mínimo: {}, máximo: {})",
+                config.market.min_trade_sats, config.market.max_trade_sats
+            ));
+        }
+        Some(sats)
+    } else {
+        None
+    };
+
+    run_simulation(config, None, scenario, custom_trade_sats).map_err(|e| e.to_string())
 }

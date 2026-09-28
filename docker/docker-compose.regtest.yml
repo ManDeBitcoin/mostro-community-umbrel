@@ -1,3 +1,7 @@
+# Fixture Docker Compose para entorno Regtest aislado (Bitcoin Core + LND + Nostr relay).
+# NOTA: Este entorno fixture se conserva para pruebas futuras de integración con daemons reales.
+# El simulador actual del Manager opera en modo SINTÉTICO (dry-run en memoria) y NO ejecuta
+# transacciones sobre estos contenedores de manera interactiva (ciclo regtest en vivo pendiente).
 services:
   bitcoind:
     image: ruimarinho/bitcoin-core:26

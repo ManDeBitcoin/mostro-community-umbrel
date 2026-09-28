@@ -67,10 +67,59 @@ pub fn import(root: &Path, nsec: &str, expected_npub: &str) -> Result<String, &'
     temporary
         .persist_noclobber(directory.join("mostro.nsec"))
         .map_err(|_| "No se guardó: ya existe una identidad o no se puede escribir")?;
+
+    let mut temp_pub = tempfile::NamedTempFile::new_in(&directory)
+        .map_err(|_| "No se pudo preparar el archivo público")?;
+    temp_pub
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| "No se pudieron establecer los permisos públicos")?;
+    temp_pub
+        .write_all(npub.as_bytes())
+        .map_err(|_| "No se pudo escribir la identidad pública")?;
+    temp_pub
+        .as_file()
+        .sync_all()
+        .map_err(|_| "No se pudo sincronizar la identidad pública")?;
+    let _ = temp_pub.persist_noclobber(directory.join("mostro.pub")); // Ignoramos error si ya existe
+
     File::open(&directory).and_then(|f| f.sync_all()).map_err(
         |_| "Identidad guardada; no se pudo sincronizar el directorio. No repetir la importación",
     )?;
     Ok(npub)
+}
+
+/// Atomically writes mostro.pub with mode 0600 without touching or requiring mostro.nsec.
+pub fn persist_public_key(root: &Path, npub: &str) -> Result<(), &'static str> {
+    PublicKey::from_bech32(npub).map_err(|_| "Clave pública inválida")?;
+    let directory = root.join("identity");
+    if !directory.is_dir() {
+        return Err("Directorio de identidad no existe");
+    }
+    let metadata = fs::symlink_metadata(&directory).map_err(|_| "Directorio no disponible")?;
+    if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err("El directorio de identidad debe ser privado (0700) y no un enlace");
+    }
+    let mut temp_pub = tempfile::NamedTempFile::new_in(&directory)
+        .map_err(|_| "No se pudo preparar el archivo público")?;
+    temp_pub
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| "No se pudieron establecer los permisos públicos")?;
+    temp_pub
+        .write_all(npub.as_bytes())
+        .map_err(|_| "No se pudo escribir la identidad pública")?;
+    temp_pub
+        .as_file()
+        .sync_all()
+        .map_err(|_| "No se pudo sincronizar la identidad pública")?;
+    temp_pub
+        .persist_noclobber(directory.join("mostro.pub"))
+        .map_err(|_| "Ya existe mostro.pub o no se puede escribir")?;
+    File::open(&directory)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| "Identidad pública guardada; no se pudo sincronizar el directorio")?;
+    Ok(())
 }
 
 pub fn import_interactive() -> Result<(), &'static str> {
@@ -121,6 +170,59 @@ pub(crate) fn read_private(root: &Path) -> Result<Option<Zeroizing<String>>, &'s
         Zeroizing::new(fs::read_to_string(&file).map_err(|_| "No se pudo leer la identidad")?);
     SecretKey::from_bech32(contents.trim()).map_err(|_| "Identidad inválida")?;
     Ok(Some(contents))
+}
+
+/// Read the public key sidecar safely without reading or exposing nsec.
+/// Validates permissions (0600 on file, 0700 on dir), rejects symlinks,
+/// and validates npub format before returning. Falls back to MOSTRO_PUBLIC_KEY env var if file is absent.
+pub fn read_public_key(root: &Path) -> Result<Option<String>, &'static str> {
+    let directory = root.join("identity");
+    let dir_meta = match fs::symlink_metadata(&directory) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return read_public_key_from_env();
+        }
+        Err(_) => return Err("Directorio de identidad no disponible"),
+    };
+    if !dir_meta.is_dir() || dir_meta.permissions().mode() & 0o077 != 0 {
+        return Err("Directorio de identidad no privado");
+    }
+
+    let file = directory.join("mostro.pub");
+    let metadata = match fs::symlink_metadata(&file) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return read_public_key_from_env();
+        }
+        Err(_) => return Err("Archivo de identidad pública no disponible"),
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.permissions().mode() & 0o077 != 0
+        || metadata.len() > 256
+    {
+        return Err("Archivo de identidad pública no privado o no válido");
+    }
+    let content = fs::read_to_string(&file).map_err(|_| "No se pudo leer la clave pública")?;
+    let trimmed = content.trim();
+    PublicKey::from_bech32(trimmed).map_err(|_| "Contenido de mostro.pub no es un npub válido")?;
+    Ok(Some(trimmed.to_string()))
+}
+
+fn read_public_key_from_env() -> Result<Option<String>, &'static str> {
+    if let Ok(env_pub) =
+        std::env::var("MOSTRO_PUBLIC_KEY").or_else(|_| std::env::var("MOSTRO_PUBKEY"))
+    {
+        let trimmed = env_pub.trim();
+        if !trimmed.is_empty() {
+            if PublicKey::from_bech32(trimmed).is_ok() {
+                return Ok(Some(trimmed.to_string()));
+            } else {
+                return Err("Variable de entorno MOSTRO_PUBLIC_KEY contiene un npub inválido");
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Read only the imported identity's public key object.
@@ -174,7 +276,7 @@ mod tests {
         let (other_secret, other_public) = fixture(2);
         assert!(import(root.path(), &other_secret, &other_public).is_err());
         assert_eq!(fs::read_to_string(path).unwrap(), secret);
-        assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 2);
     }
     #[test]
     fn rejects_symlink_and_world_readable_directory() {
@@ -189,5 +291,29 @@ mod tests {
         fs::create_dir(&path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(import(root.path(), &secret, &public).is_err());
+    }
+    #[test]
+    fn read_public_key_enforces_permissions_and_rejects_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let (secret, public) = fixture(1);
+        import(root.path(), &secret, &public).unwrap();
+        let pub_path = root.path().join("identity/mostro.pub");
+        assert_eq!(fs::metadata(&pub_path).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(read_public_key(root.path()).unwrap(), Some(public.clone()));
+
+        // Non-private permissions rejected
+        fs::set_permissions(&pub_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_public_key(root.path()).is_err());
+
+        // Restore permissions
+        fs::set_permissions(&pub_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        // Symlink rejected
+        let other_dir = tempfile::tempdir().unwrap();
+        let dummy_pub = other_dir.path().join("dummy.pub");
+        fs::write(&dummy_pub, &public).unwrap();
+        fs::remove_file(&pub_path).unwrap();
+        std::os::unix::fs::symlink(&dummy_pub, &pub_path).unwrap();
+        assert!(read_public_key(root.path()).is_err());
     }
 }

@@ -106,4 +106,37 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
 - Fixture Docker Regtest (`docker/docker-compose.regtest.yml`): composición aislada para pruebas locales que integra Bitcoin Core 26 (regtest), Nostr RS Relay (puerto 7777), LND Alice (Mostro) y LND Bob (contraparte) en red bridge privada sin colisionar con Umbrel.
 - Smoke test automatizado (`scripts/regtest-smoke.sh`): ejecuta validación de Compose, las 4 simulaciones CLI, las 4 suites de tests Rust y el build de frontend en un único script reproducible.
 
+## Monitor de Órdenes Nostr de Solo Lectura y Auditoría de Comisiones (Módulo 3A) — Desarrollo Actual
+
+- **49 pruebas Rust automáticas aprobadas** (`cargo test --workspace --locked`):
+  - 11 unitarias en `src/lib.rs` (permisos y rechazo de symlinks en `mostro.pub`, validación de pares de claves, balances LND sin inventar ceros, túnel TCP bidireccional y backups cifrados).
+  - 4 de configuración (`tests/configuration.rs`).
+  - 2 de conexión e identidad (`tests/connection.rs`).
+  - 3 de orquestación del daemon (`tests/daemon.rs`).
+  - 13 de contratos HTTP (`tests/http.rs`), incluyendo no fuga de secretos en `GET /api/orders` y headers de protección.
+  - 7 de integración real WebSocket del monitor (`tests/orders.rs`) con relay local `tokio-tungstenite`: suscripción con autor HEX, filtros EOSE, pre-EOSE stale, desempate y reemplazo de eventos, tombstones de órdenes cerradas para evitar replay de eventos pendientes viejos, preservación de snapshot tras desconexión, failover multi-relay a estado degradado y canal `watch` de reconfiguración con limpieza selectiva.
+  - 7 de simulación matemática de comisiones y Hold Invoices (`tests/simulation.rs`): validación de 10,000 sats / 25 bps => 13 por parte y 26 total, casos cero/medio satélite/100M sats, y resolución explícita de facturas en disputas.
+  - 2 de staging (`tests/staging.rs`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 errores, 0 advertencias.
+- `cargo fmt --all -- --check`: formato verificado y limpio (código de salida 0).
+- `npm --prefix web run build`: compilación de TypeScript y Vite exitosa con 0 errores (código de salida 0).
+- Smoke test sintético (`scripts/simulation-smoke.sh`): validación sintáctica de Compose regtest, 4 simulaciones CLI con verificaciones estrictas de error ante montos negativos/cero/argumentos sobrantes, tests de integración y build web (código de salida 0).
+- **Prueba End-to-End con Playwright** (`scripts/playwright-smoke.cjs`):
+  - Servidor API Axum real sirviendo la distribución estática de Vite en puerto dinámico efímero.
+  - Relay WebSocket local simulado con `mostro-community-api mock-relay`.
+  - Navegación al Dashboard y ejecución del simulador rápido: comprobación de ausencia de `TypeError` en `total_mostro_fee_sats`.
+  - Navegación al Simulador P2P completo: ejecución y verificación de desglose financiero y trazabilidad por pasos.
+  - Navegación al Monitor de Órdenes: verificación del estado inicial vacío/desconectado.
+  - Reconfiguración dinámica en caliente vía API PUT con el relay local: verificación de suscripción en tiempo real y renderizado exacto de orden (250,000 sats, 100 EUR, estado `pending`).
+  - Verificación de filtros por tipo (`sell` vs `buy`) y estado de lista vacía filtrada.
+  - Comprobación de viewport móvil responsivo a 390px x 844px sin desbordamiento horizontal (`scrollWidth <= innerWidth`).
+  - 0 errores JavaScript de consola en toda la sesión del navegador (código de salida 0).
+- Registros reproducibles de salida y códigos de salida guardados en:
+  - `/tmp/mostro-final-fmt.log` (salida 0)
+  - `/tmp/mostro-final-clippy.log` (salida 0)
+  - `/tmp/mostro-final-tests.log` (salida 0)
+  - `/tmp/mostro-final-web.log` (salida 0)
+  - `/tmp/mostro-final-smoke.log` (salida 0)
+  - `/tmp/mostro-final-playwright.log` (salida 0)
+
 

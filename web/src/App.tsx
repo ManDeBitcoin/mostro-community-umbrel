@@ -88,7 +88,10 @@ type SimulationReport = {
     fiat_amount: string;
     seller_bond_sats: number;
     buyer_bond_sats: number;
-    fee_sats: number;
+    total_mostro_fee_sats: number;
+    fee_per_side_sats: number;
+    dev_fee_sats: number;
+    fee_sats?: number;
     seller_total_locked_sats: number;
     buyer_total_locked_sats: number;
   };
@@ -97,8 +100,40 @@ type SimulationReport = {
   is_success: boolean;
   duration_simulated_ms: number;
   timestamp_unix: number;
+  simulation_mode?: string;
+  disclaimer?: string;
 };
 type CommunityReply = { revision: number; config: Configuration | null };
+
+type OrderSummary = {
+  id: string;
+  event_id: string;
+  kind: string;
+  status: string;
+  fiat_code: string;
+  fiat_amount_range: string[];
+  amount_sats: number;
+  amount_sats_str?: string;
+  payment_methods: string[];
+  premium: number;
+  created_at: number;
+  expires_at: number | null;
+};
+
+type RelayStatus = {
+  url: string;
+  state: 'unconfigured' | 'connecting' | 'syncing' | 'live' | 'degraded' | 'disconnected';
+  last_error?: string | null;
+};
+
+type OrdersSnapshot = {
+  state: 'unconfigured' | 'connecting' | 'syncing' | 'live' | 'degraded' | 'disconnected';
+  is_stale: boolean;
+  last_update: number;
+  source_npub: string | null;
+  relays?: RelayStatus[];
+  orders: OrderSummary[];
+};
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
   market: { fiat_currencies: [], min_trade_sats: 1000, max_trade_sats: 1000000, fee_bps: 0, dev_fee_bps: 0, max_routing_fee_bps: 0 },
@@ -150,8 +185,163 @@ function ActorBadge({ actor }: { actor: string }) {
     default: return <span className="sim-actor-badge">{actor}</span>;
   }
 }
+function OrdersPage() {
+  const [snapshot, setSnapshot] = useState<OrdersSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filterKind, setFilterKind] = useState<'all' | 'buy' | 'sell'>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+
+  const fetchOrders = async () => {
+    try {
+      const data = await api<OrdersSnapshot>('/api/orders');
+      setSnapshot(data);
+    } catch (err) {
+      console.error("No se pudo cargar el monitor", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+    const intId = setInterval(fetchOrders, 3000);
+    return () => clearInterval(intId);
+  }, []);
+
+  if (loading && !snapshot) {
+    return <section className="content"><div className="page-heading"><h1>Órdenes públicas</h1></div><p>Cargando monitor...</p></section>;
+  }
+
+  if (!snapshot) {
+    return <section className="content"><div className="page-heading"><h1>Órdenes públicas</h1></div><p>Error al cargar el estado.</p></section>;
+  }
+
+  const { state, is_stale, last_update, source_npub, relays, orders } = snapshot;
+
+  const stateLabels: Record<string, string> = {
+    unconfigured: "Sin configurar (falta identidad pública o relays)",
+    connecting: "Conectando a relays...",
+    syncing: "Sincronizando eventos...",
+    live: "En vivo (sincronizado)",
+    degraded: "Degradado (al menos un relay activo, otros desconectados)",
+    disconnected: "Desconectado"
+  };
+
+  const filteredOrders = orders.filter((o) => {
+    if (filterKind !== 'all' && o.kind !== filterKind) return false;
+    if (filterStatus === 'pending' && o.status !== 'pending') return false;
+    if (filterStatus === 'closed' && !['canceled', 'success', 'completed', 'failed', 'expired'].includes(o.status)) return false;
+    if (filterStatus === 'dispute' && o.status !== 'dispute') return false;
+    return true;
+  });
+
+  return (
+    <section className="content">
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">MONITOR DE SOLO LECTURA · MÓDULO 3A</div>
+          <h1>Órdenes públicas</h1>
+          <p>Órdenes anunciadas en Nostr por la identidad {source_npub ? <code style={{wordBreak: "break-all"}}>{source_npub.slice(0, 15)}...</code> : "no configurada"}</p>
+        </div>
+      </div>
+      <div className="dev-banner">
+        <div className="banner-icon"><Icon name="alert" size={18}/></div>
+        <div>
+          <b>Aviso de Solo Lectura</b>
+          <span>Los eventos históricos presentados en este monitor no garantizan liquidez, confirmación de fondos ni que el daemon de Mostro esté en ejecución. Este panel no permite realizar pagos, tomar órdenes ni ejecutar arbitrajes.</span>
+        </div>
+      </div>
+      
+      <div className="section-title-row">
+        <div><h2>Estado de Conexión</h2><p>{stateLabels[state]}</p></div>
+        <span className="updated-label">
+          {is_stale ? "Datos retenidos (obsoletos)" : "Datos frescos"}
+          {last_update > 0 && ` (Última vez: ${new Date(last_update * 1000).toLocaleTimeString()})`}
+        </span>
+      </div>
+
+      {relays && relays.length > 0 && (
+        <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#88988e' }}>Relays:</span>
+          {relays.map((r) => (
+            <span key={r.url} className={`chip ${r.state === 'live' ? 'complete' : ''}`} style={{ fontSize: '11px', padding: '3px 8px' }}>
+              <StatusDot status={r.state === 'live' ? 'online' : r.state === 'connecting' || r.state === 'syncing' ? 'warning' : 'offline'} />
+              {r.url.replace(/^wss?:\/\//, '')} ({r.state})
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="sim-control-group" style={{ minWidth: '150px' }}>
+          <label>Tipo</label>
+          <select value={filterKind} onChange={(e) => setFilterKind(e.target.value as any)}>
+            <option value="all">Todos los tipos</option>
+            <option value="sell">Solo ventas</option>
+            <option value="buy">Solo compras</option>
+          </select>
+        </div>
+        <div className="sim-control-group" style={{ minWidth: '160px' }}>
+          <label>Estado</label>
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <option value="all">Todos los estados</option>
+            <option value="pending">Solo pendientes</option>
+            <option value="closed">Cerradas / Finalizadas</option>
+            <option value="dispute">En disputa</option>
+          </select>
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: '13px', color: '#88988e' }}>
+          <span>{filteredOrders.length} orden{filteredOrders.length === 1 ? '' : 'es'} mostrada{filteredOrders.length === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+
+      <div className="form-grid">
+        {state === 'unconfigured' ? (
+          <p className="empty-hint">El monitor no tiene un origen configurado. Si importaste una clave, recarga la configuración o define la identidad pública.</p>
+        ) : orders.length === 0 ? (
+          <p className="empty-hint">{state === 'syncing' ? "Esperando eventos confirmados (EOSE)..." : "No se encontraron órdenes publicadas para este autor."}</p>
+        ) : filteredOrders.length === 0 ? (
+          <p className="empty-hint">No hay órdenes que coincidan con los filtros seleccionados.</p>
+        ) : (
+          <div className="orders-table" style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Tabla de órdenes públicas">
+              <thead>
+                <tr>
+                  <th>UUID / Fecha</th>
+                  <th>Tipo</th>
+                  <th>Cantidad (Sats)</th>
+                  <th>Precio (Fiat)</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map(o => (
+                  <tr key={o.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <td style={{ padding: '8px 0' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
+                      <div style={{ fontSize: '11px', color: '#88988e' }}>{new Date(o.created_at * 1000).toLocaleString()}</div>
+                    </td>
+                    <td>{o.kind === 'sell' ? 'Venta' : 'Compra'}</td>
+                    <td>{o.amount_sats === 0 ? "Por rango" : `${o.amount_sats_str || o.amount_sats.toLocaleString()} sats`}</td>
+                    <td>
+                      {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} - ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0.00'} {o.fiat_code.toUpperCase()}
+                      <br/>
+                      <span style={{ fontSize: '11px', color: '#88988e' }}>{o.premium !== 0 ? `Premium: ${o.premium}%` : 'Precio de mercado'}</span>
+                    </td>
+                    <td><span className="sim-actor-badge">{o.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function App() {
-  const [page, setPage] = useState<'dashboard' | 'config' | 'simulation'>('dashboard');
+  const [page, setPage] = useState<'dashboard' | 'orders' | 'config' | 'simulation'>('dashboard');
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
   const [daemon, setDaemon] = useState<DaemonReport | null>(null);
@@ -299,6 +489,7 @@ function App() {
       <div className="nav-label">GENERAL</div>
       <nav className="nav-list" aria-label="Navegación principal">
         <button className={`nav-item ${page === 'dashboard' ? 'active' : ''}`} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Panel general</span>{page === 'dashboard' && <span className="nav-active-mark"/>}</button>
+        <button className={`nav-item ${page === 'orders' ? 'active' : ''}`} onClick={() => setPage('orders')}><Icon name="bolt"/><span>Órdenes públicas</span>{page === 'orders' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'simulation' ? 'active' : ''}`} onClick={() => setPage('simulation')}><Icon name="play"/><span>Simulador P2P</span>{page === 'simulation' && <span className="nav-active-mark"/>}</button>
         <button className={`nav-item ${page === 'config' ? 'active' : ''}`} onClick={() => setPage('config')}><Icon name="sliders"/><span>Configuración</span>{page === 'config' && <span className="nav-active-mark"/>}</button>
       </nav>
@@ -306,7 +497,7 @@ function App() {
       <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>Modo desarrollo</b><span>Mercado sin iniciar</span></div><span className="mode-dot"/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'simulation' ? 'Simulador P2P' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
+      <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'orders' ? 'Órdenes públicas' : page === 'simulation' ? 'Simulador P2P' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
       {page === 'dashboard' && (
         <section className="content dashboard-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div>
@@ -437,8 +628,8 @@ function App() {
         <section className="sim-card" aria-labelledby="sim-title">
           <div className="sim-heading">
             <div>
-              <h2 id="sim-title">Simulador de Ciclo P2P (Regtest)</h2>
-              <p>Simulación interactiva de órdenes, retención Lightning (Hold Invoices), mensajes Nostr y resolución de disputas.</p>
+              <h2 id="sim-title">Simulador Sintético de Protocolo P2P</h2>
+              <p>Modelo interactivo sintético de órdenes, Hold Invoices Lightning, eventos Nostr y resolución de disputas (dry-run en memoria; regtest en vivo pendiente).</p>
             </div>
             <button className="button button-secondary" onClick={() => setPage('simulation')}>
               Abrir Simulador Completo <Icon name="arrow" size={14}/>
@@ -479,8 +670,8 @@ function App() {
           {simulationReport && (
             <div>
               <div className="sim-complete-banner">
-                <span>✓ Simulación ejecutada: {simulationReport.scenario} (Orden: {simulationReport.order_id})</span>
-                <span>Estado final: <code>{simulationReport.final_status}</code> ({simulationReport.duration_simulated_ms} ms)</span>
+                <span>✓ Simulación sintética ejecutada: {simulationReport.scenario} (Orden: {simulationReport.order_id})</span>
+                <span>Estado: <code>{simulationReport.final_status}</code> ({simulationReport.duration_simulated_ms} ms)</span>
               </div>
               <div className="sim-financials">
                 <div className="sim-financial-item">
@@ -500,7 +691,7 @@ function App() {
                 </div>
                 <div className="sim-financial-item">
                   <span>Comisión Mostro</span>
-                  <strong>{simulationReport.financials.fee_sats.toLocaleString()} sats</strong>
+                  <strong>{(simulationReport.financials.total_mostro_fee_sats ?? simulationReport.financials.fee_sats ?? 0).toLocaleString()} sats</strong>
                   <small>{draft.market.fee_bps / 100}% de la orden</small>
                 </div>
                 <div className="sim-financial-item">
@@ -527,12 +718,21 @@ function App() {
           <div className="page-heading">
             <div>
               <div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> PROTOCOLO P2P</div>
-              <h1>Simulador de Ciclo P2P (Regtest)</h1>
-              <p>Simula órdenes de compraventa, facturas retenidas (Hold Invoices), mensajes cifrados Nostr y resolución de disputas.</p>
+              <h1>Simulador Sintético de Protocolo P2P</h1>
+              <p>Modelo sintético en memoria para evaluar órdenes, Hold Invoices, eventos Nostr y disputas con las reglas de tu comunidad.</p>
             </div>
             <button className="button button-secondary" onClick={() => void handleRunSimulation()} disabled={simulating}>
               <span className={simulating ? 'spin' : ''}>↻</span> {simulating ? 'Simulando...' : 'Reejecutar Simulación'}
             </button>
+          </div>
+
+          <div className="sim-notice-card" style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.08)', border: '1px solid rgba(235, 115, 29, 0.25)', borderRadius: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#eb731d', textTransform: 'uppercase' }}>Modelo Sintético · Dry-Run en Memoria</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.4 }}>
+              Este simulador valida localmente el flujo del protocolo, las garantías (bonds) y las comisiones sin ejecutar transacciones en Bitcoin/Lightning ni relays Nostr en vivo. Los eventos y firmas son sintéticos y la equivalencia fiat es meramente ilustrativa (ciclo regtest en vivo pendiente).
+            </p>
           </div>
 
           <div className="sim-card">
@@ -611,8 +811,8 @@ function App() {
                   </div>
                   <div className="sim-financial-item">
                     <span>Comisión Mostro</span>
-                    <strong>{simulationReport.financials.fee_sats.toLocaleString()} sats</strong>
-                    <small>Tarifa por intermediación</small>
+                    <strong>{(simulationReport.financials.total_mostro_fee_sats ?? simulationReport.financials.fee_sats ?? 0).toLocaleString()} sats</strong>
+                    <small>{(simulationReport.financials.fee_per_side_sats ?? 0).toLocaleString()} sats/lado · Dev: {(simulationReport.financials.dev_fee_sats ?? 0).toLocaleString()} sats</small>
                   </div>
                   <div className="sim-financial-item">
                     <span>Bloqueado Vendedor</span>
@@ -628,8 +828,8 @@ function App() {
 
                 <div className="section-title-row" style={{ marginTop: '20px' }}>
                   <div>
-                    <h2>Secuencia de Pasos ({simulationReport.steps.length} eventos)</h2>
-                    <p>Traza criptográfica de eventos Nostr y transacciones Lightning en cada fase de la operación.</p>
+                    <h2>Secuencia Simulada de Pasos ({simulationReport.steps.length} eventos)</h2>
+                    <p>Traza sintética ilustrativa de eventos Nostr y transacciones Lightning en cada fase de la operación.</p>
                   </div>
                 </div>
 
@@ -671,6 +871,12 @@ function App() {
                     </article>
                   ))}
                 </div>
+
+                {simulationReport.disclaimer && (
+                  <p style={{ marginTop: '20px', padding: '12px', fontSize: '12px', color: '#6b7280', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', textAlign: 'center', lineHeight: 1.4 }}>
+                    {simulationReport.disclaimer}
+                  </p>
+                )}
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '30px', color: '#88988e' }}>
@@ -680,6 +886,7 @@ function App() {
           </div>
         </section>
       )}
+      {page === 'orders' && <OrdersPage />}
       {page === 'config' && <section className="content config-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span><button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
         <div className="config-layout"><nav className="config-nav"><a href="#identity">Identidad</a><a href="#market">Mercado</a><a href="#safety">Seguridad</a><a href="#nostr">Nostr</a><a href="#payments">Métodos de pago</a></nav>

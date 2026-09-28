@@ -12,7 +12,7 @@ pub struct Document {
     pub config: Option<Configuration>,
 }
 pub struct Store {
-    root: PathBuf,
+    pub root: PathBuf,
     pub document: Document,
 }
 impl Store {

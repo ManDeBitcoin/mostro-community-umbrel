@@ -96,54 +96,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let root = PathBuf::from(
                 std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
             );
-            let store = Store::open(root.clone())?;
-            let config = store
-                .document
-                .config
-                .as_ref()
-                .ok_or("Falta configurar la comunidad antes de simular")?;
-            let npub: Option<String> = mostro_community_api::identity::inspect_public_key(&root)
-                .ok()
-                .flatten()
-                .and_then(|k| {
-                    use nostr::ToBech32;
-                    k.to_bech32().ok()
-                });
-            let scenario = match args.get(1).map(|s| s.as_str()) {
-                Some("dispute-buyer") => {
-                    mostro_community_api::simulation::SimulationScenario::DisputeSettledForBuyer
-                }
-                Some("dispute-seller") => {
-                    mostro_community_api::simulation::SimulationScenario::DisputeRefundedToSeller
-                }
-                Some("cancel") => {
-                    mostro_community_api::simulation::SimulationScenario::SellerCancellation
-                }
-                _ => mostro_community_api::simulation::SimulationScenario::HappyPath,
-            };
-            let trade_sats = args.get(2).and_then(|s| s.parse::<u64>().ok());
-            let report = mostro_community_api::simulation::run_simulation(
-                config,
-                npub.as_deref(),
-                scenario,
-                trade_sats,
-            )?;
+            let report = mostro_community_api::simulation::run_cli_simulation(&root, &args[1..])
+                .map_err(Box::<dyn std::error::Error>::from)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
+        if args == ["derive-public-identity"] {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            if let Some(npub) = mostro_community_api::identity::inspect(&root)? {
+                mostro_community_api::identity::persist_public_key(&root, &npub)
+                    .map_err(|e| format!("Error al persistir identidad pública: {e}"))?;
+                println!("Identidad pública guardada en mostro.pub: {npub}");
+                return Ok(());
+            } else {
+                return Err("No se encontró identidad privada para derivar la pública".into());
+            }
+        }
+        if args.len() >= 2 && args[0] == "mock-relay" {
+            return run_mock_relay(&args[1]).await;
+        }
         return Err(
-            "Uso: mostro-community-api [import-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|simulate-trade [happy-path|dispute-buyer|dispute-seller|cancel] [sats]|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
+            "Uso: mostro-community-api [import-identity|derive-public-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|simulate-trade [happy-path|dispute-buyer|dispute-seller|cancel] [sats]|mock-relay <bind-addr>|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
         );
     }
 
     let bind = std::env::var("API_BIND").unwrap_or_else(|_| "127.0.0.1:3001".into());
     let root = PathBuf::from(std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()));
+    let store = Arc::new(Mutex::new(Store::open(root.clone())?));
+
+    // Configuración del Monitor de Órdenes (Watch Channel)
+    let initial_config = store
+        .lock()
+        .unwrap()
+        .document
+        .config
+        .clone()
+        .unwrap_or_else(|| mostro_community_api::config::Configuration {
+            community: mostro_community_api::config::Community {
+                name: String::new(),
+                about: String::new(),
+                website: String::new(),
+                contact: String::new(),
+                language: "es".into(),
+            },
+            market: mostro_community_api::config::Market {
+                fiat_currencies: vec![],
+                min_trade_sats: 1000,
+                max_trade_sats: 1000000,
+                fee_bps: 0,
+                dev_fee_bps: 0,
+                max_routing_fee_bps: 0,
+            },
+            safety: mostro_community_api::config::Safety {
+                bond_enabled: false,
+                bond_bps: 0,
+                base_bond_sats: 0,
+                bond_apply_to: mostro_community_api::config::BondApply::Both,
+                automatic_timeout_slash: false,
+                pow: 0,
+                pow_first_contact: 0,
+            },
+            nostr: mostro_community_api::config::Nostr { relays: vec![] },
+            payment_methods: vec![],
+        });
+    let initial_npub = mostro_community_api::identity::read_public_key(&root)
+        .ok()
+        .flatten();
+
+    let orders_cache = Arc::new(tokio::sync::RwLock::new(
+        mostro_community_api::orders::OrdersCache::new(),
+    ));
+    let (monitor_tx, monitor_rx) =
+        tokio::sync::watch::channel(mostro_community_api::orders::MonitorCommand {
+            config: initial_config,
+            npub: initial_npub,
+        });
+
+    // Tarea de red en segundo plano (Monitor WS)
+    tokio::spawn(mostro_community_api::orders::monitor_worker(
+        orders_cache.clone(),
+        monitor_rx,
+        mostro_community_api::orders::MonitorTiming::default(),
+    ));
+
     let state = AppState {
-        store: Arc::new(Mutex::new(Store::open(root)?)),
+        store,
         integrations: Integrations::from_env(),
+        orders: orders_cache,
+        monitor_tx,
     };
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    eprintln!("Community API listening on {bind}");
+    let local_addr = listener.local_addr()?;
+    eprintln!("Community API listening on {local_addr}");
     let app = if let Some(directory) = std::env::var_os("STATIC_DIR") {
         use axum::http::{HeaderValue, header};
         use tower_http::{
@@ -165,4 +211,143 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     Ok(())
+}
+
+async fn run_mock_relay(bind_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use futures_util::{SinkExt, StreamExt};
+    use nostr::{EventBuilder, Keys, Kind, SecretKey, Tag, Timestamp, ToBech32};
+    use tokio_tungstenite::tungstenite::protocol::Message;
+
+    let secret_key = SecretKey::from_slice(&[1u8; 32])?;
+    let keys = Keys::new(secret_key);
+    let pubkey = keys.public_key();
+    let npub = pubkey.to_bech32()?;
+
+    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+    let local_addr = listener.local_addr()?;
+    println!("MOCK_RELAY_READY npub={npub} url=ws://{local_addr}");
+
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let keys_clone = keys.clone();
+        tokio::spawn(async move {
+            if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                while let Some(Ok(msg)) = ws.next().await {
+                    match msg {
+                        Message::Text(text) => {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text)
+                                && let Some(arr) = val.as_array()
+                                && !arr.is_empty()
+                                && arr[0] == "REQ"
+                                && arr.len() >= 2
+                            {
+                                let sub_id = arr[1].as_str().unwrap_or("sub");
+                                let now = Timestamp::now().as_secs();
+                                let tags = vec![
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("d"),
+                                        ),
+                                        vec!["d3b07384-d113-4001-a111-a8e0f1112222".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("k"),
+                                        ),
+                                        vec!["sell".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("s"),
+                                        ),
+                                        vec!["pending".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("f"),
+                                        ),
+                                        vec!["EUR".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("amt"),
+                                        ),
+                                        vec!["250000".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("fa"),
+                                        ),
+                                        vec!["100".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("pm"),
+                                        ),
+                                        vec!["face_to_face".to_string(), "cash".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("premium"),
+                                        ),
+                                        vec!["2".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("y"),
+                                        ),
+                                        vec!["mostro".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("z"),
+                                        ),
+                                        vec!["order".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("network"),
+                                        ),
+                                        vec!["mainnet".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("layer"),
+                                        ),
+                                        vec!["lightning".to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("expiration"),
+                                        ),
+                                        vec![(now + 3600).to_string()],
+                                    ),
+                                    Tag::custom(
+                                        nostr::event::tag::TagKind::Custom(
+                                            std::borrow::Cow::Borrowed("expires_at"),
+                                        ),
+                                        vec![(now + 1800).to_string()],
+                                    ),
+                                ];
+                                let event = EventBuilder::new(Kind::from(38383), "")
+                                    .tags(tags)
+                                    .sign_with_keys(&keys_clone)
+                                    .unwrap();
+                                let event_msg =
+                                    serde_json::json!(["EVENT", sub_id, event]).to_string();
+                                let eose_msg = serde_json::json!(["EOSE", sub_id]).to_string();
+                                let _ = ws.send(Message::Text(event_msg.into())).await;
+                                let _ = ws.send(Message::Text(eose_msg.into())).await;
+                            }
+                        }
+                        Message::Ping(payload) => {
+                            let _ = ws.send(Message::Pong(payload)).await;
+                        }
+                        Message::Close(_) => break,
+                        _ => {}
+                    }
+                }
+            }
+        });
+    }
 }
