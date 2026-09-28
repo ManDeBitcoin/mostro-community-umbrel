@@ -149,6 +149,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notifications", get(notifications_list_handler))
         .route("/api/backup/status", get(backup_status_handler))
         .route("/api/backup/trigger", post(backup_trigger_handler))
+        .route("/api/lnd/channels", get(lnd_channels_handler))
         .layer(middleware::from_fn(timeout_middleware));
 
     let sse_routes = Router::new().route("/api/notifications/sse", get(notifications_sse_handler));
@@ -424,6 +425,19 @@ async fn dashboard(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"mostro":mostro,"lightning":lightning,
         "bitcoin":{"status":"unknown","detail":"Verificación directa de Bitcoin pendiente; el estado de LND no la sustituye"},
         "market_started":false}))
+}
+
+#[derive(Deserialize, Default)]
+pub struct LndChannelsQuery {
+    pub mock: Option<bool>,
+}
+
+async fn lnd_channels_handler(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<LndChannelsQuery>,
+) -> Json<Value> {
+    let force_mock = query.mock.unwrap_or(false);
+    Json(state.integrations.channels(force_mock).await)
 }
 
 async fn community(State(state): State<AppState>) -> Result<Json<Document>, Error> {

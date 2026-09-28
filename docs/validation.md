@@ -213,4 +213,72 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
   - Tarjeta en Dashboard **Backups Automáticos Offsite y Persistencia**: telemetría en vivo del worker (`Activo / Periódico`), conteo de backups retenidos, último backup generado, botón para forzar backup inmediato (`POST /api/backup/trigger`) y listado histórico con fechas y tamaños.
 - Reporte detallado generado en `/tmp/mostro-gemini-module4-report.md`.
 
+## Fase Final de Integración y Operador (Módulo 5) — Validación Completa
+
+- **73 pruebas Rust automáticas aprobadas** (`cargo test --workspace --locked`):
+  - 18 unitarias en `src/lib.rs`:
+    - `lnd::tests::mock_channels_report_structure_and_balances`: estructura, presencia de campos obligatorios y coherencia matemática de balances simulados.
+    - `lnd::tests::parse_channels_json_calculates_totals_and_handles_flags`: cálculo exacto de capacidad total, saldo local, saldo remoto (inbound) y estado de canales activos/inactivos a partir de JSON upstream de LND REST.
+    - Permisos y rechazo de symlinks en `mostro.pub` y claves privadas (`identity.rs`).
+    - Balances LND de precisión satoshi y orígenes HTTPS estrictos (`lnd.rs`).
+    - Túnel TCP bidireccional LND (`tunnel.rs`).
+    - Detección de liquidez y preflight sin fugas de secretos (`preflight.rs`).
+    - Cifrado simétrico `age` y rechazo de passphrases cortas (`backup.rs`).
+    - Exportación a carpeta secundaria personalizada y retención automática (`backup.rs`).
+    - Inicialización de constructores y helpers de alertas (`notifications.rs`).
+    - Capacidad y comportamiento de búfer circular acotado a 50 eventos (`notifications.rs`).
+    - Publicación y recuperación de eventos recientes en `NotificationHub` (`notifications.rs`).
+  - 17 de contratos HTTP (`tests/http.rs`):
+    - `lnd_channels_endpoint_contract`: verificación del endpoint `GET /api/lnd/channels` respondiendo 200 OK con datos estructurados de prueba (`?mock=true`) y comportamiento seguro de sólo lectura (`unconfigured` sin credenciales).
+    - `health_never_fabricates_connected_services`.
+    - `backup_status_and_trigger_contracts`.
+    - `daemon_endpoints_enforce_protection_and_report_state`.
+    - `invalid_configuration_is_not_persisted`.
+    - `notifications_endpoint_returns_recent_and_sse_headers`.
+    - `orders_endpoint_reports_snapshot_without_secrets`.
+    - `mutation_requires_same_origin_custom_header_and_fresh_revision`.
+    - `rate_limiting_enforces_limits_and_returns_429`.
+    - `secrets_and_unknown_fields_are_rejected`.
+    - `simulation_contract_enforces_protection_headers`.
+    - `simulation_contract_accepts_defaults_with_valid_config`.
+    - `simulation_contract_rejects_invalid_trade_amounts`.
+    - `imported_identity_is_not_exposed_over_http`.
+    - `simulation_scenarios_contract_returns_metadata`.
+    - `simulation_contract_rejects_unknown_scenarios_and_fields`.
+    - `simulation_contract_requires_configured_community`.
+  - 8 de integración hermética de chat cifrado (`tests/chat.rs`).
+  - 4 de configuración (`tests/configuration.rs`).
+  - 2 de conexión e identidad (`tests/connection.rs`).
+  - 3 de orquestación del daemon (`tests/daemon.rs`).
+  - 5 de integración y ciclo de vida de Módulo 4 (`tests/module4.rs`).
+  - 7 de integración real WebSocket del monitor (`tests/orders.rs`).
+  - 7 de simulación matemática de comisiones y Hold Invoices (`tests/simulation.rs`).
+  - 2 de staging (`tests/staging.rs`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 errores, 0 advertencias.
+- `cargo fmt --all -- --check`: formato verificado y limpio (código de salida 0).
+- `npm --prefix web run build`: compilación de TypeScript y Vite exitosa en < 1.1s con 0 errores (código de salida 0).
+- **Verificación de Ciclo Completo (E2E) Automatizada (`scripts/verify-e2e.sh`)**:
+  - Ejecución de 73 tests de Rust y build del frontend.
+  - Arranque automático del servidor en entorno mock aislado temporal con permisos 0700/0600.
+  - Validación con `curl` de respuestas 200 OK y esquemas JSON esperados en:
+    - `GET /api/health` -> `{"status":"ok",...}`
+    - `GET /api/orders` -> `{"state":..., "orders":[...]}`
+    - `GET /api/notifications/sse` -> `Content-Type: text/event-stream` con `KeepAlive`
+    - `GET /api/chat/:id` -> `403 Forbidden` sin cabecera CSRF, `200 OK` con `X-Requested-With: mostro-community`
+    - `GET /api/backup/status` -> `{"interval_secs":..., "backups":[...]}`
+    - `GET /api/lnd/channels` -> `{"status":"online", "channels":[...]}`
+    - `GET /api/simulation/scenarios` -> `[{"id":"happy_path",...}]`
+    - `GET /` -> Frontend estático con `<div id="root">`
+  - Ejecución exitosa de simulación sintética CLI `simulate-trade happy-path 50000`.
+  - Parada limpia de procesos y eliminación de archivos temporales mediante `trap`.
+- **Preparación de Nodos Lightning (Operador)**:
+  - Nueva pestaña en frontend React: `Operaciones LND` (`LiquidityOperationsPage`) con tarjetas métricas de capacidad total, saldo local vs remoto (inbound), porcentaje de distribución, alerta de suficiencia de liquidez, tabla interactiva de canales abiertos con copia de puntos de canal, y selector de modo en vivo vs demostración.
+  - Manual operativo paso a paso integrado en la UI explicando la regla de oro de la liquidez en Mostro (por qué se necesita Inbound para depósitos de vendedores), procedimiento de apertura con Alby Hub / LSPs, canales salientes hacia routing nodes (ACINQ, Kraken) y mantenimiento.
+  - Endpoint `GET /api/lnd/channels` implementado en Axum (`lnd.rs` y `http.rs`) con cálculo exacto de balances satoshi en uint128 sin overflow y soporte para modo demostración (`?mock=true`).
+- **Despliegue Final y Producción**:
+  - Manifiesto `mandebitcoin-mostro-manager/umbrel-app.yml` actualizado a versión de Producción `1.0.0`, con descripciones completas, release notes, dependencia única `lightning` y categoría `bitcoin`.
+  - Guía completa de despliegue y manual de operaciones redactado en `docs/DEPLOYMENT.md`.
+- Reporte detallado generado en `/tmp/mostro-gemini-module5-report.md`.
+
+
 

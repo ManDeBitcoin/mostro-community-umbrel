@@ -55,4 +55,19 @@ impl Integrations {
         )
         .await
     }
+    pub async fn channels(&self, force_mock: bool) -> Value {
+        if force_mock
+            || std::env::var("MOCK_LND_CHANNELS").as_deref() == Ok("1")
+            || std::env::var("MOCK_LND_CHANNELS").as_deref() == Ok("true")
+        {
+            return crate::lnd::mock_channels_report();
+        }
+        crate::lnd::channels(
+            self.lnd_rest.as_deref(),
+            self.lnd_connect_host.as_deref(),
+            self.lnd_cert.as_deref(),
+            self.lnd_macaroon.as_deref(),
+        )
+        .await
+    }
 }

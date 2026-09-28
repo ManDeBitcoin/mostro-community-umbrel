@@ -649,3 +649,45 @@ async fn backup_status_and_trigger_contracts() {
         .unwrap();
     assert_eq!(res_missing_pass.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn lnd_channels_endpoint_contract() {
+    let (_dir, app) = setup();
+
+    // 1. GET /api/lnd/channels?mock=true -> 200 OK with mock channels
+    let res_mock = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/lnd/channels?mock=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_mock.status(), StatusCode::OK);
+    let body_mock: serde_json::Value =
+        serde_json::from_slice(&res_mock.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body_mock["status"], "online");
+    assert_eq!(body_mock["is_mock"], true);
+    assert_eq!(body_mock["num_active_channels"], 2);
+    assert_eq!(body_mock["inbound_sufficient"], true);
+    assert_eq!(body_mock["channels"].as_array().unwrap().len(), 2);
+
+    // 2. GET /api/lnd/channels without mock -> 200 OK (unconfigured when no credentials)
+    let res_default = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/lnd/channels")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_default.status(), StatusCode::OK);
+    let body_default: serde_json::Value =
+        serde_json::from_slice(&res_default.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert_eq!(body_default["status"], "unconfigured");
+    assert_eq!(body_default["channels"].as_array().unwrap().len(), 0);
+}

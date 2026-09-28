@@ -1,20 +1,35 @@
 manifestVersion: 1
 id: mandebitcoin-mostro-manager
 name: Mostro Community Manager
-tagline: Prepara tu comunidad P2P con Mostro
+tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 0.1.0-preview.14
+version: 1.0.0
 port: 5173
 description: >-
-  Vista previa del panel administrativo de comunidades Mostro.
-  Permite guardar la identidad pública y el borrador de reglas del mercado:
-  monedas, límites, comisiones, bonds, relays y catálogo de pagos.
+  Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
+  cualquier operador cree, configure y administre su propia comunidad de intercambio
+  P2P soberana de Bitcoin sobre el protocolo Mostro y Lightning Network.
 
-  Esta versión incorpora el motor de simulación de ciclo completo P2P y
-  fixture Regtest (Módulo 2): simulación de órdenes, retención de fondos
-  mediante Lightning Hold Invoices, eventos Nostr y resolución de disputas.
-  Incluye estudio interactivo en el panel web y CLI simulate-trade.
+  Características principales:
+  • Configuración de Mercado: Define monedas fiat locales, límites por operación,
+  comisiones de operador y desarrollo, depósitos de garantía (bonds) y relays Nostr.
+  • Orquestación del Motor Mostro: Ciclo de vida y activación atómica del daemon
+  oficial upstream sin necesidad de forks ni compilaciones manuales.
+  • Gestión de Liquidez Lightning (LND): Supervisión en tiempo real de canales,
+  balance local vs balance entrante (inbound liquidity) y guía operativa integrada
+  para apertura con Alby Hub y proveedores de servicios Lightning (LSP).
+  • Monitor de Órdenes Públicas: Visualización y seguimiento en vivo de eventos
+  Nostr Kind 38383 de solo lectura emitidos por la comunidad.
+  • Consola de Mediación y Arbitraje: Canal cifrado punto a punto (NIP-04, NIP-44,
+  NIP-59) para resolución asistida de disputas comerciales con acciones adm-settle
+  y adm-refund.
+  • Alertas y Notificaciones en Vivo: Transmisión reactiva de eventos críticos,
+  caída de relays y disputas activas mediante Server-Sent Events (SSE).
+  • Respaldos Automáticos Cifrados: Copias periódicas simétricas con age hacia
+  almacenamiento secundario o externo con política de retención automática.
+  • Compatible al 100% con la aplicación oficial Mostro App mediante código QR y
+  nprofile con relays.
 developer: ManDeBitcoin
 website: https://github.com/ManDeBitcoin/mostro-community-umbrel
 repo: https://github.com/ManDeBitcoin/mostro-community-umbrel
@@ -26,9 +41,14 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
-  Módulo 4: Notificaciones, Backups Automáticos Offsite y Hardening.
-  Incluye notificaciones en tiempo real vía SSE, retención de backups automatizados cifrados y límites de peticiones (rate limiting) en API. Endurecimiento de contenedores con privilegios mínimos y aislamiento estricto.
+  Versión de Producción 1.0.0 (Fase Final de Integración y Operador):
+  - Nueva pestaña de Operaciones LND y Gestión de Liquidez con monitor de capacidad, balances entrantes/salientes y manual paso a paso para operadores (Alby Hub, LSPs, rebalanceo).
+  - Nuevo endpoint de solo lectura /api/lnd/channels con datos estructurados de canales y liquidez.
+  - Verificación integral de ciclo completo automatizada (scripts/verify-e2e.sh).
+  - Consola de mediación con chat cifrado en memoria para resolución de conflictos.
+  - Monitor en vivo de órdenes públicas Nostr Kind 38383.
+  - Simulador sintético del protocolo P2P con cálculo exacto de fianzas y comisiones.
+  - Notificaciones en tiempo real vía SSE y backups automáticos offsite con retención programada.
+  - Endurecimiento integral de seguridad: contenedores read-only, cap_drop ALL, red privada segregada y protección anti-CSRF / rate limiting en API.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
-
-

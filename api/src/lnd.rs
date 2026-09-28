@@ -83,12 +83,12 @@ async fn get(
     }
     Ok(serde_json::from_slice(&body)?)
 }
-async fn probe(
+async fn build_client(
     address: &str,
     connect_host: Option<&str>,
     cert: &Path,
     macaroon: &Path,
-) -> Result<Value, ProbeError> {
+) -> Result<(Client, url::Url, HeaderValue), ProbeError> {
     let url = base_url(address)?;
     let cert = reqwest::Certificate::from_pem(&tokio::fs::read(cert).await?)?;
     let bytes = Zeroizing::new(tokio::fs::read(macaroon).await?);
@@ -100,7 +100,6 @@ async fn probe(
     credential.set_sensitive(true);
     let mut builder = Client::builder();
     if let Some(connect_host) = connect_host {
-        // Resolve the private-network relay while retaining the original TLS host name.
         let origin_host = url.host_str().ok_or("LND URL has no host")?;
         let address = tokio::net::lookup_host(connect_host)
             .await?
@@ -117,6 +116,16 @@ async fn probe(
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(3))
         .build()?;
+    Ok((client, url, credential))
+}
+
+async fn probe(
+    address: &str,
+    connect_host: Option<&str>,
+    cert: &Path,
+    macaroon: &Path,
+) -> Result<Value, ProbeError> {
+    let (client, url, credential) = build_client(address, connect_host, cert, macaroon).await?;
     let info = get(&client, &url, &credential, "/v1/getinfo").await?;
     // Balance failure must not misrepresent an otherwise responding LND as offline.
     let balance = get(&client, &url, &credential, "/v1/balance/channels")
@@ -125,6 +134,150 @@ async fn probe(
         .unwrap_or_else(|_| unavailable_liquidity());
     summary(&info, balance)
 }
+
+pub fn mock_channels_report() -> Value {
+    json!({
+        "status": "online",
+        "detail": "Canales simulados para pruebas y demostración de liquidez (modo mock)",
+        "total_capacity_sats": "2000000",
+        "total_local_balance_sats": "850000",
+        "total_remote_balance_sats": "1150000",
+        "num_active_channels": 2,
+        "num_inactive_channels": 0,
+        "is_mock": true,
+        "inbound_sufficient": true,
+        "channels": [
+            {
+                "channel_point": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b:0",
+                "remote_pubkey": "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f",
+                "capacity_sats": "1000000",
+                "local_balance_sats": "250000",
+                "remote_balance_sats": "750000",
+                "active": true,
+                "private": false
+            },
+            {
+                "channel_point": "8f2195f3b7c89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda12a:1",
+                "remote_pubkey": "02ad3973f3d303d65b64770195738b15e7bf2cf6078b3f8ebcd971167b405528b3",
+                "capacity_sats": "1000000",
+                "local_balance_sats": "600000",
+                "remote_balance_sats": "400000",
+                "active": true,
+                "private": false
+            }
+        ]
+    })
+}
+
+fn parse_channels_json(response: &Value) -> Result<Value, ProbeError> {
+    let empty_vec = Vec::new();
+    let channels_arr = response["channels"].as_array().unwrap_or(&empty_vec);
+    let mut total_capacity: u128 = 0;
+    let mut total_local: u128 = 0;
+    let mut total_remote: u128 = 0;
+    let mut active_count: u64 = 0;
+    let mut inactive_count: u64 = 0;
+    let mut parsed_channels = Vec::new();
+
+    for c in channels_arr {
+        let active = c["active"].as_bool().unwrap_or(false);
+        if active {
+            active_count += 1;
+        } else {
+            inactive_count += 1;
+        }
+
+        let cap_str = sats(&c["capacity"]).unwrap_or_else(|| "0".to_string());
+        let loc_str = sats(&c["local_balance"]).unwrap_or_else(|| "0".to_string());
+        let rem_str = sats(&c["remote_balance"]).unwrap_or_else(|| "0".to_string());
+
+        let cap_val = cap_str.parse::<u128>().unwrap_or(0);
+        let loc_val = loc_str.parse::<u128>().unwrap_or(0);
+        let rem_val = rem_str.parse::<u128>().unwrap_or(0);
+
+        total_capacity = total_capacity.saturating_add(cap_val);
+        total_local = total_local.saturating_add(loc_val);
+        total_remote = total_remote.saturating_add(rem_val);
+
+        parsed_channels.push(json!({
+            "channel_point": c["channel_point"].as_str().unwrap_or(""),
+            "remote_pubkey": c["remote_pubkey"].as_str().unwrap_or(""),
+            "capacity_sats": cap_str,
+            "local_balance_sats": loc_str,
+            "remote_balance_sats": rem_str,
+            "active": active,
+            "private": c["private"].as_bool().unwrap_or(false)
+        }));
+    }
+
+    Ok(json!({
+        "status": "online",
+        "detail": "Canales LND consultados exitosamente (solo lectura)",
+        "total_capacity_sats": total_capacity.to_string(),
+        "total_local_balance_sats": total_local.to_string(),
+        "total_remote_balance_sats": total_remote.to_string(),
+        "num_active_channels": active_count,
+        "num_inactive_channels": inactive_count,
+        "is_mock": false,
+        "inbound_sufficient": total_remote > 0,
+        "channels": parsed_channels
+    }))
+}
+
+async fn probe_channels(
+    address: &str,
+    connect_host: Option<&str>,
+    cert: &Path,
+    macaroon: &Path,
+) -> Result<Value, ProbeError> {
+    let (client, url, credential) = build_client(address, connect_host, cert, macaroon).await?;
+    let channels_raw = get(&client, &url, &credential, "/v1/channels").await?;
+    parse_channels_json(&channels_raw)
+}
+
+pub async fn channels(
+    address: Option<&str>,
+    connect_host: Option<&str>,
+    cert: Option<&Path>,
+    macaroon: Option<&Path>,
+) -> Value {
+    let (Some(address), Some(cert), Some(macaroon)) = (address, cert, macaroon) else {
+        return json!({
+            "status": "unconfigured",
+            "detail": "Falta configurar la conexión de lectura a LND",
+            "total_capacity_sats": "0",
+            "total_local_balance_sats": "0",
+            "total_remote_balance_sats": "0",
+            "num_active_channels": 0,
+            "num_inactive_channels": 0,
+            "is_mock": false,
+            "inbound_sufficient": false,
+            "channels": []
+        });
+    };
+
+    match tokio::time::timeout(
+        Duration::from_secs(7),
+        probe_channels(address, connect_host, cert, macaroon),
+    )
+    .await
+    {
+        Ok(Ok(value)) => value,
+        _ => json!({
+            "status": "offline",
+            "detail": "No se pudo verificar canales LND: revisa conexión, certificado y permisos",
+            "total_capacity_sats": "0",
+            "total_local_balance_sats": "0",
+            "total_remote_balance_sats": "0",
+            "num_active_channels": 0,
+            "num_inactive_channels": 0,
+            "is_mock": false,
+            "inbound_sufficient": false,
+            "channels": []
+        }),
+    }
+}
+
 pub async fn status(
     address: Option<&str>,
     connect_host: Option<&str>,
@@ -186,5 +339,51 @@ mod tests {
             assert_eq!(liquidity(&bad)["status"], "unavailable");
             assert!(liquidity(&bad)["local_balance_sats"].is_null());
         }
+    }
+    #[test]
+    fn mock_channels_report_structure_and_balances() {
+        let rep = mock_channels_report();
+        assert_eq!(rep["status"], "online");
+        assert_eq!(rep["is_mock"], true);
+        assert_eq!(rep["total_capacity_sats"], "2000000");
+        assert_eq!(rep["total_local_balance_sats"], "850000");
+        assert_eq!(rep["total_remote_balance_sats"], "1150000");
+        assert_eq!(rep["num_active_channels"], 2);
+        assert_eq!(rep["inbound_sufficient"], true);
+        let channels = rep["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 2);
+    }
+    #[test]
+    fn parse_channels_json_calculates_totals_and_handles_flags() {
+        let raw = json!({
+            "channels": [
+                {
+                    "active": true,
+                    "remote_pubkey": "peer1",
+                    "channel_point": "txid1:0",
+                    "capacity": "500000",
+                    "local_balance": "200000",
+                    "remote_balance": "300000",
+                    "private": false
+                },
+                {
+                    "active": false,
+                    "remote_pubkey": "peer2",
+                    "channel_point": "txid2:1",
+                    "capacity": "1000000",
+                    "local_balance": "400000",
+                    "remote_balance": "600000",
+                    "private": true
+                }
+            ]
+        });
+        let rep = parse_channels_json(&raw).unwrap();
+        assert_eq!(rep["status"], "online");
+        assert_eq!(rep["total_capacity_sats"], "1500000");
+        assert_eq!(rep["total_local_balance_sats"], "600000");
+        assert_eq!(rep["total_remote_balance_sats"], "900000");
+        assert_eq!(rep["num_active_channels"], 1);
+        assert_eq!(rep["num_inactive_channels"], 1);
+        assert_eq!(rep["inbound_sufficient"], true);
     }
 }
