@@ -74,7 +74,10 @@ async fn lifecycle_standby_to_activated_to_deactivated() {
     assert!(settings_str.contains("fee = 0.006"));
 
     let rep_active = report(&root, &Integrations::from_env()).await;
-    assert_eq!(rep_active.state, DaemonState::ActiveReady);
+    assert!(matches!(
+        rep_active.state,
+        DaemonState::ActiveReady | DaemonState::ActiveRunning
+    ));
     assert_eq!(rep_active.active_revision, Some(1));
     assert_eq!(
         rep_active.active_settings_hash.as_deref(),

@@ -205,7 +205,7 @@ pub fn render_settings(
     }
     for (key, value) in [
         ("fee", config.market.fee_bps),
-        ("dev_fee_percentage", config.market.dev_fee_bps),
+        ("dev_fee_percentage", config.market.dev_fee_bps.max(1_000)),
         ("max_routing_fee", config.market.max_routing_fee_bps),
     ] {
         doc["mostro"][key] = (f64::from(value) / 10_000.0).into();
