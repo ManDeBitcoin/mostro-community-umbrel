@@ -169,3 +169,48 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
   - Bosquejo interactivo de acciones de arbitraje asistido (`adm-settle` para liquidar a favor del comprador y `adm-refund` para devolver al vendedor).
 - Reporte detallado generado en `/tmp/mostro-gemini-module3b-report.md`.
 
+## Notificaciones de Eventos, Backups Automáticos Offsite y Endurecimiento de Red (Módulo 4) — Desarrollo Actual
+
+- **63 pruebas Rust automáticas aprobadas** (`cargo test --workspace --locked`):
+  - 16 unitarias en `src/lib.rs`:
+    - Permisos y rechazo de symlinks en `mostro.pub` y claves privadas (`identity.rs`).
+    - Balances LND de precisión satoshi y orígenes HTTPS estrictos (`lnd.rs`).
+    - Túnel TCP bidireccional LND (`tunnel.rs`).
+    - Detección de liquidez y preflight sin fugas de secretos (`preflight.rs`).
+    - Cifrado simétrico `age` y rechazo de passphrases cortas (`backup.rs`).
+    - Exportación a carpeta secundaria personalizada y retención automática (`backup.rs`).
+    - Inicialización de constructores y helpers de alertas (`notifications.rs`).
+    - Capacidad y comportamiento de búfer circular acotado a 50 eventos (`notifications.rs`).
+    - Publicación y recuperación de eventos recientes en `NotificationHub` (`notifications.rs`).
+  - 8 de integración hermética de chat cifrado (`tests/chat.rs`).
+  - 4 de configuración (`tests/configuration.rs`).
+  - 2 de conexión e identidad (`tests/connection.rs`).
+  - 3 de orquestación del daemon (`tests/daemon.rs`).
+  - 16 de contratos HTTP (`tests/http.rs`):
+    - Incluye `notifications_endpoint_returns_recent_and_sse_headers` (verificación de array JSON y headers de streaming `text/event-stream`).
+    - Incluye `backup_status_and_trigger_contracts` (consulta de estado y disparo manual seguro con cabecera CSRF).
+    - Incluye `rate_limiting_enforces_limits_and_returns_429` (bloqueo determinista al superar cuota y cabecera `Retry-After`).
+  - 5 de integración y ciclo de vida de Módulo 4 (`tests/module4.rs`):
+    - `test_notifications_broadcast_and_sse_stream`: difusión multicanal y consumo continuo vía stream SSE.
+    - `test_relay_down_notification_emitted_on_connection_failure`: emisión automática de alerta `relay_alert` ante fallo de conexión con relay.
+    - `test_dispute_notification_emitted_by_order_monitor`: emisión de alerta `dispute_alert` en tiempo real cuando una orden pasa a estado `dispute`.
+    - `test_rate_limiter_token_replenishment`: reabastecimiento continuo del algoritmo Token Bucket.
+    - `test_auto_backup_cycle_and_retention_policy`: ciclo completo de respaldo periódico cifrado con age y poda determinista conservando exactamente la cuota de retención configurada.
+  - 7 de integración real WebSocket del monitor (`tests/orders.rs`).
+  - 7 de simulación matemática de comisiones y Hold Invoices (`tests/simulation.rs`).
+  - 2 de staging (`tests/staging.rs`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: 0 errores, 0 advertencias.
+- `cargo fmt --all -- --check`: formato verificado y limpio (código de salida 0).
+- `npm --prefix web run build`: compilación de TypeScript y Vite exitosa con 0 errores (código de salida 0).
+- Endurecimiento de red y contenedores (`mandebitcoin-mostro-manager/docker-compose.yml`):
+  - Servicio `mostro`: `read_only: true`, `tmpfs: [/tmp]`, `cap_drop: [ALL]`.
+  - Servicio `init`: inicialización y permisos `0700` para `/data/backup`, `cap_drop: [ALL]`, `cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]`.
+  - Red privada segregada `manager_private` para aislamiento estricto de los contenedores de la aplicación.
+  - Rate limiting en API Axum: algoritmo Token Bucket (60 tokens/minuto por cliente IP) con respuesta `429 Too Many Requests` y cabecera `Retry-After`.
+  - Timeout middleware global a 30s con respuesta `504 Gateway Timeout`, con exclusión selectiva de `/api/notifications/sse` (que cuenta con `KeepAlive` a 15s) para evitar desconexiones prematuras de streaming.
+- Interfaz de Usuario React (`web/src/App.tsx`):
+  - Tarjeta en Dashboard **Alertas y Notificaciones de Eventos (SSE en vivo)**: suscripción automática a `/api/notifications/sse`, indicador visual en tiempo real de estado SSE (`En vivo (SSE)` vs `Desconectado`), badges por severidad (`info`, `warning`, `critical`), filtrado y marcas de tiempo relativas.
+  - Tarjeta en Dashboard **Backups Automáticos Offsite y Persistencia**: telemetría en vivo del worker (`Activo / Periódico`), conteo de backups retenidos, último backup generado, botón para forzar backup inmediato (`POST /api/backup/trigger`) y listado histórico con fechas y tamaños.
+- Reporte detallado generado en `/tmp/mostro-gemini-module4-report.md`.
+
+

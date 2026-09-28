@@ -405,13 +405,13 @@ async fn test_http_chat_endpoint_contract() {
         });
     }
 
-    let app = router(AppState {
-        store: Arc::new(Mutex::new(Store::open(root.into()).unwrap())),
-        integrations: Integrations::default(),
-        orders: Arc::new(RwLock::new(OrdersCache::new())),
-        chat: chat_cache,
-        monitor_tx: tx,
-    });
+    let app = router(AppState::new(
+        Arc::new(Mutex::new(Store::open(root.into()).unwrap())),
+        Integrations::default(),
+        Arc::new(RwLock::new(OrdersCache::new())),
+        chat_cache,
+        tx,
+    ));
 
     // 1. Missing protection header -> 403 Forbidden
     let req = Request::builder()

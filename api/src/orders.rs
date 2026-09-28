@@ -557,6 +557,7 @@ async fn run_relay_worker(
     cache: SharedOrders,
     generation: u64,
     timing: MonitorTiming,
+    notifications: Option<Arc<crate::notifications::NotificationHub>>,
 ) {
     let mut reconnect_delay = timing.reconnect_initial;
 
@@ -581,6 +582,15 @@ async fn run_relay_worker(
                         generation,
                     );
                 }
+                if let Some(ref hub) = notifications {
+                    hub.publish(crate::notifications::Notification::relay_alert(
+                        "Relay desconectado",
+                        &format!("Fallo de conexión con {relay_url}: {e}"),
+                        "warning",
+                        Some(serde_json::json!({"relay": relay_url})),
+                    ))
+                    .await;
+                }
                 tokio::time::sleep(reconnect_delay).await;
                 reconnect_delay = (reconnect_delay * 2).min(timing.reconnect_max);
                 continue;
@@ -594,6 +604,15 @@ async fn run_relay_worker(
                         Some("Timeout en conexión a relay".into()),
                         generation,
                     );
+                }
+                if let Some(ref hub) = notifications {
+                    hub.publish(crate::notifications::Notification::relay_alert(
+                        "Relay desconectado",
+                        &format!("Timeout en conexión con {relay_url}"),
+                        "warning",
+                        Some(serde_json::json!({"relay": relay_url})),
+                    ))
+                    .await;
                 }
                 tokio::time::sleep(reconnect_delay).await;
                 reconnect_delay = (reconnect_delay * 2).min(timing.reconnect_max);
@@ -653,8 +672,8 @@ async fn run_relay_worker(
                             if text.len() > MAX_WS_FRAME_SIZE {
                                 continue;
                             }
-                            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-                                && let Some(arr) = value.as_array()
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text)
+                                && let Some(arr) = val.as_array()
                             {
                                 if arr.len() >= 3 && arr[0] == "EVENT" && arr[1] == "mostro_monitor" {
                                     if let Ok(event) = serde_json::from_value::<Event>(arr[2].clone()) {
@@ -665,8 +684,25 @@ async fn run_relay_worker(
                                             now,
                                             timing.max_future_drift_secs,
                                         ) {
+                                            let is_dispute = summary.status == "dispute";
+                                            let order_id = summary.id.clone();
+                                            let fiat_code = summary.fiat_code.clone();
+                                            let amount_sats = summary.amount_sats;
                                             let mut w = cache.write().await;
                                             w.try_insert_event(event, summary.id, is_closed, generation);
+                                            if is_dispute
+                                                && let Some(ref hub) = notifications
+                                            {
+                                                hub.publish(crate::notifications::Notification::dispute_alert(
+                                                    &order_id,
+                                                    &format!("La orden {order_id} ha entrado en estado de disputa"),
+                                                    Some(serde_json::json!({
+                                                        "order_id": order_id,
+                                                        "fiat_code": fiat_code,
+                                                        "amount_sats": amount_sats,
+                                                    })),
+                                                )).await;
+                                            }
                                         }
                                     }
                                 } else if arr.len() >= 2 && arr[0] == "EOSE" && arr[1] == "mostro_monitor" {
@@ -715,8 +751,17 @@ async fn run_relay_worker(
 
 pub async fn monitor_worker(
     cache: SharedOrders,
+    config_rx: watch::Receiver<MonitorCommand>,
+    timing: MonitorTiming,
+) {
+    monitor_worker_with_notifications(cache, config_rx, timing, None).await;
+}
+
+pub async fn monitor_worker_with_notifications(
+    cache: SharedOrders,
     mut config_rx: watch::Receiver<MonitorCommand>,
     timing: MonitorTiming,
+    notifications: Option<Arc<crate::notifications::NotificationHub>>,
 ) {
     let mut current_generation: u64 = 0;
     let mut relay_handles: Vec<JoinHandle<()>> = Vec::new();
@@ -756,6 +801,7 @@ pub async fn monitor_worker(
                         cache.clone(),
                         current_generation,
                         timing.clone(),
+                        notifications.clone(),
                     ));
                     relay_handles.push(h);
                 }

@@ -117,8 +117,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args.len() >= 2 && args[0] == "mock-relay" {
             return run_mock_relay(&args[1]).await;
         }
+        if !args.is_empty() && args[0] == "auto-backup" {
+            let root = PathBuf::from(
+                std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
+            );
+            let target_dir = if args.len() >= 2 {
+                PathBuf::from(&args[1])
+            } else {
+                PathBuf::from(
+                    std::env::var("BACKUP_OFFSITE_DIR").unwrap_or_else(|_| "/data/backup".into()),
+                )
+            };
+            let passphrase = std::env::var("BACKUP_PASSPHRASE")
+                .map_err(|_| "Variable BACKUP_PASSPHRASE no configurada")?;
+            let summary = mostro_community_api::backup::run_auto_backup_cycle(
+                &root,
+                &target_dir,
+                7,
+                age::secrecy::SecretString::from(passphrase),
+            )?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "status": "ok",
+                    "path": summary.path.display().to_string(),
+                    "revision": summary.revision,
+                    "npub": summary.npub
+                })
+            );
+            return Ok(());
+        }
         return Err(
-            "Uso: mostro-community-api [import-identity|derive-public-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|simulate-trade [happy-path|dispute-buyer|dispute-seller|cancel] [sats]|mock-relay <bind-addr>|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
+            "Uso: mostro-community-api [import-identity|derive-public-identity|export-backup|verify-backup <archivo>|restore-backup <archivo> <directorio-nuevo>|auto-backup [directorio]|stage-mostro-settings <origen-gRPC-LND>|activate-daemon <origen-gRPC-LND>|deactivate-daemon|daemon-status|simulate-trade [happy-path|dispute-buyer|dispute-seller|cancel] [sats]|mock-relay <bind-addr>|connection-info|check-lnd|check-mostro|lnd-tunnel]".into(),
         );
     }
 
@@ -177,12 +207,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             npub: initial_npub,
         });
 
-    // Tarea de red en segundo plano (Monitor WS de órdenes)
-    tokio::spawn(mostro_community_api::orders::monitor_worker(
-        orders_cache.clone(),
-        monitor_rx,
-        mostro_community_api::orders::MonitorTiming::default(),
+    let notifications = Arc::new(mostro_community_api::notifications::NotificationHub::default());
+    let backup_state = Arc::new(tokio::sync::RwLock::new(
+        mostro_community_api::backup::AutoBackupState::default(),
     ));
+    let rate_limiter = Arc::new(mostro_community_api::RateLimiter::default());
+
+    // Tarea de red en segundo plano (Monitor WS de órdenes con notificaciones)
+    tokio::spawn(
+        mostro_community_api::orders::monitor_worker_with_notifications(
+            orders_cache.clone(),
+            monitor_rx,
+            mostro_community_api::orders::MonitorTiming::default(),
+            Some(notifications.clone()),
+        ),
+    );
 
     // Tarea de red en segundo plano (Chat / Mensajería cifrada)
     tokio::spawn(mostro_community_api::chat::chat_worker(
@@ -192,12 +231,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mostro_community_api::orders::MonitorTiming::default(),
     ));
 
+    // Tarea de respaldo automático (Worker periódico)
+    let backup_dir = PathBuf::from(
+        std::env::var("BACKUP_OFFSITE_DIR").unwrap_or_else(|_| "/data/backup".into()),
+    );
+    let backup_passphrase = std::env::var("BACKUP_PASSPHRASE")
+        .ok()
+        .map(age::secrecy::SecretString::from);
+    let backup_interval_secs = std::env::var("BACKUP_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(86400); // 24 horas por defecto
+    let backup_retention_count = std::env::var("BACKUP_RETENTION_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(7); // 7 respaldos conservados por defecto
+
+    tokio::spawn(mostro_community_api::backup::auto_backup_worker(
+        root.clone(),
+        backup_dir,
+        std::time::Duration::from_secs(backup_interval_secs),
+        backup_retention_count,
+        backup_passphrase,
+        backup_state.clone(),
+        notifications.clone(),
+    ));
+
     let state = AppState {
         store,
         integrations: Integrations::from_env(),
         orders: orders_cache,
         chat: chat_cache,
         monitor_tx,
+        notifications,
+        backup_state,
+        rate_limiter,
     };
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     let local_addr = listener.local_addr()?;

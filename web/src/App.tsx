@@ -105,6 +105,35 @@ type SimulationReport = {
 };
 type CommunityReply = { revision: number; config: Configuration | null };
 
+type NotificationItem = {
+  id: string;
+  level: string;
+  category: string;
+  title: string;
+  message: string;
+  timestamp: number;
+  details?: Record<string, unknown>;
+};
+
+type BackupEntry = {
+  filename: string;
+  path: string;
+  size_bytes: number;
+  modified_timestamp: number;
+};
+
+type AutoBackupState = {
+  enabled: boolean;
+  target_dir: string;
+  interval_secs: number;
+  retention_count: number;
+  last_run_timestamp: number | null;
+  last_run_success: boolean | null;
+  last_error: string | null;
+  last_backup_path: string | null;
+  backups: BackupEntry[];
+};
+
 type OrderSummary = {
   id: string;
   event_id: string;
@@ -740,6 +769,13 @@ function App() {
   const [relayInput, setRelayInput] = useState('');
   const [feeInputs, setFeeInputs] = useState({ fee: '', devFee: '', routingFee: '', bond: '' });
 
+  // Module 4: Notifications and Backup states
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [backupState, setBackupState] = useState<AutoBackupState | null>(null);
+  const [triggeringBackup, setTriggeringBackup] = useState(false);
+  const [backupPassphrase, setBackupPassphrase] = useState('');
+  const [backupMessage, setBackupMessage] = useState('');
+
   // Simulation states
   const [simScenarios, setSimScenarios] = useState<SimulationScenarioInfo[]>([]);
   const [selectedScenario, setSelectedScenario] = useState('happy_path');
@@ -761,6 +797,8 @@ function App() {
     const dashboardPromise = api<Dashboard>('/api/dashboard').then(setDashboard).catch(() => setDashboard(null));
     const connectionPromise = api<ConnectionInfo>('/api/connection').then(setConnection).catch(() => setConnection(null));
     const daemonPromise = api<DaemonReport>('/api/daemon/status').then(setDaemon).catch(() => setDaemon(null));
+    const notifsPromise = api<NotificationItem[]>('/api/notifications').then(setNotifications).catch(() => {});
+    const backupPromise = api<AutoBackupState>('/api/backup/status').then(setBackupState).catch(() => {});
     const simScenariosPromise = api<SimulationScenarioInfo[]>('/api/simulation/scenarios').then((data) => {
       setSimScenarios(data);
     }).catch(() => setSimScenarios([]));
@@ -769,9 +807,46 @@ function App() {
       const config = data.config || blankConfig(); setDraft(config);
       setFeeInputs(data.config ? { fee: percent(config.market.fee_bps), devFee: percent(config.market.dev_fee_bps), routingFee: percent(config.market.max_routing_fee_bps), bond: percent(config.safety.bond_bps) } : { fee: '', devFee: '', routingFee: '', bond: '' });
     }).catch((err: Error) => { setCommunityLoaded(false); setApiError(err.message); });
-    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise]); setLoading(false);
+    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise, notifsPromise, backupPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/notifications/sse');
+      es.addEventListener('notification', (e) => {
+        try {
+          const item: NotificationItem = JSON.parse(e.data);
+          setNotifications((prev) => [item, ...prev.filter((n) => n.id !== item.id)].slice(0, 50));
+        } catch {}
+      });
+    } catch {}
+
+    return () => {
+      es?.close();
+    };
+  }, []);
+
+  const handleTriggerBackup = async () => {
+    setTriggeringBackup(true);
+    setBackupMessage('');
+    try {
+      const res = await api<{ status: string; path: string; revision: number }>('/api/backup/trigger', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'mostro-community' },
+        body: JSON.stringify({ passphrase: backupPassphrase || undefined }),
+      });
+      setBackupMessage(`✓ Respaldo generado con éxito: revisión ${res.revision}`);
+      setBackupPassphrase('');
+      const updated = await api<AutoBackupState>('/api/backup/status');
+      setBackupState(updated);
+    } catch (err) {
+      setBackupMessage(err instanceof Error ? `Error: ${err.message}` : 'Error al generar respaldo');
+    } finally {
+      setTriggeringBackup(false);
+    }
+  };
 
   const handleRunSimulation = async (scenarioOverride?: string) => {
     setSimulating(true);
@@ -1088,6 +1163,111 @@ function App() {
             </div>
           )}
         </section>
+
+        <section className="connection-card" aria-labelledby="notifications-title" style={{ marginTop: '16px' }}>
+          <div className="connection-heading">
+            <div>
+              <h2 id="notifications-title">Alertas y Notificaciones de Eventos (SSE en vivo)</h2>
+              <p>Transmisión reactiva en tiempo real sobre la salud de relays, órdenes en disputa y eventos críticos del nodo.</p>
+            </div>
+            <span className="service-status">
+              <StatusDot status={notifications.some((n) => n.level === 'error' || n.level === 'critical') ? 'warning' : 'online'} />
+              {notifications.length} eventos registrados
+            </span>
+          </div>
+          {notifications.length === 0 ? (
+            <p className="empty-hint" style={{ padding: '16px 0' }}>No hay alertas recientes; el nodo opera de manera estable.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+              {notifications.slice(0, 6).map((n) => (
+                <div key={n.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', borderLeft: `3px solid ${n.level === 'error' ? '#ef4444' : n.level === 'warning' ? '#f59e0b' : '#10b981'}` }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: n.level === 'error' ? 'rgba(239,68,68,0.2)' : n.level === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)', color: n.level === 'error' ? '#ef4444' : n.level === 'warning' ? '#f59e0b' : '#10b981' }}>{n.category}</span>
+                      <strong style={{ fontSize: '14px' }}>{n.title}</strong>
+                    </div>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#9ca3af' }}>{n.message}</p>
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                    {n.timestamp ? new Date(n.timestamp * 1000).toLocaleTimeString('es') : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="connection-card" aria-labelledby="backup-title" style={{ marginTop: '16px' }}>
+          <div className="connection-heading">
+            <div>
+              <h2 id="backup-title">Backups Automáticos Offsite y Persistencia</h2>
+              <p>Exportación cifrada periódica con retención en carpeta segura (0700/0600) y medio secundario.</p>
+            </div>
+            <span className="service-status">
+              <StatusDot status={backupState?.enabled ? 'online' : 'warning'} />
+              {backupState?.enabled ? 'Worker Automático Activo' : 'En Espera de Frase / Manual'}
+            </span>
+          </div>
+          <div className="daemon-grid" style={{ marginTop: '12px' }}>
+            <div className="daemon-grid-item">
+              <span>Carpeta secundaria</span>
+              <strong>{backupState?.target_dir || '/data/backup'}</strong>
+            </div>
+            <div className="daemon-grid-item">
+              <span>Política de retención</span>
+              <strong>{backupState?.retention_count ?? 7} respaldos más recientes</strong>
+            </div>
+            <div className="daemon-grid-item">
+              <span>Intervalo de respaldo</span>
+              <strong>{backupState?.interval_secs ? `${Math.round(backupState.interval_secs / 3600)} horas` : 'Diario (24h)'}</strong>
+            </div>
+            <div className="daemon-grid-item">
+              <span>Último respaldo ejecutado</span>
+              <strong>{backupState?.last_run_timestamp ? new Date(backupState.last_run_timestamp * 1000).toLocaleString('es') : 'Sin ejecuciones recientes'}</strong>
+            </div>
+          </div>
+          {backupState?.last_error && (
+            <div className="daemon-warnings" style={{ marginTop: '12px' }}>
+              <div>⚠ {backupState.last_error}</div>
+            </div>
+          )}
+          {backupMessage && (
+            <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '6px', background: backupMessage.startsWith('✓') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: backupMessage.startsWith('✓') ? '#10b981' : '#ef4444', fontSize: '13px' }}>
+              {backupMessage}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap' }}>
+            <input
+              type="password"
+              placeholder="Frase de cifrado (mínimo 16 caracteres)"
+              value={backupPassphrase}
+              onChange={(e) => setBackupPassphrase(e.target.value)}
+              style={{ flex: '1 1 240px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }}
+            />
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => void handleTriggerBackup()}
+              disabled={triggeringBackup || (backupPassphrase.length > 0 && backupPassphrase.length < 16)}
+            >
+              {triggeringBackup ? 'Cifrando respaldo...' : 'Ejecutar Respaldo Ahora'}
+            </button>
+          </div>
+          {backupState?.backups && backupState.backups.length > 0 && (
+            <div style={{ marginTop: '16px' }}>
+              <span className="field-label">Respaldos verificados en medio secundario ({backupState.backups.length})</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                {backupState.backups.slice(0, 5).map((b, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', fontSize: '13px' }}>
+                    <code>{b.filename}</code>
+                    <span style={{ color: '#9ca3af' }}>{(b.size_bytes / 1024).toFixed(1)} KB · {new Date(b.modified_timestamp * 1000).toLocaleDateString('es')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
         <div className="dashboard-lower"><article className="setup-card"><div className="card-heading"><div><span className="card-kicker">PUESTA EN MARCHA</span><h2>Prepara tu comunidad</h2><p>Configura los datos esenciales antes de iniciar el mercado.</p></div><div className="progress-ring"><span>{readiness}<small>/4</small></span></div></div><progress className="setup-progress" value={readiness} max={4} aria-label="Preparación de la comunidad"/><div className="setup-checks"><span className={draft.community.name ? 'complete' : ''}><i>{draft.community.name ? <Icon name="check" size={12}/> : '1'}</i>Identidad</span><span className={draft.market.fiat_currencies.length ? 'complete' : ''}><i>{draft.market.fiat_currencies.length ? <Icon name="check" size={12}/> : '2'}</i>Monedas</span><span className={draft.nostr.relays.length ? 'complete' : ''}><i>{draft.nostr.relays.length ? <Icon name="check" size={12}/> : '3'}</i>Relays Nostr</span><span className={draft.payment_methods.some((m) => m.active) ? 'complete' : ''}><i>{draft.payment_methods.some((m) => m.active) ? <Icon name="check" size={12}/> : '4'}</i>Pagos</span></div><button className="button button-primary" onClick={() => setPage('config')}>Abrir configuración <Icon name="arrow" size={15}/></button></article>
           <article className="market-card"><div className="market-card-top"><span className="market-symbol"><Icon name="bolt" size={19}/></span><span className="market-tag"><i/> AÚN NO INICIADO</span></div><div className="market-empty"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><span>₿</span></div></div><div className="market-copy"><h3>Mercado en desarrollo</h3><p>Este prototipo permite guardar los parámetros de la comunidad. El inicio del mercado aún no está disponible.</p><span className="market-note"><Icon name="alert" size={14}/> Operaciones aún no consultadas</span></div></article></div>
         <div className="bottom-note"><span className="secure-icon"><Icon name="check" size={13}/></span><span>Configuración local</span><span className="note-separator">·</span><span>Los cambios se guardan en el servidor de esta instancia</span><span className="note-spacer"/><span className="api-indicator"><StatusDot status={health ? 'ok' : ''}/>{health ? 'API conectada' : 'API no disponible'}</span></div>

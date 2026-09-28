@@ -14,17 +14,17 @@ fn setup() -> (tempfile::TempDir, axum::Router) {
         config: initial_config,
         npub: None,
     });
-    let app = router(AppState {
-        store: Arc::new(Mutex::new(Store::open(dir.path().into()).unwrap())),
-        integrations: Integrations::default(),
-        orders: Arc::new(tokio::sync::RwLock::new(
+    let app = router(AppState::new(
+        Arc::new(Mutex::new(Store::open(dir.path().into()).unwrap())),
+        Integrations::default(),
+        Arc::new(tokio::sync::RwLock::new(
             mostro_community_api::orders::OrdersCache::new(),
         )),
-        chat: Arc::new(tokio::sync::RwLock::new(
+        Arc::new(tokio::sync::RwLock::new(
             mostro_community_api::chat::ChatCache::new(),
         )),
-        monitor_tx: tx,
-    });
+        tx,
+    ));
     (dir, app)
 }
 fn save(revision: u64, header: bool, origin: &str, config: serde_json::Value) -> Request<Body> {
@@ -489,4 +489,163 @@ async fn orders_endpoint_reports_snapshot_without_secrets() {
     assert!(body["is_stale"].is_boolean());
     assert!(body["orders"].is_array());
     assert!(body["relays"].is_array());
+}
+
+#[tokio::test]
+async fn notifications_endpoint_returns_recent_and_sse_headers() {
+    let (_dir, app) = setup();
+
+    // 1. GET /api/notifications -> 200 OK JSON array
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/notifications")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(body.is_array());
+
+    // 2. GET /api/notifications/sse -> 200 OK text/event-stream
+    let res_sse = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/notifications/sse")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_sse.status(), StatusCode::OK);
+    let content_type = res_sse
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(content_type.contains("text/event-stream"));
+}
+
+#[tokio::test]
+async fn rate_limiting_enforces_limits_and_returns_429() {
+    let dir = tempfile::tempdir().unwrap();
+    let (tx, _rx) = tokio::sync::watch::channel(mostro_community_api::orders::MonitorCommand {
+        config: serde_json::from_str(include_str!("fixtures/community.json")).unwrap(),
+        npub: None,
+    });
+    let mut state = AppState::new(
+        Arc::new(Mutex::new(Store::open(dir.path().into()).unwrap())),
+        Integrations::default(),
+        Arc::new(tokio::sync::RwLock::new(
+            mostro_community_api::orders::OrdersCache::new(),
+        )),
+        Arc::new(tokio::sync::RwLock::new(
+            mostro_community_api::chat::ChatCache::new(),
+        )),
+        tx,
+    );
+    // Strict limiter: 2 tokens max, 0 refill rate
+    state.rate_limiter = Arc::new(mostro_community_api::RateLimiter::new(2.0, 0.0));
+    let app = router(state);
+
+    // Request 1: OK
+    let res1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+
+    // Request 2: OK
+    let res2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+
+    // Request 3: Exceeded -> 429 Too Many Requests
+    let res3 = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res3.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        res3.headers()
+            .get("retry-after")
+            .and_then(|h| h.to_str().ok()),
+        Some("5")
+    );
+}
+
+#[tokio::test]
+async fn backup_status_and_trigger_contracts() {
+    let (_dir, app) = setup();
+
+    // 1. GET /api/backup/status -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/backup/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(body.is_object());
+    assert!(body["interval_secs"].is_number());
+    assert!(body["backups"].is_array());
+
+    // 2. POST /api/backup/trigger without protection -> 403 Forbidden
+    let res_no_csrf = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/backup/trigger")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"passphrase":"some-passphrase"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_no_csrf.status(), StatusCode::FORBIDDEN);
+
+    // 3. POST /api/backup/trigger with CSRF but missing passphrase -> 400 Bad Request
+    let res_missing_pass = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/backup/trigger")
+                .header("content-type", "application/json")
+                .header("x-requested-with", "mostro-community")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_missing_pass.status(), StatusCode::BAD_REQUEST);
 }

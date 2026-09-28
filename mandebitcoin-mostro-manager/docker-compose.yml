@@ -11,11 +11,13 @@ services:
     image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.13
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
-    command: ["mkdir -p /data/config && chown 1000:1000 /data /data/config && chmod 700 /data /data/config"]
+    command: ["mkdir -p /data/config /data/backup && chown -R 1000:1000 /data && chmod 700 /data/config /data/backup"]
     volumes:
       - ${APP_DATA_DIR}/data:/data
     networks: [manager_private]
     restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
     security_opt: ["no-new-privileges:true"]
   lnd_bridge:
     image: ghcr.io/mandebitcoin/mostro-community-umbrel:0.1.0-preview.13
@@ -59,6 +61,7 @@ services:
       LND_CONNECT_HOST: lnd_bridge:8080
       LND_TLS_CERT: /lnd/tls.cert
       LND_READONLY_MACAROON: /lnd/readonly.macaroon
+      BACKUP_OFFSITE_DIR: /data/backup
     networks: [manager_private]
     read_only: true
     tmpfs: [/tmp]
@@ -70,7 +73,6 @@ services:
     user: "1000:1000"
     restart: on-failure
     depends_on:
-
       init:
         condition: service_completed_successfully
     volumes:
@@ -93,6 +95,9 @@ services:
       MOSTRO_IDENTITY_FILE: /data/config/identity/mostro.nsec
     networks:
       - default
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
 networks:
