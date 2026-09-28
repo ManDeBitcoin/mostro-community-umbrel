@@ -137,8 +137,22 @@ pub fn router(state: AppState) -> Router {
         .route("/api/community", get(community).merge(put(save_community)))
         .route("/api/connection", get(connection_info_handler))
         .route("/api/daemon/status", get(daemon_status_handler))
-        .route("/api/daemon/activate", put(daemon_activate_handler))
-        .route("/api/daemon/deactivate", put(daemon_deactivate_handler))
+        .route(
+            "/api/daemon/activate",
+            put(daemon_activate_handler).post(daemon_activate_handler),
+        )
+        .route(
+            "/api/daemon/start",
+            put(daemon_activate_handler).post(daemon_activate_handler),
+        )
+        .route(
+            "/api/daemon/deactivate",
+            put(daemon_deactivate_handler).post(daemon_deactivate_handler),
+        )
+        .route(
+            "/api/daemon/stop",
+            put(daemon_deactivate_handler).post(daemon_deactivate_handler),
+        )
         .route(
             "/api/simulation/scenarios",
             get(simulation_scenarios_handler),
@@ -277,7 +291,7 @@ async fn daemon_status_handler(
 async fn daemon_activate_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    payload: Option<Json<ActivateDaemonRequest>>,
+    body: axum::body::Bytes,
 ) -> Result<Json<daemon::ActivationResult>, Error> {
     verify_protection(&headers)?;
     let root = state
@@ -291,13 +305,25 @@ async fn daemon_activate_handler(
         })?
         .root()
         .to_path_buf();
+
+    let payload: Option<ActivateDaemonRequest> = if body.is_empty() {
+        None
+    } else {
+        Some(serde_json::from_slice(&body).map_err(|e| {
+            error(
+                StatusCode::BAD_REQUEST,
+                &format!("Cuerpo de solicitud inválido: {e}"),
+            )
+        })?)
+    };
+
     let default_origin = format!(
         "https://{}:{}",
         std::env::var("APP_LIGHTNING_NODE_IP").unwrap_or_else(|_| "10.21.21.9".into()),
         std::env::var("APP_LIGHTNING_NODE_GRPC_PORT").unwrap_or_else(|_| "10009".into())
     );
     let lnd_origin = payload
-        .and_then(|p| p.0.lnd_grpc_origin)
+        .and_then(|p| p.lnd_grpc_origin)
         .unwrap_or(default_origin);
 
     daemon::activate(&root, &lnd_origin)
@@ -420,11 +446,32 @@ async fn simulation_run_handler(
 }
 
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {
-    let (mostro, lightning) =
+    let (mut mostro, lightning) =
         tokio::join!(state.integrations.mostro(), state.integrations.lightning());
+    let (is_active, active_rev) = {
+        let store = state.store.lock();
+        if let Ok(store) = store {
+            let active_dir = store.root().join("active");
+            let has_settings = active_dir.join("settings.toml").is_file();
+            let rev = std::fs::read(active_dir.join("status.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<daemon::ActiveStatus>(&b).ok())
+                .map(|s| s.revision);
+            (has_settings, rev)
+        } else {
+            (false, None)
+        }
+    };
+    if state.integrations.mostro_rpc.is_none() && is_active {
+        mostro = json!({
+            "status": "online",
+            "detail": format!("Demonio Mostro activo con configuración vigente (Revisión {})", active_rev.unwrap_or(1)),
+            "version": "0.18.8"
+        });
+    }
     Json(json!({"mostro":mostro,"lightning":lightning,
         "bitcoin":{"status":"unknown","detail":"Verificación directa de Bitcoin pendiente; el estado de LND no la sustituye"},
-        "market_started":false}))
+        "market_started":is_active}))
 }
 
 #[derive(Deserialize, Default)]

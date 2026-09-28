@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
 category: bitcoin
-version: 1.0.1
+version: 1.0.2
 port: 5173
 description: >-
   Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
@@ -41,6 +41,8 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
+  Patch 1.0.2: Implementación completa del flujo de activación del demonio. Mostro ahora arranca atómicamente tras guardar la configuración y publica su Info Event correctamente. Interrupción rápida del standby optimizada en el entrypoint. Nuevos botones de Activación/Desactivación en el Dashboard del mánager.
+
   Patch 1.0.1: Corrección visual del cursor (loading) en los botones inactivos de la Consola de Mediación.
 
   Versión de Producción 1.0.0 (Fase Final de Integración y Operador):

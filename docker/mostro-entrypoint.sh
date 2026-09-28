@@ -17,10 +17,21 @@ fail() {
 [ "${MOSTRO_NSEC_PRIVKEY+x}" != x ] || fail 'pass the identity as a mounted file, not a Docker environment value'
 
 if [ "${STANDBY_IF_UNCONFIGURED:-false}" = "true" ]; then
+    standby_dir="$(dirname "$settings_dir")"
+    standby_pid_file="${MOSTRO_STANDBY_PID_FILE:-$standby_dir/.mostro_standby.pid}"
+    echo "$$" > "$standby_pid_file" 2>/dev/null || true
+    trap 'rm -f "$standby_pid_file" "${standby_pid_file}.sleep" 2>/dev/null || true' EXIT INT TERM
+
     while [ ! -f "$identity_file" ] || [ ! -f "$settings_dir/settings.toml" ]; do
         printf '%s\n' "Mostro daemon: en espera de activación por el operador en el panel de control..."
-        sleep 10
+        sleep 1 &
+        sleep_pid=$!
+        echo "$sleep_pid" > "${standby_pid_file}.sleep" 2>/dev/null || true
+        wait "$sleep_pid" 2>/dev/null || true
+        rm -f "$standby_dir/.standby_wake" "$settings_dir/.standby_wake" "/data/.standby_wake" 2>/dev/null || true
     done
+    rm -f "$standby_pid_file" "${standby_pid_file}.sleep" "$standby_dir/.standby_wake" "$settings_dir/.standby_wake" "/data/.standby_wake" 2>/dev/null || true
+    printf '%s\n' "Mostro daemon: configuración activa detectada. Iniciando mostrod..."
 fi
 
 [ -f "$identity_file" ] && [ ! -L "$identity_file" ] || fail 'private identity file is missing or is a symlink'

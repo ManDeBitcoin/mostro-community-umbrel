@@ -200,6 +200,20 @@ async fn daemon_endpoints_enforce_protection_and_report_state() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
+    // POST daemon start fails without custom header
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/daemon/start")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
     // PUT daemon deactivate fails without custom header
     let response = app
         .clone()
@@ -213,6 +227,151 @@ async fn daemon_endpoints_enforce_protection_and_report_state() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // POST daemon stop fails without custom header
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/daemon/stop")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn daemon_activation_flow_and_dashboard_status() {
+    use nostr::{Keys, SecretKey, ToBech32};
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, app) = setup();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    // 1. Initial dashboard reports market_started = false and mostro unconfigured
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["market_started"], false);
+    assert_eq!(body["mostro"]["status"], "unconfigured");
+
+    // 2. Save community draft
+    let res = app
+        .clone()
+        .oneshot(save(0, true, "http://localhost:5173", config()))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 3. Import private identity
+    let keys = Keys::new(SecretKey::from_slice(&[42; 32]).unwrap());
+    let secret = keys.secret_key().to_bech32().unwrap();
+    let public = keys.public_key().to_bech32().unwrap();
+    mostro_community_api::identity::import(dir.path(), &secret, &public).unwrap();
+
+    // 4. Verify daemon status can_activate = true, state = configured_standby
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/daemon/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["state"], "configured_standby");
+    assert_eq!(body["can_activate"], true);
+
+    // 5. POST /api/daemon/start activates daemon
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/daemon/start")
+                .header("x-requested-with", "mostro-community")
+                .header("host", "localhost:5173")
+                .header("origin", "http://localhost:5173")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"lnd_grpc_origin":"https://127.0.0.1:10009"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["revision"], 1);
+    assert_eq!(body["settings_sha256"].as_str().unwrap().len(), 64);
+
+    // 6. Verify settings.toml exists and active status
+    assert!(dir.path().join("active").join("settings.toml").is_file());
+
+    // 7. Verify dashboard reports market_started = true and mostro online
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["market_started"], true);
+    assert_eq!(body["mostro"]["status"], "online");
+
+    // 8. POST /api/daemon/stop deactivates daemon
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/daemon/stop")
+                .header("x-requested-with", "mostro-community")
+                .header("host", "localhost:5173")
+                .header("origin", "http://localhost:5173")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(!dir.path().join("active").join("settings.toml").exists());
+
+    // 9. Dashboard returns to market_started = false
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["market_started"], false);
 }
 
 fn sim_request(

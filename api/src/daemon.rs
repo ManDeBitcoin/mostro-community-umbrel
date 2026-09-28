@@ -140,7 +140,11 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
 
     let can_activate = identity_present && draft_revision.is_some();
     let state = if active_settings_path.is_some() {
-        DaemonState::ActiveReady
+        if is_mostrod_running() {
+            DaemonState::ActiveRunning
+        } else {
+            DaemonState::ActiveReady
+        }
     } else if can_activate {
         DaemonState::ConfiguredStandby
     } else {
@@ -219,6 +223,9 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
         .and_then(|file| file.sync_all())
         .map_err(|_| "No se pudo sincronizar el directorio activo")?;
 
+    // Despertar o interrumpir el bucle de espera (sleep) del contenedor mostro
+    kill_standby_sleep(root);
+
     Ok(ActivationResult {
         revision: document.revision,
         settings_path: settings_file,
@@ -238,5 +245,69 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
     if status_file.exists() {
         fs::remove_file(&status_file).map_err(|_| "No se pudo eliminar status.json activo")?;
     }
+    let _ = fs::remove_file(root.join(".standby_wake"));
+    let _ = fs::remove_file(active_dir.join(".standby_wake"));
+
+    // Detener mostrod si está corriendo en el mismo entorno/namespace
+    let _ = std::process::Command::new("pkill")
+        .args(["-TERM", "mostrod"])
+        .status();
+
     Ok(())
+}
+
+fn kill_standby_sleep(root: &Path) {
+    // 1. Terminar PID grabado por mostro-entrypoint si existe
+    let candidates = [
+        root.join(".mostro_standby.pid.sleep"),
+        root.join(".mostro_standby.pid"),
+        PathBuf::from("/data/.mostro_standby.pid.sleep"),
+        PathBuf::from("/data/.mostro_standby.pid"),
+        PathBuf::from("/data/config/.mostro_standby.pid.sleep"),
+        PathBuf::from("/data/config/.mostro_standby.pid"),
+    ];
+
+    for pid_file in candidates {
+        if let Ok(content) = fs::read_to_string(&pid_file) {
+            let pid_str = content.trim();
+            if let Ok(pid) = pid_str.parse::<i32>()
+                && pid > 1
+            {
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", pid_str])
+                    .status();
+            }
+        }
+    }
+
+    // 2. Interrumpir procesos sleep de espera si están en el mismo namespace
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", "sleep 10"])
+        .status();
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", "sleep 1"])
+        .status();
+
+    // 3. Crear archivo señalizadador de activación para detección inmediata
+    let _ = File::create(root.join(".standby_wake"));
+    let _ = File::create(root.join("active").join(".standby_wake"));
+    let _ = File::create(Path::new("/data/.standby_wake"));
+}
+
+fn is_mostrod_running() -> bool {
+    if let Ok(entries) = fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            if let Ok(file_name) = entry.file_name().into_string()
+                && file_name.chars().all(|c| c.is_ascii_digit())
+            {
+                let comm_path = entry.path().join("comm");
+                if let Ok(comm) = fs::read_to_string(&comm_path)
+                    && comm.trim() == "mostrod"
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }

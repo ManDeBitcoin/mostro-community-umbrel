@@ -76,15 +76,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
-        if args.len() == 2 && args[0] == "activate-daemon" {
+        if !args.is_empty() && (args[0] == "activate-daemon" || args[0] == "start-daemon") {
             let root = PathBuf::from(
                 std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
             );
-            let activated = mostro_community_api::daemon::activate(&root, &args[1])?;
+            let default_origin = format!(
+                "https://{}:{}",
+                std::env::var("APP_LIGHTNING_NODE_IP").unwrap_or_else(|_| "10.21.21.9".into()),
+                std::env::var("APP_LIGHTNING_NODE_GRPC_PORT").unwrap_or_else(|_| "10009".into())
+            );
+            let origin = if args.len() >= 2 {
+                &args[1]
+            } else {
+                &default_origin
+            };
+            let activated = mostro_community_api::daemon::activate(&root, origin)?;
             println!("{}", serde_json::to_string_pretty(&activated)?);
             return Ok(());
         }
-        if args == ["deactivate-daemon"] {
+        if args == ["deactivate-daemon"] || args == ["stop-daemon"] {
             let root = PathBuf::from(
                 std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./var/config".into()),
             );

@@ -28,7 +28,7 @@ RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo clipp
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/ManDeBitcoin/mostro-community-umbrel"
 LABEL org.opencontainers.image.title="Mostro Community Manager"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base procps && rm -rf /var/lib/apt/lists/*
 COPY --from=api /src/target/release/mostro-community-api /usr/local/bin/mostro-community-api
 COPY --from=download /mostrod /usr/local/bin/mostrod
 COPY docker/mostro-entrypoint.sh /usr/local/bin/mostro-entrypoint
