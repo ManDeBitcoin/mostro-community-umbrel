@@ -51,4 +51,6 @@
 .payment-summary-badge .summary-dot{width:5px;height:5px;border-radius:50%;background:#5ec485}
 .payment-summary-badge .summary-count{background:#23352a;color:#8be3a6;font-size:8px;padding:0 5px;border-radius:10px;font-weight:700}
 
+.brand-mark{display:block;flex:none;background:none;box-shadow:0 5px 16px #0005}
+.brand-copy b{letter-spacing:.2px}
 

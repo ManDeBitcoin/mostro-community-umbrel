@@ -1283,7 +1283,7 @@ function App() {
   ] : [];
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><div className="brand-mark">M</div><div className="brand-copy"><b>mostro</b><span>COMMUNITY MANAGER</span></div></div>
+      <div className="brand"><img className="brand-mark" src="/brand-mark.png" alt="" aria-hidden="true"/><div className="brand-copy"><b>MOSTRO</b><span>COMMUNITY MANAGER</span></div></div>
       <div className="workspace-label">ESPACIO DE TRABAJO</div>
       <div className="workspace"><div className="workspace-icon">{(draft.community.name || 'MC').slice(0, 2).toUpperCase()}</div><div><b>{draft.community.name || 'Mi comunidad'}</b><span>Entorno local</span></div><span className="workspace-chevron">⌄</span></div>
       <div className="nav-label">GENERAL</div>

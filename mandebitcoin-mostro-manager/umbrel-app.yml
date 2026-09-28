@@ -2,9 +2,9 @@ manifestVersion: 1
 id: mandebitcoin-mostro-manager
 name: Mostro Community Manager
 tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
-icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.svg
+icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.png
 category: bitcoin
-version: 1.0.3
+version: 1.0.4
 port: 5173
 description: >-
   Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
@@ -37,10 +37,15 @@ support: https://github.com/ManDeBitcoin/mostro-community-umbrel/issues
 dependencies: [lightning]
 gallery:
   - https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/docs/screenshots/dashboard.png
+  - https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/logo.png
 path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: >-
+  Patch 1.0.4:
+  - Nueva identidad visual de Mostro Community Manager: logotipo elegido, icono de Umbrel y favicon coherentes con el panel.
+  - Galería y captura del panel actualizadas para mostrar la interfaz vigente.
+
   Patch 1.0.3:
   - Navegación de Configuración: Resuelto bug estético donde el indicador highlight quedaba fijo en Identidad. Ahora sigue dinámicamente la sección activa (Identidad, Mercado, Seguridad, Nostr, Métodos de pago) y sincroniza con el scroll.
   - Métodos de Pago: Sistema interactivo de Tags dinámicos ("TAC") con resumen de categorías en uso y asignación directa con 1 clic para mantener la coherencia del catálogo. Auto-slug para ID de métodos de pago.

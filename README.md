@@ -1,39 +1,35 @@
 # Mostro Community Manager for Umbrel
 
-Panel para preparar comunidades Mostro. **Vista previa:** guarda borradores de configuración; todavía no inicia mercados ni gestiona operaciones financieras.
+<img src="assets/logo.png" alt="Mostro Community Manager" width="720">
+
+Panel de operador para configurar una comunidad P2P sobre Mostro y Lightning, activar el daemon y supervisar órdenes, liquidez y mediación. **Versión del manifiesto de Umbrel: 1.0.4.**
 
 ## Instalar en Umbrel
 
 Este repositorio también es una tienda comunitaria de una sola aplicación.
 
-**Disponible: [0.1.0-preview.8](https://github.com/ManDeBitcoin/mostro-community-umbrel/releases/tag/v0.1.0-preview.8).** Imágenes amd64 y arm64 probadas, fijadas por digest y con descarga anónima verificada. [Compilación y pruebas](https://github.com/ManDeBitcoin/mostro-community-umbrel/actions/runs/36331949528).
-
 1. En Umbrel, abrir **App Store → Community App Stores / Tiendas comunitarias**.
 2. Añadir `https://github.com/ManDeBitcoin/mostro-community-umbrel`.
 3. Instalar **Mostro Community Manager**.
-4. Comprobar que la ficha muestre **0.1.0-preview.8** o posterior y abrirlo desde Umbrel.
-
-Si intentaste instalar `0.1.0-preview.1` y recibiste 403, actualiza la tienda antes de reintentar. Si Umbrel conserva la instalación fallida y sigue solicitando la imagen antigua, elimina únicamente la instalación fallida de **Mostro Community Manager** y vuelve a instalarla. La instalación independiente de Mostro no forma parte de ese paquete.
+4. Comprobar que la ficha muestre **1.0.4** y abrirlo desde Umbrel.
 
 ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
 
-El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel para sus consultas de lectura; todavía no usa Bitcoin directamente ni ejecuta operaciones.
+El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel y empaqueta el daemon oficial Mostro v0.18.8.
 
 ## Si ya tienes Mostro funcionando
 
-Puedes conservar tu instalación. El Manager se empaqueta sin daemon Mostro, no monta sus claves ni su base de datos, no abre RPC y solo consulta LND mediante su macaroon de lectura. La API del panel permanece en una red interna; un puente de destino fijo permite consultar LND con TLS.
-
-Esto permite probar el panel por separado. **Instalarlo no importa ni administra automáticamente el Mostro existente.** Antes de conectar esa instancia se debe inventariar versión, red, método de ejecución, estado de operaciones, identidad LND y backups. No arrancar un segundo daemon con la misma identidad, DB o estado financiero. Ver [convivencia y futura conexión](docs/coexistence.md).
+Puedes conservar tu instalación. El Manager incluye su propio daemon Mostro, que permanece en espera hasta la activación, y no importa automáticamente la identidad ni la base de datos de una instancia externa. Antes de activar otra comunidad, comprueba identidad, red, LND, estado de operaciones y backups. Ver [convivencia y futura conexión](docs/coexistence.md).
 
 ## Incluye
 
 - Panel React en español y API Rust/Axum.
-- Borrador persistente: comunidad, monedas, límites, comisiones, bonds, relays y catálogo de pagos.
-- Validación, revisión optimista, escritura atómica y copia de la revisión anterior.
-- Consulta de lectura al LND de Umbrel: sincronización, red, canales y saldos agregados, sin acceso de administración al nodo. El adaptador Mostro aún no está conectado en el paquete.
-- Contratos y renderer TOML fijados a Mostro v0.18.8; todavía sin aplicar configuraciones al daemon.
+- Configuración persistente de comunidad, mercado, seguridad, relays y métodos de pago, con validación y revisiones.
+- Activación y desactivación del daemon Mostro oficial v0.18.8 a partir de la configuración guardada.
+- Consulta de LND y panel de liquidez; monitor de órdenes públicas Nostr y simulador P2P.
+- Consola de mediación, notificaciones en vivo y respaldos cifrados.
 
-Pendientes: backup cifrado de la identidad, inicio de mercado, trades, disputas, Telegram, upgrades y pruebas E2E regtest. [Estado del blueprint](docs/roadmap.md).
+El [roadmap](docs/roadmap.md) conserva el historial y los siguientes pasos.
 
 ## Desarrollo local
 
@@ -62,18 +58,8 @@ El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y 
 
 Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin credenciales. La visibilidad del repositorio no convierte automáticamente sus paquetes en públicos.
 
-[Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Blueprint original](docs/reference/blueprint-v4.md)
+[Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Identidad visual y dirección de interfaz](docs/brand-and-ui-direction.md) · [Blueprint original](docs/reference/blueprint-v4.md)
 
-## Importar la identidad existente
+## Documentación operativa
 
-Desde preview.5, puedes importar tu `nsec` por terminal con entrada oculta y comprobar que corresponda al `npub` esperado. Se almacena con permisos privados, sin sobrescribir otra identidad. No inicia Mostro. Ver [instrucciones y límites](docs/identity.md).
-
-## LND de Umbrel
-
-La integración de lectura utiliza `tls.cert` y `readonly.macaroon` existentes del LND de Umbrel. No copia ni publica sus valores. El panel muestra si la cadena y el grafo están sincronizados y, si LND lo informa, el saldo agregado de canales abiertos. Son indicadores de diagnóstico; no prueban que exista una ruta ni que Mostro pueda aceptar órdenes. Disponible desde preview.6. Ver [conexión y límites](docs/lnd.md).
-
-## Preparación de Mostro (en desarrollo)
-
-Desde preview.7, `mostro-community-api check-mostro` revisa localmente el borrador, la identidad y LND sin arrancar el daemon. La instalación inspeccionada tiene cero canales Lightning activos: aunque LND está conectado, todavía no hay capacidad para intercambios. La imagen oficial de Mostro se verifica por checksum y versión; el despliegue y las operaciones financieras siguen pendientes. Ver [preflight y requisitos](docs/mostro-preflight.md).
-
-Desde preview.8, `mostro-community-api export-backup` cifra la identidad y el borrador previo al mercado en un archivo age privado y verifica el descifrado antes de guardarlo. `verify-backup` comprueba ese archivo sin restaurar datos. La futura base de datos Mostro y la restauración automática siguen pendientes. Ver [exportación e instrucciones](docs/identity.md#exportación-cifrada-previa-al-mercado).
+[Identidad y respaldos](docs/identity.md) · [LND de Umbrel](docs/lnd.md) · [Revisión previa de Mostro](docs/mostro-preflight.md) · [Convivencia con una instancia existente](docs/coexistence.md)
