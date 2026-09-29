@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.png
 category: bitcoin
-version: 1.0.8
+version: 1.0.9
 port: 5173
 description: >-
   Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
@@ -42,7 +42,13 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: |-
-  Versión 1.0.8
+  Versión 1.0.9
+  
+  - Rediseño estético y armonioso de la tarjeta de Conexión con Mostro App y Mostrix.
+  - Distribución en 2 columnas: panel de código QR interactivo con selector de pestañas (URI Mostro / JSON) a la izquierda y detalles de conexión con botones de copiado a la derecha.
+  - Visualización dinámica del payload activo (URI o JSON) según la pestaña seleccionada.
+  
+  # Mostro Community Manager v1.0.8
   
   - Agregado switch para alternar entre formato URI y JSON en el código QR comunitario.
   - Corregido el copiado al portapapeles en entornos HTTP.
