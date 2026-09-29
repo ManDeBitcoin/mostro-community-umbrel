@@ -54,7 +54,7 @@ docker build -f docker/Dockerfile.umbrel -t mostro-community:preview .
 ./scripts/container-smoke.sh mostro-community:preview
 ```
 
-El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y persistencia tras reinicio. El workflow [`publish.yml`](.github/workflows/publish.yml) compila y prueba imágenes nativas amd64 y arm64 al publicar un tag `v*`, después genera el manifiesto multi-arquitectura en GHCR y una release. La tienda debe fijar ese manifiesto por digest.
+El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y persistencia tras reinicio. El workflow [`publish.yml`](.github/workflows/publish.yml) compila y prueba imágenes nativas amd64 y arm64 al publicar un tag `v*`. Solo después de verificar que GHCR las entrega sin credenciales promueve la nueva versión en la tienda. Ver el [proceso de publicación](docs/release-process.md) antes de crear un tag.
 
 Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin credenciales. La visibilidad del repositorio no convierte automáticamente sus paquetes en públicos.
 

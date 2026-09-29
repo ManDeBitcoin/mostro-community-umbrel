@@ -1,4 +1,4 @@
-name: Build and publish Umbrel preview
+name: Build and publish Umbrel release
 on:
   push:
     tags: ['v*']
@@ -6,10 +6,19 @@ permissions:
   contents: read
   packages: write
 concurrency:
-  group: publish-${{ github.ref }}
+  group: umbrel-release
   cancel-in-progress: false
 jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Test release metadata gate
+        run: python3 -m unittest discover -s scripts/tests
+      - name: Reject store version bumps before the image exists
+        run: python3 scripts/release_metadata.py check-candidate "$GITHUB_REF_NAME"
   build:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +66,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
@@ -83,3 +93,36 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" image-manifest.json --verify-tag --prerelease --title "Mostro Community Manager $GITHUB_REF_NAME" --notes-file docs/release-notes.md
           fi
+      - name: Promote verified image in the Umbrel store
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CURRENT_VERSION="$(python3 -c 'from scripts.release_metadata import current_version; print(current_version())')"
+          cp docs/release-notes.md "$RUNNER_TEMP/mostro-release-notes.md"
+          git fetch origin main:refs/remotes/origin/main
+          git switch -C release-promotion origin/main
+          if [ "$(python3 -c 'from scripts.release_metadata import current_version; print(current_version())')" = "$VERSION" ]; then
+            python3 scripts/release_metadata.py check-store
+            exit 0
+          fi
+          python3 scripts/release_metadata.py promote "$GITHUB_REF_NAME" --expected-current "$CURRENT_VERSION" --notes-file "$RUNNER_TEMP/mostro-release-notes.md"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md mandebitcoin-mostro-manager/umbrel-app.yml mandebitcoin-mostro-manager/docker-compose.yml
+          git commit -m "release: promote $GITHUB_REF_NAME in Umbrel store"
+          PROMOTION_BRANCH="release-promotion-$VERSION-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          PROMOTION_SHA="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/$PROMOTION_BRANCH"
+          gh workflow run store-guard.yml --ref "$PROMOTION_BRANCH"
+          GUARD_RUN_ID=""
+          for attempt in $(seq 1 30); do
+            GUARD_RUN_ID="$(gh run list --workflow store-guard.yml --branch "$PROMOTION_BRANCH" --event workflow_dispatch --limit 5 --json databaseId,headSha --jq ".[] | select(.headSha == \"$PROMOTION_SHA\") | .databaseId" | head -1)"
+            if [ -n "$GUARD_RUN_ID" ]; then break; fi
+            sleep 2
+          done
+          if [ -z "$GUARD_RUN_ID" ]; then echo 'Store guard did not start' >&2; exit 1; fi
+          gh run watch "$GUARD_RUN_ID" --exit-status
+          git push origin HEAD:main
+          git push origin --delete "$PROMOTION_BRANCH"
