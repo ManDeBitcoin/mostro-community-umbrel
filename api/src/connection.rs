@@ -77,9 +77,12 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             .map(|code| code.render::<svg::Color>().build())
     });
 
-
     let json_uri = pubkey_hex.as_ref().map(|pk| {
-        let relays_json = configured_relays.iter().map(|r| format!("\"{}\"", r)).collect::<Vec<_>>().join(", ");
+        let relays_json = configured_relays
+            .iter()
+            .map(|r| format!("\"{}\"", r))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("{{\"pubkey\": \"{}\", \"relays\": [{}]}}", pk, relays_json)
     });
 
