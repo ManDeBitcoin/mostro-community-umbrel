@@ -122,6 +122,68 @@ pub fn persist_public_key(root: &Path, npub: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub fn import_nsec_with_overwrite(
+    root: &Path,
+    nsec: &str,
+    overwrite: bool,
+) -> Result<String, &'static str> {
+    let secret = SecretKey::from_bech32(nsec.trim()).map_err(|_| "Clave nsec inválida")?;
+    let keys = Keys::new(secret);
+    let expected = keys
+        .public_key()
+        .to_bech32()
+        .map_err(|_| "Clave pública inválida")?;
+    if overwrite {
+        let directory = root.join("identity");
+        let nsec_path = directory.join("mostro.nsec");
+        let pub_path = directory.join("mostro.pub");
+        if nsec_path.exists() {
+            let _ = fs::remove_file(nsec_path);
+        }
+        if pub_path.exists() {
+            let _ = fs::remove_file(pub_path);
+        }
+    }
+    import(root, nsec.trim(), &expected)
+}
+
+pub fn import_nsec(root: &Path, nsec: &str) -> Result<String, &'static str> {
+    import_nsec_with_overwrite(root, nsec, false)
+}
+
+pub fn generate_with_overwrite(
+    root: &Path,
+    overwrite: bool,
+) -> Result<(String, String), &'static str> {
+    if overwrite {
+        let directory = root.join("identity");
+        let nsec_path = directory.join("mostro.nsec");
+        let pub_path = directory.join("mostro.pub");
+        if nsec_path.exists() {
+            let _ = fs::remove_file(nsec_path);
+        }
+        if pub_path.exists() {
+            let _ = fs::remove_file(pub_path);
+        }
+    }
+    let keys = Keys::generate();
+    let nsec = Zeroizing::new(
+        keys.secret_key()
+            .to_bech32()
+            .map_err(|_| "Clave privada inválida")?,
+    );
+    let npub = keys
+        .public_key()
+        .to_bech32()
+        .map_err(|_| "Clave pública inválida")?;
+    import(root, &nsec, &npub)?;
+    Ok((nsec.to_string(), npub))
+}
+
+pub fn generate(root: &Path) -> Result<(String, String), &'static str> {
+    generate_with_overwrite(root, false)
+}
+
 pub fn import_interactive() -> Result<(), &'static str> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("La importación requiere una terminal interactiva local (-it)");
@@ -325,5 +387,23 @@ mod tests {
         fs::remove_file(&pub_path).unwrap();
         std::os::unix::fs::symlink(&dummy_pub, &pub_path).unwrap();
         assert!(read_public_key(root.path()).is_err());
+    }
+    #[test]
+    fn test_generate_and_import_nsec() {
+        let root = tempfile::tempdir().unwrap();
+        let (nsec, npub) = generate(root.path()).unwrap();
+        assert!(nsec.starts_with("nsec1"));
+        assert!(npub.starts_with("npub1"));
+        assert_eq!(read_public_key(root.path()).unwrap(), Some(npub.clone()));
+        assert!(generate(root.path()).is_err());
+        let (nsec2, npub2) = generate_with_overwrite(root.path(), true).unwrap();
+        assert_ne!(nsec, nsec2);
+        assert_ne!(npub, npub2);
+        assert_eq!(read_public_key(root.path()).unwrap(), Some(npub2));
+
+        let root2 = tempfile::tempdir().unwrap();
+        let imported = import_nsec(root2.path(), &nsec).unwrap();
+        assert_eq!(imported, npub);
+        assert_eq!(read_public_key(root2.path()).unwrap(), Some(npub));
     }
 }

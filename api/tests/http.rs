@@ -900,3 +900,91 @@ async fn lnd_channels_endpoint_contract() {
     assert_eq!(body_default["status"], "unconfigured");
     assert_eq!(body_default["channels"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn test_community_presets_and_identity_endpoints() {
+    let (_dir, app) = setup();
+
+    let res_presets = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/community/presets")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_presets.status(), StatusCode::OK);
+    let presets: serde_json::Value =
+        serde_json::from_slice(&res_presets.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert_eq!(presets.as_array().unwrap().len(), 3);
+    assert_eq!(presets[0]["id"], "latam");
+    assert_eq!(presets[1]["id"], "europe");
+    assert_eq!(presets[2]["id"], "global");
+
+    let req_unprotected = Request::builder()
+        .method("POST")
+        .uri("/api/identity/generate")
+        .header("host", "localhost:5173")
+        .body(Body::empty())
+        .unwrap();
+    let res_unprotected = app.clone().oneshot(req_unprotected).await.unwrap();
+    assert_eq!(res_unprotected.status(), StatusCode::FORBIDDEN);
+
+    let req_gen = Request::builder()
+        .method("POST")
+        .uri("/api/identity/generate")
+        .header("x-requested-with", "mostro-community")
+        .header("host", "localhost:5173")
+        .body(Body::empty())
+        .unwrap();
+    let res_gen = app.clone().oneshot(req_gen).await.unwrap();
+    assert_eq!(res_gen.status(), StatusCode::OK);
+    let gen_body: serde_json::Value =
+        serde_json::from_slice(&res_gen.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let nsec = gen_body["nsec"].as_str().unwrap().to_string();
+    let npub = gen_body["npub"].as_str().unwrap().to_string();
+    assert!(nsec.starts_with("nsec1"));
+    assert!(npub.starts_with("npub1"));
+
+    let req_gen_duplicate = Request::builder()
+        .method("POST")
+        .uri("/api/identity/generate")
+        .header("x-requested-with", "mostro-community")
+        .header("host", "localhost:5173")
+        .body(Body::empty())
+        .unwrap();
+    let res_dup = app.clone().oneshot(req_gen_duplicate).await.unwrap();
+    assert_eq!(res_dup.status(), StatusCode::BAD_REQUEST);
+
+    let (_dir2, app2) = setup();
+    let req_import = Request::builder()
+        .method("POST")
+        .uri("/api/identity/import")
+        .header("content-type", "application/json")
+        .header("x-requested-with", "mostro-community")
+        .header("host", "localhost:5173")
+        .body(Body::from(serde_json::json!({"nsec": nsec}).to_string()))
+        .unwrap();
+    let res_import = app2.clone().oneshot(req_import).await.unwrap();
+    assert_eq!(res_import.status(), StatusCode::OK);
+    let import_body: serde_json::Value =
+        serde_json::from_slice(&res_import.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert_eq!(import_body["npub"], npub);
+
+    let req_invalid = Request::builder()
+        .method("POST")
+        .uri("/api/identity/import")
+        .header("content-type", "application/json")
+        .header("x-requested-with", "mostro-community")
+        .header("host", "localhost:5173")
+        .body(Body::from(
+            serde_json::json!({"nsec": "nsec1invalid"}).to_string(),
+        ))
+        .unwrap();
+    let res_invalid = app2.oneshot(req_invalid).await.unwrap();
+    assert_eq!(res_invalid.status(), StatusCode::BAD_REQUEST);
+}

@@ -238,3 +238,245 @@ pub fn render_settings(
         .insert("anti_abuse_bond".into(), bond.into());
     toml::to_string_pretty(&doc).map_err(|_| "No se pudo generar TOML".into())
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegionalPreset {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub icon: String,
+    pub config: Configuration,
+}
+
+pub fn get_regional_presets() -> Vec<RegionalPreset> {
+    vec![
+        RegionalPreset {
+            id: "latam".into(),
+            title: "Latinoamérica (LATAM)".into(),
+            description: "Configuración optimizada para mercados en Latam: Pago Móvil, Zelle, Mercado Pago, PIX, etc.".into(),
+            icon: "🌎".into(),
+            config: Configuration {
+                community: Community {
+                    name: "Mostro P2P Latam".into(),
+                    about: "Comunidad de intercambio P2P de Bitcoin Lightning para Latinoamérica.".into(),
+                    website: "https://mostro.network".into(),
+                    contact: "https://t.me/MostroP2P".into(),
+                    language: "es".into(),
+                },
+                market: Market {
+                    fiat_currencies: vec![
+                        "USD".into(), "ARS".into(), "VES".into(), "COP".into(),
+                        "BRL".into(), "MXN".into(), "CLP".into(), "PEN".into(),
+                    ],
+                    min_trade_sats: 10_000,
+                    max_trade_sats: 1_000_000,
+                    fee_bps: 50,
+                    dev_fee_bps: 1_000,
+                    max_routing_fee_bps: 10,
+                },
+                safety: Safety {
+                    bond_enabled: true,
+                    bond_bps: 300,
+                    base_bond_sats: 5_000,
+                    bond_apply_to: BondApply::Both,
+                    automatic_timeout_slash: true,
+                    pow: 0,
+                    pow_first_contact: 0,
+                },
+                nostr: Nostr {
+                    relays: vec![
+                        "wss://relay.damus.io".into(),
+                        "wss://nos.lol".into(),
+                        "wss://nostr.mom".into(),
+                    ],
+                },
+                payment_methods: vec![
+                    PaymentMethod {
+                        id: "pago_movil".into(),
+                        label: "Pago Móvil".into(),
+                        category: "Venezuela".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "transferencia_bancaria".into(),
+                        label: "Transferencia Bancaria".into(),
+                        category: "Nacional / Regional".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "zelle".into(),
+                        label: "Zelle".into(),
+                        category: "USD Internacional".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "mercado_pago".into(),
+                        label: "Mercado Pago".into(),
+                        category: "Latam Digital".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "pix".into(),
+                        label: "PIX".into(),
+                        category: "Brasil".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "nequi_bancolombia".into(),
+                        label: "Nequi / Bancolombia".into(),
+                        category: "Colombia".into(),
+                        active: true,
+                    },
+                ],
+            },
+        },
+        RegionalPreset {
+            id: "europe".into(),
+            title: "Europa (SEPA / Bizum)".into(),
+            description: "Configuración para zona SEPA, Bizum, Revolut, EUR y CHF.".into(),
+            icon: "🇪🇺".into(),
+            config: Configuration {
+                community: Community {
+                    name: "Mostro P2P Europe".into(),
+                    about: "Bitcoin Lightning P2P community for Europe & SEPA zone.".into(),
+                    website: "https://mostro.network".into(),
+                    contact: "https://t.me/MostroP2P".into(),
+                    language: "en".into(),
+                },
+                market: Market {
+                    fiat_currencies: vec!["EUR".into(), "CHF".into(), "GBP".into()],
+                    min_trade_sats: 20_000,
+                    max_trade_sats: 2_000_000,
+                    fee_bps: 50,
+                    dev_fee_bps: 1_000,
+                    max_routing_fee_bps: 10,
+                },
+                safety: Safety {
+                    bond_enabled: true,
+                    bond_bps: 300,
+                    base_bond_sats: 10_000,
+                    bond_apply_to: BondApply::Both,
+                    automatic_timeout_slash: true,
+                    pow: 0,
+                    pow_first_contact: 0,
+                },
+                nostr: Nostr {
+                    relays: vec![
+                        "wss://relay.damus.io".into(),
+                        "wss://nos.lol".into(),
+                        "wss://nostr.mom".into(),
+                    ],
+                },
+                payment_methods: vec![
+                    PaymentMethod {
+                        id: "bizum".into(),
+                        label: "Bizum".into(),
+                        category: "España".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "sepa_instant".into(),
+                        label: "SEPA Instant".into(),
+                        category: "Eurozona".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "revolut".into(),
+                        label: "Revolut".into(),
+                        category: "Multi-divisa".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "n26".into(),
+                        label: "N26".into(),
+                        category: "Eurozona".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "wise".into(),
+                        label: "Wise".into(),
+                        category: "Internacional".into(),
+                        active: true,
+                    },
+                ],
+            },
+        },
+        RegionalPreset {
+            id: "global".into(),
+            title: "P2P Global / Internacional".into(),
+            description: "Configuración flexible para operaciones globales con Wise, Revolut y efectivo.".into(),
+            icon: "🌐".into(),
+            config: Configuration {
+                community: Community {
+                    name: "Mostro P2P Global".into(),
+                    about: "Global peer-to-peer Bitcoin Lightning exchange community.".into(),
+                    website: "https://mostro.network".into(),
+                    contact: "https://t.me/MostroP2P".into(),
+                    language: "en".into(),
+                },
+                market: Market {
+                    fiat_currencies: vec!["USD".into(), "EUR".into()],
+                    min_trade_sats: 20_000,
+                    max_trade_sats: 2_000_000,
+                    fee_bps: 50,
+                    dev_fee_bps: 1_000,
+                    max_routing_fee_bps: 10,
+                },
+                safety: Safety {
+                    bond_enabled: true,
+                    bond_bps: 300,
+                    base_bond_sats: 10_000,
+                    bond_apply_to: BondApply::Both,
+                    automatic_timeout_slash: true,
+                    pow: 0,
+                    pow_first_contact: 0,
+                },
+                nostr: Nostr {
+                    relays: vec![
+                        "wss://relay.damus.io".into(),
+                        "wss://nos.lol".into(),
+                        "wss://nostr.mom".into(),
+                    ],
+                },
+                payment_methods: vec![
+                    PaymentMethod {
+                        id: "wise".into(),
+                        label: "Wise".into(),
+                        category: "Internacional".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "revolut".into(),
+                        label: "Revolut".into(),
+                        category: "Multi-divisa".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "swift".into(),
+                        label: "SWIFT Transfer".into(),
+                        category: "Bancario Internacional".into(),
+                        active: true,
+                    },
+                    PaymentMethod {
+                        id: "cash_in_person".into(),
+                        label: "Efectivo en Persona (Cash)".into(),
+                        category: "Presencial".into(),
+                        active: true,
+                    },
+                ],
+            },
+        },
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_regional_presets_are_valid() {
+        for preset in get_regional_presets() {
+            assert!(preset.config.validate().is_ok());
+        }
+    }
+}
