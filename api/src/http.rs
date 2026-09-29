@@ -464,14 +464,15 @@ async fn dashboard(State(state): State<AppState>) -> Json<Value> {
     };
     if state.integrations.mostro_rpc.is_none() && is_active {
         mostro = json!({
-            "status": "online",
-            "detail": format!("Demonio Mostro activo con configuración vigente (Revisión {})", active_rev.unwrap_or(1)),
-            "version": "0.18.8"
+            "status": "unknown",
+            "detail": "Configuración guardada; ejecución y versión del daemon sin verificar",
+            "configured_revision": active_rev
         });
     }
     Json(json!({"mostro":mostro,"lightning":lightning,
         "bitcoin":{"status":"unknown","detail":"Verificación directa de Bitcoin pendiente; el estado de LND no la sustituye"},
-        "market_started":is_active}))
+        "configuration_active":is_active,
+        "market_started":false}))
 }
 
 #[derive(Deserialize, Default)]

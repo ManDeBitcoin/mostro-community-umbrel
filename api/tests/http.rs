@@ -139,6 +139,31 @@ async fn health_never_fabricates_connected_services() {
 }
 
 #[tokio::test]
+async fn saved_settings_do_not_fabricate_daemon_health_or_version() {
+    let (dir, app) = setup();
+    let active = dir.path().join("active");
+    std::fs::create_dir(&active).unwrap();
+    std::fs::write(active.join("settings.toml"), "[mostro]\n").unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(value["configuration_active"], true);
+    assert_eq!(value["mostro"]["status"], "unknown");
+    assert!(value["mostro"].get("version").is_none());
+    assert!(value["mostro"]["configured_revision"].is_null());
+    assert_eq!(value["market_started"], false);
+}
+
+#[tokio::test]
 async fn imported_identity_is_not_exposed_over_http() {
     use nostr::{Keys, SecretKey, ToBech32};
     let (dir, app) = setup();
@@ -324,7 +349,7 @@ async fn daemon_activation_flow_and_dashboard_status() {
     // 6. Verify settings.toml exists and active status
     assert!(dir.path().join("active").join("settings.toml").is_file());
 
-    // 7. Verify dashboard reports market_started = true and mostro online
+    // 7. Saving settings cannot establish daemon health or a running market.
     let res = app
         .clone()
         .oneshot(
@@ -337,8 +362,11 @@ async fn daemon_activation_flow_and_dashboard_status() {
         .unwrap();
     let body: serde_json::Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    assert_eq!(body["market_started"], true);
-    assert_eq!(body["mostro"]["status"], "online");
+    assert_eq!(body["configuration_active"], true);
+    assert_eq!(body["market_started"], false);
+    assert_eq!(body["mostro"]["status"], "unknown");
+    assert_eq!(body["mostro"]["configured_revision"], 1);
+    assert!(body["mostro"].get("version").is_none());
 
     // 8. POST /api/daemon/stop deactivates daemon
     let res = app
@@ -358,7 +386,7 @@ async fn daemon_activation_flow_and_dashboard_status() {
     assert_eq!(res.status(), StatusCode::OK);
     assert!(!dir.path().join("active").join("settings.toml").exists());
 
-    // 9. Dashboard returns to market_started = false
+    // 9. Dashboard no longer reports a prepared configuration.
     let res = app
         .clone()
         .oneshot(
@@ -372,6 +400,8 @@ async fn daemon_activation_flow_and_dashboard_status() {
     let body: serde_json::Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(body["market_started"], false);
+    assert_eq!(body["configuration_active"], false);
+    assert_eq!(body["mostro"]["status"], "unconfigured");
 }
 
 fn sim_request(

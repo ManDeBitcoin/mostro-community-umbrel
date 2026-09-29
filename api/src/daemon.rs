@@ -6,7 +6,10 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -140,7 +143,7 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
 
     let can_activate = identity_present && draft_revision.is_some();
     let state = if active_settings_path.is_some() {
-        if is_mostrod_running() {
+        if is_mostrod_running(&active_dir) {
             DaemonState::ActiveRunning
         } else {
             DaemonState::ActiveReady
@@ -150,6 +153,13 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
     } else {
         DaemonState::Unconfigured
     };
+
+    if state == DaemonState::ActiveReady {
+        warnings.push("Configuración guardada, pero ejecución del daemon sin verificar. En Umbrel el daemon está en otro contenedor; guardar settings.toml no confirma su arranque ni la versión que recibe Mostrix.".into());
+    }
+    if active_revision.is_some() && active_revision != draft_revision {
+        warnings.push("Hay cambios en el borrador que no están en la configuración activa.".into());
+    }
 
     DaemonReport {
         state,
@@ -224,7 +234,7 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
         .map_err(|_| "No se pudo sincronizar el directorio activo")?;
 
     // Despertar o interrumpir el bucle de espera (sleep) del contenedor mostro
-    kill_standby_sleep(root);
+    notify_standby(root);
 
     Ok(ActivationResult {
         revision: document.revision,
@@ -248,53 +258,35 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
     let _ = fs::remove_file(root.join(".standby_wake"));
     let _ = fs::remove_file(active_dir.join(".standby_wake"));
 
-    // Detener mostrod si está corriendo en el mismo entorno/namespace
-    let _ = std::process::Command::new("pkill")
-        .args(["-TERM", "mostrod"])
-        .status();
+    // Only signal processes using this instance's settings. Other Mostro
+    // installations may be visible in the same PID namespace.
+    for pid in mostrod_pids(&active_dir) {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
 
     Ok(())
 }
 
-fn kill_standby_sleep(root: &Path) {
-    // 1. Terminar PID grabado por mostro-entrypoint si existe
-    let candidates = [
-        root.join(".mostro_standby.pid.sleep"),
-        root.join(".mostro_standby.pid"),
-        PathBuf::from("/data/.mostro_standby.pid.sleep"),
-        PathBuf::from("/data/.mostro_standby.pid"),
-        PathBuf::from("/data/config/.mostro_standby.pid.sleep"),
-        PathBuf::from("/data/config/.mostro_standby.pid"),
-    ];
-
-    for pid_file in candidates {
-        if let Ok(content) = fs::read_to_string(&pid_file) {
-            let pid_str = content.trim();
-            if let Ok(pid) = pid_str.parse::<i32>()
-                && pid > 1
-            {
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", pid_str])
-                    .status();
-            }
-        }
-    }
-
-    // 2. Interrumpir procesos sleep de espera si están en el mismo namespace
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", "sleep 10"])
-        .status();
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", "sleep 1"])
-        .status();
-
-    // 3. Crear archivo señalizadador de activación para detección inmediata
+fn notify_standby(root: &Path) {
+    // The entrypoint checks for settings every second. Do not signal PIDs from
+    // files: they belong to another container's PID namespace and may be reused.
     let _ = File::create(root.join(".standby_wake"));
-    let _ = File::create(root.join("active").join(".standby_wake"));
-    let _ = File::create(Path::new("/data/.standby_wake"));
 }
 
-fn is_mostrod_running() -> bool {
+fn uses_settings_directory(cmdline: &[u8], settings_dir: &Path) -> bool {
+    let args: Vec<&[u8]> = cmdline.split(|byte| *byte == 0).collect();
+    args.windows(2)
+        .any(|pair| pair[0] == b"-d" && pair[1] == settings_dir.as_os_str().as_bytes())
+}
+
+fn is_mostrod_running(settings_dir: &Path) -> bool {
+    !mostrod_pids(settings_dir).is_empty()
+}
+
+fn mostrod_pids(settings_dir: &Path) -> Vec<u32> {
+    let mut pids = Vec::new();
     if let Ok(entries) = fs::read_dir("/proc") {
         for entry in entries.flatten() {
             if let Ok(file_name) = entry.file_name().into_string()
@@ -303,11 +295,38 @@ fn is_mostrod_running() -> bool {
                 let comm_path = entry.path().join("comm");
                 if let Ok(comm) = fs::read_to_string(&comm_path)
                     && comm.trim() == "mostrod"
+                    && fs::read(entry.path().join("cmdline"))
+                        .is_ok_and(|args| uses_settings_directory(&args, settings_dir))
+                    && let Ok(pid) = file_name.parse::<u32>()
+                    && pid > 1
                 {
-                    return true;
+                    pids.push(pid);
                 }
             }
         }
     }
-    false
+    pids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_detection_requires_this_instances_settings_directory() {
+        let dir = Path::new("/data/config/active");
+        assert!(uses_settings_directory(
+            b"/usr/local/bin/mostrod\0-d\0/data/config/active\0",
+            dir
+        ));
+        for cmdline in [
+            b"mostrod\0-d\0/another/instance\0".as_slice(),
+            b"mostrod\0-d\0/data/config/active-old\0",
+            b"mostrod\0",
+            b"mostrod\0-d\0",
+            b"",
+        ] {
+            assert!(!uses_settings_directory(cmdline, dir));
+        }
+    }
 }

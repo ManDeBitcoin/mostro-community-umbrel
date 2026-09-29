@@ -62,4 +62,6 @@ Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin cr
 
 ## Documentación operativa
 
+[Resolver errores de Mostrix y discrepancias con el daemon](docs/mostrix-troubleshooting.md).
+
 [Identidad y respaldos](docs/identity.md) · [LND de Umbrel](docs/lnd.md) · [Revisión previa de Mostro](docs/mostro-preflight.md) · [Convivencia con una instancia existente](docs/coexistence.md)

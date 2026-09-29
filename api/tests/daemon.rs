@@ -83,6 +83,27 @@ async fn lifecycle_standby_to_activated_to_deactivated() {
         rep_active.active_settings_hash.as_deref(),
         Some(activated.settings_sha256.as_str())
     );
+    if rep_active.state == DaemonState::ActiveReady {
+        assert!(
+            rep_active
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ejecución del daemon sin verificar"))
+        );
+    }
+
+    let mut updated = config();
+    updated.market.max_trade_sats += 1;
+    store.save(updated).unwrap();
+    let changed = report(&root, &Integrations::default()).await;
+    assert_eq!(changed.draft_revision, Some(2));
+    assert_eq!(changed.active_revision, Some(1));
+    assert!(
+        changed
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("cambios en el borrador"))
+    );
 
     deactivate(&root).unwrap();
     assert!(!settings_path.exists());

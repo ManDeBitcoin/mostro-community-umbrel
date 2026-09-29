@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Configuration = {
   community: { name: string; about: string; website: string; contact: string; language: string };
@@ -245,25 +245,111 @@ function ActorBadge({ actor }: { actor: string }) {
 function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) => void }) {
   const [snapshot, setSnapshot] = useState<OrdersSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('mostro_orders_auto_refresh');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [refreshIntervalSec, setRefreshIntervalSec] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mostro_orders_refresh_interval');
+      return saved ? Math.max(2, Math.min(60, Number(saved))) : 3;
+    } catch {
+      return 3;
+    }
+  });
+  const [countdown, setCountdown] = useState<number>(3);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [filterKind, setFilterKind] = useState<'all' | 'buy' | 'sell'>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
+  const [newlyAddedIds, setNewlyAddedIds] = useState<Set<string>>(new Set());
 
-  const fetchOrders = async () => {
+  const knownOrderIdsRef = useRef<Set<string>>(new Set());
+  const initialFetchDoneRef = useRef(false);
+
+  const fetchOrders = useCallback(async (isManual = false) => {
+    if (isManual) {
+      setRefreshing(true);
+    }
     try {
       const data = await api<OrdersSnapshot>('/api/orders');
       setSnapshot(data);
+      setLastRefreshedAt(new Date());
+
+      if (data.orders && data.orders.length > 0) {
+        const currentIds = new Set(data.orders.map(o => o.id));
+        if (initialFetchDoneRef.current) {
+          const freshIds: string[] = [];
+          for (const id of currentIds) {
+            if (!knownOrderIdsRef.current.has(id)) {
+              freshIds.push(id);
+            }
+          }
+          if (freshIds.length > 0) {
+            setNewOrdersCount(prev => prev + freshIds.length);
+            setNewlyAddedIds(prev => {
+              const next = new Set(prev);
+              freshIds.forEach(id => next.add(id));
+              return next;
+            });
+            setTimeout(() => {
+              setNewlyAddedIds(prev => {
+                const next = new Set(prev);
+                freshIds.forEach(id => next.delete(id));
+                return next;
+              });
+            }, 6000);
+          }
+        }
+        knownOrderIdsRef.current = currentIds;
+        initialFetchDoneRef.current = true;
+      }
     } catch (err) {
       console.error("No se pudo cargar el monitor", err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchOrders();
-    const intId = setInterval(fetchOrders, 3000);
-    return () => clearInterval(intId);
-  }, []);
+    try {
+      localStorage.setItem('mostro_orders_auto_refresh', String(autoRefresh));
+    } catch {}
+  }, [autoRefresh]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mostro_orders_refresh_interval', String(refreshIntervalSec));
+    } catch {}
+  }, [refreshIntervalSec]);
+
+  useEffect(() => {
+    void fetchOrders();
+  }, [fetchOrders]);
+
+  useEffect(() => {
+    if (!autoRefresh) {
+      return;
+    }
+    setCountdown(refreshIntervalSec);
+    const intervalTimer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          void fetchOrders();
+          return refreshIntervalSec;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalTimer);
+  }, [autoRefresh, refreshIntervalSec, fetchOrders]);
 
   if (loading && !snapshot) {
     return <section className="content"><div className="page-heading"><h1>Órdenes públicas</h1></div><p>Cargando monitor...</p></section>;
@@ -293,14 +379,99 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
   });
 
   return (
-    <section className="content">
+    <section className="content orders-page">
       <div className="page-heading">
         <div>
           <div className="eyebrow">MONITOR DE SOLO LECTURA · MÓDULO 3A</div>
           <h1>Órdenes públicas</h1>
           <p>Órdenes anunciadas en Nostr por la identidad {source_npub ? <code style={{wordBreak: "break-all"}}>{source_npub.slice(0, 15)}...</code> : "no configurada"}</p>
         </div>
+        <div className="orders-updater-toolbar">
+          <div className="orders-updater-status">
+            <span className={`auto-refresh-pill ${autoRefresh ? 'is-live' : 'is-paused'}`}>
+              <span className={`status-dot ${autoRefresh ? 'good pulse' : 'unknown'}`} />
+              {autoRefresh ? (
+                <>
+                  <b>En vivo</b>
+                  <small>({countdown}s)</small>
+                </>
+              ) : (
+                <b>Pausado</b>
+              )}
+            </span>
+            {lastRefreshedAt && (
+              <span className="last-sync-label" title={lastRefreshedAt.toLocaleString()}>
+                Sincronizado {lastRefreshedAt.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          <div className="orders-updater-actions">
+            <div className="interval-selector">
+              <label htmlFor="orders-refresh-interval" className="interval-label">Frecuencia:</label>
+              <select
+                id="orders-refresh-interval"
+                value={refreshIntervalSec}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setRefreshIntervalSec(val);
+                  setCountdown(val);
+                }}
+                className="interval-select"
+                title="Intervalo de actualización automática"
+              >
+                <option value={3}>Cada 3 seg</option>
+                <option value={5}>Cada 5 seg</option>
+                <option value={10}>Cada 10 seg</option>
+                <option value={30}>Cada 30 seg</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              className={`button ${autoRefresh ? 'button-secondary' : 'button-primary'} auto-toggle-btn`}
+              onClick={() => {
+                const nextState = !autoRefresh;
+                setAutoRefresh(nextState);
+                if (nextState) {
+                  setCountdown(refreshIntervalSec);
+                  void fetchOrders(true);
+                }
+              }}
+              title={autoRefresh ? 'Pausar actualización periódica' : 'Activar actualización periódica'}
+            >
+              {autoRefresh ? '⏸ Pausar' : '▶ Reanudar'}
+            </button>
+            <button
+              type="button"
+              className="button button-secondary refresh-button"
+              onClick={() => {
+                setCountdown(refreshIntervalSec);
+                void fetchOrders(true);
+              }}
+              disabled={refreshing || loading}
+              title="Forzar actualización inmediata"
+            >
+              <span className={refreshing ? 'spin' : ''}>↻</span> Actualizar
+            </button>
+          </div>
+        </div>
       </div>
+      {newOrdersCount > 0 && (
+        <div className="new-orders-banner" role="status">
+          <div className="new-orders-info">
+            <span className="new-orders-icon">⚡</span>
+            <span>
+              <strong>{newOrdersCount} nueva{newOrdersCount === 1 ? '' : 's'} orden{newOrdersCount === 1 ? '' : 'es'} detectada{newOrdersCount === 1 ? '' : 's'}</strong> en el monitor.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary dismiss-btn"
+            onClick={() => setNewOrdersCount(0)}
+          >
+            Entendido
+          </button>
+        </div>
+      )}
       <div className="dev-banner">
         <div className="banner-icon"><Icon name="alert" size={18}/></div>
         <div>
@@ -386,7 +557,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
         ) : filteredOrders.length === 0 ? (
           <p className="empty-hint">No hay órdenes que coincidan con los filtros seleccionados.</p>
         ) : (
-          <div className="orders-table" style={{ overflowX: 'auto' }}>
+          <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Tabla de órdenes públicas">
               <thead>
                 <tr>
@@ -399,8 +570,14 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map(o => (
-                  <tr key={o.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                {filteredOrders.map(o => {
+                  const isNew = newlyAddedIds.has(o.id);
+                  return (
+                    <tr
+                      key={o.id}
+                      className={isNew ? 'order-row-highlight' : ''}
+                      style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
+                    >
                     <td style={{ padding: '8px 0' }}>
                       <div style={{ fontSize: '13px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
                       <div style={{ fontSize: '11px', color: '#88988e' }}>{new Date(o.created_at * 1000).toLocaleString()}</div>
@@ -429,7 +606,8 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
                       )}
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>
@@ -1246,7 +1424,8 @@ function App() {
       setActivatingDaemon(false);
     }
   };
-  const isDaemonActive = daemon?.state === 'active_ready' || daemon?.state === 'active_running';
+  const hasActiveConfiguration = daemon?.state === 'active_ready' || daemon?.state === 'active_running';
+  const isDaemonRunning = daemon?.state === 'active_running';
   const readiness = useMemo(() => [Boolean(draft.community.name.trim()), draft.market.fiat_currencies.length > 0, draft.nostr.relays.length > 0, draft.payment_methods.some((method) => method.active)].filter(Boolean).length, [draft]);
   const activeCategories = useMemo(() => {
     const seen = new Set<string>();
@@ -1296,14 +1475,14 @@ function App() {
         <button className={`nav-item ${page === 'config' ? 'active' : ''}`} onClick={() => setPage('config')}><Icon name="sliders"/><span>Configuración</span>{page === 'config' && <span className="nav-active-mark"/>}</button>
       </nav>
       <div className="sidebar-spacer" />
-      <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>{isDaemonActive ? 'Mostro Activo' : 'Modo desarrollo'}</b><span>{isDaemonActive ? 'Mercado iniciado' : 'Mercado sin iniciar'}</span></div><span className="mode-dot" style={isDaemonActive ? { background: '#52c41a', boxShadow: '0 0 8px rgba(82,196,26,0.6)' } : {}}/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
+      <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>{isDaemonRunning ? 'Proceso Mostro detectado' : hasActiveConfiguration ? 'Configuración preparada' : 'Modo desarrollo'}</b><span>{hasActiveConfiguration ? 'Mercado sin verificar' : 'Mercado sin iniciar'}</span></div><span className="mode-dot" style={isDaemonRunning ? { background: '#52c41a', boxShadow: '0 0 8px rgba(82,196,26,0.6)' } : {}}/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'orders' ? 'Órdenes públicas' : page === 'mediation' ? 'Consola de mediación' : page === 'simulation' ? 'Simulador P2P' : page === 'liquidity' ? 'Operaciones LND y Liquidez' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir mediación" onClick={() => setPage('mediation')}><Icon name="shield" size={17}/></button><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir liquidez LND" onClick={() => setPage('liquidity')}><Icon name="bitcoin" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
       {page === 'dashboard' && (
         <section className="content dashboard-page">
-        <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>{daemon?.can_activate && (<button type="button" className={`button ${isDaemonActive ? 'button-secondary' : 'button-primary'}`} onClick={() => void (isDaemonActive ? handleDeactivateDaemon() : handleActivateDaemon())} disabled={activatingDaemon || loading} title={isDaemonActive ? 'Desactivar demonio Mostro' : 'Activar demonio Mostro'}>{activatingDaemon ? 'Procesando...' : isDaemonActive ? 'Desactivar Mostro (Off)' : 'Activar Mostro (On)'}</button>)}<button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div></div>
-        <div className={`dev-banner ${isDaemonActive ? 'active-banner' : ''}`}><div className="banner-icon"><Icon name={isDaemonActive ? 'globe' : 'alert'} size={18}/></div><div><b>{isDaemonActive ? 'Demonio Mostro Activo' : 'Entorno de desarrollo'}</b><span>{isDaemonActive ? 'El demonio Mostro está activado con las reglas vigentes en active/settings.toml. Listo para recibir y procesar órdenes.' : 'Prototipo de configuración: activa el demonio Mostro con las reglas de tu comunidad para comenzar a operar.'}</span></div><div className={`banner-status ${isDaemonActive ? 'online' : ''}`} style={isDaemonActive ? { color: '#52c41a' } : {}}><i style={isDaemonActive ? { background: '#52c41a' } : {}}/> {isDaemonActive ? 'MERCADO ACTIVO' : 'MERCADO INACTIVO'}</div></div>
+        <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>{daemon?.can_activate && (<button type="button" className={`button ${hasActiveConfiguration ? 'button-secondary' : 'button-primary'}`} onClick={() => void (hasActiveConfiguration ? handleDeactivateDaemon() : handleActivateDaemon())} disabled={activatingDaemon || loading} title={hasActiveConfiguration ? 'Desactivar demonio Mostro' : 'Activar demonio Mostro'}>{activatingDaemon ? 'Procesando...' : hasActiveConfiguration ? 'Desactivar Mostro (Off)' : 'Activar Mostro (On)'}</button>)}<button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div></div>
+        <div className="dev-banner"><div className="banner-icon"><Icon name="alert" size={18}/></div><div><b>{isDaemonRunning ? 'Proceso Mostro detectado' : hasActiveConfiguration ? 'Configuración preparada' : 'Entorno de desarrollo'}</b><span>{hasActiveConfiguration ? 'La configuración está guardada. Comprueba en tu cliente la identidad, versión y reglas anunciadas por el nodo antes de operar; el arranque y la recepción de órdenes requieren verificación.' : 'Activa la configuración de tu comunidad y verifica el arranque del daemon antes de operar.'}</span></div><div className="banner-status"><i/> {hasActiveConfiguration ? 'MERCADO SIN VERIFICAR' : 'MERCADO SIN INICIAR'}</div></div>
         <div className="section-title-row"><div><h2>Servicios</h2><p>Conectividad reportada por la instancia local.</p></div><span className="updated-label">{loading ? 'Consultando…' : health ? 'API disponible' : 'API sin conexión'}</span></div>
         <div className="service-grid">{statuses.length ? statuses.map(({ title, icon, data }) => <article className="service-card" key={title}><div className="service-top"><span className="service-icon"><Icon name={icon}/></span><span className="service-status"><StatusDot status={data.status}/>{({ online: 'Conectado', offline: 'Sin conexión', unconfigured: 'Sin configurar', unknown: 'Desconocido', warning: 'Revisar' } as Record<string, string>)[data.status] || 'Desconocido'}</span></div><h3>{title}</h3><p>{data.detail || 'Sin detalles disponibles'}</p><div className="service-meta">{title === 'Mostro' && data.version ? <span>v{data.version}</span> : null}{title === 'Lightning' && data.alias ? <span>{data.alias}</span> : null}{title === 'Lightning' && typeof data.num_active_channels === 'number' ? <span>{data.num_active_channels} canales activos</span> : null}{title === 'Bitcoin' && typeof data.block_height === 'number' ? <span>Bloque {data.block_height.toLocaleString('es')}</span> : null}<Icon name="arrow" size={15}/></div></article>) : <div className="service-card unavailable"><div className="service-top"><span className="service-icon"><Icon name="grid"/></span><span className="service-status"><StatusDot/>Desconocido</span></div><h3>Servicios no disponibles</h3><p>{apiError || 'La API aún no informa el estado de los servicios.'}</p><div className="service-meta"><span>Reintenta cuando el servidor esté disponible</span></div></div>}</div>
         {dashboard?.lightning && <section className="lightning-details" aria-labelledby="lightning-details-title"><div className="lightning-heading"><div><h2 id="lightning-details-title">Detalles de Lightning</h2><p>Información reportada por el nodo.</p></div>{dashboard.lightning.network && <span className="network-tag">Red {dashboard.lightning.network}</span>}</div>{dashboard.lightning.num_active_channels === 0 && <p className="lightning-capacity-note" role="status">LND está conectado, pero no tiene canales activos. El mercado no tiene capacidad de intercambio Lightning.</p>}<div className="lightning-stats"><div><span>Sincronización de cadena</span><strong>{dashboard.lightning.synced_to_chain === true ? 'Sincronizado' : dashboard.lightning.synced_to_chain === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Sincronización del grafo</span><strong>{dashboard.lightning.synced_to_graph === true ? 'Sincronizado' : dashboard.lightning.synced_to_graph === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Canales activos</span><strong>{typeof dashboard.lightning.num_active_channels === 'number' ? dashboard.lightning.num_active_channels : 'Desconocido'}</strong></div><div><span>Canales pendientes</span><strong>{typeof dashboard.lightning.num_pending_channels === 'number' ? dashboard.lightning.num_pending_channels : 'Desconocido'}</strong></div><div><span>Canales inactivos</span><strong>{typeof dashboard.lightning.num_inactive_channels === 'number' ? dashboard.lightning.num_inactive_channels : 'Desconocido'}</strong></div></div><div className="liquidity-row"><div><span>Liquidez local</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.local_balance_sats !== null ? `${dashboard.lightning.liquidity.local_balance_sats} sats` : 'Desconocida'}</strong></div><div><span>Liquidez remota</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.remote_balance_sats !== null ? `${dashboard.lightning.liquidity.remote_balance_sats} sats` : 'Desconocida'}</strong></div><p>{dashboard.lightning.liquidity?.status === 'unavailable' ? dashboard.lightning.liquidity.detail || 'El nodo no informa la liquidez.' : 'Los datos de canales y liquidez no garantizan que una ruta o una operación esté disponible.'}</p></div><div style={{ marginTop: '10px', textAlign: 'right' }}><button type="button" className="button button-secondary" style={{ fontSize: '10px', height: '28px' }} onClick={() => setPage('liquidity')}>Operaciones LND y Guía de Liquidez →</button></div></section>}
@@ -1311,8 +1490,8 @@ function App() {
           <section className="connection-card" aria-labelledby="connection-title">
             <div className="connection-heading">
               <div>
-                <h2 id="connection-title">Conexión con Mostro App</h2>
-                <p>Datos públicos para que los usuarios conecten su cliente oficial Mostro a este nodo.</p>
+                <h2 id="connection-title">Conexión con Mostro App y Mostrix</h2>
+                <p>Compara esta clave pública y los relays con los que muestra tu cliente Mostro.</p>
               </div>
               <a href={connection.app_download_url} target="_blank" rel="noreferrer" className="button button-secondary download-link">
                 Mostro App ↗
@@ -1374,8 +1553,8 @@ function App() {
                 <p>Control del archivo de configuración activa y estado de arranque del motor P2P.</p>
               </div>
               <span className="service-status">
-                <StatusDot status={isDaemonActive ? 'online' : daemon.state === 'configured_standby' ? 'warning' : 'offline'} />
-                {daemon.state === 'active_running' ? 'Demonio en Ejecución' : isDaemonActive ? 'Preparado para Mercado' : daemon.state === 'configured_standby' ? 'En Espera de Activación' : 'Sin Configurar'}
+                <StatusDot status={isDaemonRunning ? 'online' : hasActiveConfiguration || daemon.state === 'configured_standby' ? 'warning' : 'offline'} />
+                {isDaemonRunning ? 'Proceso local detectado' : hasActiveConfiguration ? 'Ejecución sin verificar' : daemon.state === 'configured_standby' ? 'En Espera de Activación' : 'Sin Configurar'}
               </span>
             </div>
             {daemon.warnings.length > 0 && (
@@ -1411,10 +1590,10 @@ function App() {
                   onClick={() => void handleActivateDaemon()}
                   disabled={activatingDaemon}
                 >
-                  {activatingDaemon ? 'Activando...' : isDaemonActive ? 'Reactivar Mostro / Actualizar Configuración' : 'Activar Mostro'}
+                  {activatingDaemon ? 'Activando...' : hasActiveConfiguration ? 'Reactivar Mostro / Actualizar Configuración' : 'Activar Mostro'}
                 </button>
               )}
-              {isDaemonActive && (
+              {hasActiveConfiguration && (
                 <button
                   type="button"
                   className="button button-secondary"
@@ -1427,6 +1606,19 @@ function App() {
             </div>
           </section>
         )}
+        <section className="connection-card" aria-labelledby="order-help-title">
+          <h2 id="order-help-title">Ayuda para crear órdenes en Mostrix</h2>
+          <p>Elige un importe fijo en sats o un precio de mercado con premium. Mostro rechaza combinar sats fijos con un premium distinto de cero.</p>
+          <details>
+            <summary>Cómo resolver «Invalid parameters»</summary>
+            <ul>
+              <li><strong>Importe fijo:</strong> Amount = 10000, Fiat = 5 USD y Premium = 0. Mantén el método de pago y la expiración elegidos.</li>
+              <li><strong>Precio de mercado:</strong> Amount = 0, Fiat = 5 USD y Premium = 10 para +10 %. Los sats se calculan con la cotización; ya no serán necesariamente 10.000.</li>
+            </ul>
+            <p>El importe calculado debe cumplir los límites del nodo y la moneda debe estar admitida. El premium de la orden es distinto de la comisión del nodo.</p>
+            <p>Si Mostro Info muestra otra versión o límites distintos de los configurados aquí, compara la clave pública y los relays. Revisa el daemon que responde y si la configuración fue aplicada; guardar los ajustes no confirma que un proceso en ejecución los haya recargado.</p>
+          </details>
+        </section>
         <section className="sim-card" aria-labelledby="sim-title">
           <div className="sim-heading">
             <div>
@@ -1811,7 +2003,7 @@ function App() {
         <LiquidityOperationsPage />
       )}
       {page === 'config' && <section className="content config-page">
-        <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span>{daemon?.can_activate && (<button type="button" className="button button-primary" onClick={() => void handleActivateDaemon()} disabled={activatingDaemon || saving || loading}>{activatingDaemon ? 'Activando...' : isDaemonActive ? 'Reactivar Mostro' : 'Activar Mostro'}</button>)}<button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
+        <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span>{daemon?.can_activate && (<button type="button" className="button button-primary" onClick={() => void handleActivateDaemon()} disabled={activatingDaemon || saving || loading}>{activatingDaemon ? 'Activando...' : hasActiveConfiguration ? 'Reactivar Mostro' : 'Activar Mostro'}</button>)}<button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
         <div className="config-layout">
           <nav className="config-nav" aria-label="Secciones de configuración">
             {configNavSections.map((sec) => (

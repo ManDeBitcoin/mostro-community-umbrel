@@ -107,6 +107,11 @@ async function main() {
   const configPath = path.join(tempConfigDir, 'community.json');
   fs.writeFileSync(configPath, JSON.stringify(initialConfig, null, 2), { mode: 0o600 });
 
+  // A prepared configuration must not make the UI claim a live market.
+  const activeDir = path.join(tempConfigDir, 'active');
+  fs.mkdirSync(activeDir, { mode: 0o700 });
+  fs.writeFileSync(path.join(activeDir, 'settings.toml'), '[mostro]\n', { mode: 0o600 });
+
   // 4. Start API server serving built static UI and API on ephemeral port
   console.log('[2/6] Launching Community API + UI server...');
   apiProc = spawn(`${REPO_ROOT}/target/debug/mostro-community-api`, [], {
@@ -172,6 +177,14 @@ async function main() {
   console.log('[4/6] Navigating to Dashboard & testing Simulation (TypeError check)...');
   await page.goto(apiBaseUrl, { waitUntil: 'networkidle' });
   await page.getByText('Comunidad Playwright E2E').waitFor();
+
+  await page.getByText('MERCADO SIN VERIFICAR', { exact: true }).waitFor();
+  await page.getByText('Ejecución sin verificar', { exact: true }).waitFor();
+  assert.equal(await page.getByText('MERCADO ACTIVO', { exact: true }).count(), 0);
+  await page.getByText('Cómo resolver «Invalid parameters»', { exact: true }).click();
+  await page.getByText('Importe fijo:', { exact: true }).waitFor();
+  await page.getByText('Precio de mercado:', { exact: true }).waitFor();
+  console.log('✓ Prepared settings stay unverified; Mostrix order guidance is available.');
 
   // Test Quick Simulation in Dashboard
   const runSimButton = page.getByRole('button', { name: 'Ejecutar Simulación' }).first();

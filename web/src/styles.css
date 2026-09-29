@@ -54,3 +54,48 @@
 .brand-mark{display:block;flex:none;background:none;box-shadow:0 5px 16px #0005}
 .brand-copy b{letter-spacing:.2px}
 
+/* Public Orders Auto-Updater Toolbar & Live Badge */
+.orders-updater-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.orders-updater-status{display:flex;align-items:center;gap:8px}
+.auto-refresh-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:20px;font-size:9px;font-weight:600}
+.auto-refresh-pill.is-live{background:#13281d;border:1px solid #28543a;color:#7ee0a5}
+.auto-refresh-pill.is-paused{background:#231e15;border:1px solid #4a3e26;color:#d8b877}
+.auto-refresh-pill small{font-size:8px;opacity:.8;font-family:ui-monospace,monospace}
+.pulse{animation:pulseDot 1.6s ease-in-out infinite}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.85)}}
+.last-sync-label{font-size:9px;color:#728379}
+.orders-updater-actions{display:flex;align-items:center;gap:8px}
+.interval-selector{display:flex;align-items:center;gap:5px}
+.interval-label{font-size:9px;color:#85968d;font-weight:600}
+.interval-select{height:34px;background:#141d19;border:1px solid #2b3b32;border-radius:6px;color:#dfe8e2;padding:0 8px;font-size:10px;outline:none}
+.interval-select:focus{border-color:#578c67}
+.new-orders-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#152c1e;border:1px solid #2b6140;border-radius:8px;margin-bottom:14px;color:#a8f0c3;font-size:11px}
+.new-orders-info{display:flex;align-items:center;gap:8px}
+.new-orders-icon{font-size:14px}
+.new-orders-banner .dismiss-btn{height:28px;padding:0 10px;font-size:9px}
+.order-row-highlight{background:rgba(118,223,160,0.08);transition:background 1s ease}
+@media(max-width:760px){
+  .orders-page .page-heading{flex-direction:column;align-items:stretch;gap:12px}
+  .orders-updater-toolbar{width:100%;justify-content:space-between;gap:8px}
+  .orders-updater-actions{flex-wrap:wrap;gap:6px}
+  .orders-page .form-grid{display:block;min-width:0;width:100%}
+  .orders-table{display:block;min-width:0;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+@media(max-width:480px){
+  .topbar{padding:0 10px;gap:6px}
+  .breadcrumb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}
+  .breadcrumb span{display:none}
+  .breadcrumb b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .environment-pill{display:none}
+  .top-actions{gap:4px;flex-shrink:0}
+  .top-actions .icon-button{width:26px;height:26px}
+  .orders-updater-toolbar{flex-direction:column;align-items:stretch;gap:8px}
+  .orders-updater-status{display:flex;justify-content:space-between;align-items:center}
+  .orders-updater-actions{display:flex;flex-wrap:wrap;gap:6px}
+  .orders-updater-actions .interval-selector{flex:1 1 100%;display:flex;justify-content:space-between;align-items:center}
+  .orders-updater-actions .interval-select{flex:1;max-width:180px}
+  .orders-updater-actions .button{flex:1;min-width:0;padding:0 8px;font-size:10px}
+}
+
+
+
