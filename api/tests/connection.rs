@@ -54,7 +54,7 @@ fn generates_nprofile_and_uri_with_relays_without_exposing_secret() {
         .nostr_uri
         .as_deref()
         .expect("nostr_uri should be present");
-    assert_eq!(nostr_uri, format!("nostr:{}", nprofile));
+    assert_eq!(nostr_uri, format!("mostro://community/{}", nprofile));
 
     let qr_svg = info.qr_svg.as_deref().expect("qr_svg should be present");
     assert!(qr_svg.contains("<svg"));
