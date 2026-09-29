@@ -62,9 +62,9 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
     };
 
     let nostr_uri = if let Some(ref prof) = nprofile {
-        Some(format!("nostr:{}", prof))
+        Some(format!("mostro://community/{}", prof))
     } else {
-        npub.as_ref().map(|np| format!("nostr:{}", np))
+        npub.as_ref().map(|np| format!("mostro://community/{}", np))
     };
 
     let qr_svg = nostr_uri.as_ref().and_then(|uri| {
