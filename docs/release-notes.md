@@ -1,3 +1,7 @@
+# Mostro Community Manager v1.0.7
+
+Actualización del formato de conexión de la URI QR (nostr: -> mostro://community/)
+
 # Mostro Community Manager v1.0.6
 
 Onboarding soberano con generación de identidad Nostr, plantillas de comisiones y catálogo bilingüe de divisas ISO 4217.
