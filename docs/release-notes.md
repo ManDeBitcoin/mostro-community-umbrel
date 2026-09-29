@@ -1,3 +1,9 @@
+# Mostro Community Manager v1.0.9
+
+- Rediseño estético y armonioso de la tarjeta de Conexión con Mostro App y Mostrix.
+- Distribución en 2 columnas: panel de código QR interactivo con selector de pestañas (URI Mostro / JSON) a la izquierda y detalles de conexión con botones de copiado a la derecha.
+- Visualización dinámica del payload activo (URI o JSON) según la pestaña seleccionada.
+
 # Mostro Community Manager v1.0.8
 
 - Agregado switch para alternar entre formato URI y JSON en el código QR comunitario.
