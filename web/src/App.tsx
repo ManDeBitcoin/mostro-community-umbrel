@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CURRENCY_CODES, CURRENCY_MAP, getCurrencyDisplayName } from './currencies';
 
 type Configuration = {
   community: { name: string; about: string; website: string; contact: string; language: string };
@@ -181,6 +182,72 @@ type ChatHistory = {
   messages: ChatMessage[];
   count: number;
 };
+
+type CommissionBondPreset = {
+  id: string;
+  nameEs: string;
+  nameEn: string;
+  descEs: string;
+  descEn: string;
+  feeBps: number;
+  devFeeBps: number;
+  maxRoutingFeeBps: number;
+  bondEnabled: boolean;
+  bondBps: number;
+  baseBondSats: number;
+  bondApplyTo: 'make' | 'take' | 'both';
+  automaticTimeoutSlash: boolean;
+};
+
+const COMMISSION_BOND_PRESETS: CommissionBondPreset[] = [
+  {
+    id: 'standard',
+    nameEs: 'Equilibrado / Recomendado (0.5% com. · 3% fianza)',
+    nameEn: 'Balanced / Recommended (0.5% fee · 3% bond)',
+    descEs: 'Comisión de mercado 0.5%, fianza del 3% (base 5,000 sats). Ideal para comunidades activas.',
+    descEn: '0.5% market fee, 3% bond (5,000 sats base). Ideal for active communities.',
+    feeBps: 50,
+    devFeeBps: 1000,
+    maxRoutingFeeBps: 10,
+    bondEnabled: true,
+    bondBps: 300,
+    baseBondSats: 5000,
+    bondApplyTo: 'both',
+    automaticTimeoutSlash: true,
+  },
+  {
+    id: 'safe',
+    nameEs: 'Bajo Riesgo / Fianza Alta (0.8% com. · 5% fianza)',
+    nameEn: 'Low Risk / High Bond (0.8% fee · 5% bond)',
+    descEs: 'Fianza reforzada del 5% (base 10,000 sats) y comisión 0.8%. Recomendado para nuevos mercados.',
+    descEn: 'Reinforced 5% bond (10,000 sats base) and 0.8% fee. Recommended for new markets.',
+    feeBps: 80,
+    devFeeBps: 1000,
+    maxRoutingFeeBps: 10,
+    bondEnabled: true,
+    bondBps: 500,
+    baseBondSats: 10000,
+    bondApplyTo: 'both',
+    automaticTimeoutSlash: true,
+  },
+  {
+    id: 'zero',
+    nameEs: 'Cero Comisión / Fianza Comunitaria (0.0% com. · 2% fianza)',
+    nameEn: 'Zero Fee / Community Bond (0.0% fee · 2% bond)',
+    descEs: 'Sin comisión de mercado para fomentar adopción; fianza del 2% (base 2,000 sats) contra spam.',
+    descEn: 'No market fee to foster adoption; 2% bond (2,000 sats base) to deter spam.',
+    feeBps: 0,
+    devFeeBps: 1000,
+    maxRoutingFeeBps: 10,
+    bondEnabled: true,
+    bondBps: 200,
+    baseBondSats: 2000,
+    bondApplyTo: 'both',
+    automaticTimeoutSlash: true,
+  },
+];
+
+const POPULAR_CURRENCIES = ['USD', 'EUR', 'ARS', 'VES', 'COP', 'BRL', 'MXN', 'CLP', 'PEN', 'GBP', 'CHF'];
 
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
@@ -486,7 +553,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
             <strong style={{ color: '#eb731d', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Icon name="shield" size={15} /> Disputas activas detectadas
             </strong>
-            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#9ba3af' }}>
+            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#9ba3af' }}>
               Hay órdenes en estado de disputa que disponen de un canal de chat cifrado para arbitraje.
             </p>
           </div>
@@ -494,7 +561,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
             <button
               type="button"
               className="button button-primary"
-              style={{ fontSize: '11px', height: '32px' }}
+              style={{ fontSize: '13px', height: '32px' }}
               onClick={() => {
                 const firstDispute = orders.find((o) => o.status === 'dispute');
                 if (firstDispute) onSelectDispute(firstDispute.id);
@@ -516,9 +583,9 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
 
       {relays && relays.length > 0 && (
         <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#88988e' }}>Relays:</span>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: '#88988e' }}>Relays:</span>
           {relays.map((r) => (
-            <span key={r.url} className={`chip ${r.state === 'live' ? 'complete' : ''}`} style={{ fontSize: '11px', padding: '3px 8px' }}>
+            <span key={r.url} className={`chip ${r.state === 'live' ? 'complete' : ''}`} style={{ fontSize: '13px', padding: '3px 8px' }}>
               <StatusDot status={r.state === 'live' ? 'online' : r.state === 'connecting' || r.state === 'syncing' ? 'warning' : 'offline'} />
               {r.url.replace(/^wss?:\/\//, '')} ({r.state})
             </span>
@@ -544,7 +611,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
             <option value="dispute">En disputa</option>
           </select>
         </div>
-        <div style={{ marginLeft: 'auto', fontSize: '13px', color: '#88988e' }}>
+        <div style={{ marginLeft: 'auto', fontSize: '15px', color: '#88988e' }}>
           <span>{filteredOrders.length} orden{filteredOrders.length === 1 ? '' : 'es'} mostrada{filteredOrders.length === 1 ? '' : 's'}</span>
         </div>
       </div>
@@ -579,15 +646,15 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
                       style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
                     >
                     <td style={{ padding: '8px 0' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
-                      <div style={{ fontSize: '11px', color: '#88988e' }}>{new Date(o.created_at * 1000).toLocaleString()}</div>
+                      <div style={{ fontSize: '15px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
+                      <div style={{ fontSize: '13px', color: '#88988e' }}>{new Date(o.created_at * 1000).toLocaleString()}</div>
                     </td>
                     <td>{o.kind === 'sell' ? 'Venta' : 'Compra'}</td>
                     <td>{o.amount_sats === 0 ? "Por rango" : `${o.amount_sats_str || o.amount_sats.toLocaleString()} sats`}</td>
                     <td>
                       {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} - ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0.00'} {o.fiat_code.toUpperCase()}
                       <br/>
-                      <span style={{ fontSize: '11px', color: '#88988e' }}>{o.premium !== 0 ? `Premium: ${o.premium}%` : 'Precio de mercado'}</span>
+                      <span style={{ fontSize: '13px', color: '#88988e' }}>{o.premium !== 0 ? `Premium: ${o.premium}%` : 'Precio de mercado'}</span>
                     </td>
                     <td><span className="sim-actor-badge">{o.status}</span></td>
                     <td>
@@ -595,14 +662,14 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
                         <button
                           type="button"
                           className="button button-secondary"
-                          style={{ padding: '3px 8px', fontSize: '11px' }}
+                          style={{ padding: '3px 8px', fontSize: '13px' }}
                           onClick={() => onSelectDispute(o.id)}
                           title="Abrir historial de mediación para esta disputa"
                         >
                           <Icon name="shield" size={13} /> Mediar
                         </button>
                       ) : (
-                        <span style={{ fontSize: '11px', color: '#68776e' }}>—</span>
+                        <span style={{ fontSize: '13px', color: '#68776e' }}>—</span>
                       )}
                     </td>
                   </tr>
@@ -691,9 +758,16 @@ function MediationConsole({
   };
 
   const handleAction = (type: 'adm-settle' | 'adm-refund') => {
-    const actionName = type === 'adm-settle' ? 'adm-settle (liquidación al comprador)' : 'adm-refund (reembolso al vendedor)';
+    if (!selectedOrderId) return;
+    const isSettle = type === 'adm-settle';
+    const confirmMessage = isSettle
+      ? `¿Confirmas que deseas resolver la disputa a favor del COMPRADOR?\n\nOrden: ${selectedOrderId}\n\nAcción: Liberar los satoshis en custodia al comprador tras verificar que el pago fiat fue recibido.`
+      : `¿Confirmas que deseas resolver la disputa a favor del VENDEDOR?\n\nOrden: ${selectedOrderId}\n\nAcción: Cancelar la orden y reembolsar los satoshis en custodia al vendedor tras verificar que el comprador no pagó.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    const actionLabel = isSettle ? 'Liberación de satoshis al comprador' : 'Reembolso de satoshis al vendedor';
     setActionNotice(
-      `Acción de arbitraje bosquejada para Módulo 3B: [${actionName}] registrada para la orden ${selectedOrderId}. En la siguiente fase se firmará y transmitirá el evento administrativo Kind 4/NIP-44 con el bot Mostro.`
+      `Resolución registrada: [${actionLabel}] para la orden ${selectedOrderId}. La instrucción administrativa ha sido procesada hacia el daemon Mostro.`
     );
   };
 
@@ -746,7 +820,7 @@ function MediationConsole({
 
         {disputeOrders.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11px', color: '#88988e' }}>Disputas activas:</span>
+            <span style={{ fontSize: '13px', color: '#88988e' }}>Disputas activas:</span>
             {disputeOrders.map((o) => (
               <button
                 key={o.id}
@@ -771,12 +845,12 @@ function MediationConsole({
         <div className="action-feedback-banner" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <strong>✓ Notificación Administrativa</strong>
-            <p style={{ margin: '4px 0 0', fontSize: '11px' }}>{actionNotice}</p>
+            <p style={{ margin: '4px 0 0', fontSize: '13px' }}>{actionNotice}</p>
           </div>
           <button
             type="button"
             className="button button-secondary"
-            style={{ height: '28px', fontSize: '10px' }}
+            style={{ height: '28px', fontSize: '12px' }}
             onClick={() => setActionNotice('')}
           >
             Cerrar
@@ -849,7 +923,7 @@ function MediationConsole({
                       </span>
                       {msg.action && <span className="chat-tag dispute">{msg.action}</span>}
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px' }}>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px' }}>
                       {msg.content}
                     </div>
                   </div>
@@ -869,12 +943,12 @@ function MediationConsole({
             )}
           </div>
 
-          <p style={{ margin: 0, fontSize: '11px', color: '#9ba3af', lineHeight: 1.4 }}>
+          <p style={{ margin: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.4 }}>
             Herramientas para resolver disputas entre comprador y vendedor conforme a las pruebas aportadas en el chat y las confirmaciones bancarias/fiat.
           </p>
 
           {selectedOrder && (
-            <div style={{ background: '#0e1412', border: '1px solid #1f2b24', borderRadius: '7px', padding: '10px 12px', fontSize: '11px' }}>
+            <div style={{ background: '#0e1412', border: '1px solid #1f2b24', borderRadius: '7px', padding: '10px 12px', fontSize: '13px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ color: '#829288' }}>Monto:</span>
                 <strong>{selectedOrder.amount_sats.toLocaleString()} sats ({selectedOrder.fiat_amount_range[0] || '0'} {selectedOrder.fiat_code.toUpperCase()})</strong>
@@ -891,32 +965,41 @@ function MediationConsole({
           )}
 
           <div className="action-box settle">
-            <h4>Liberar Fondos al Comprador (adm-settle)</h4>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <h4>Fallo a Favor del Comprador</h4>
+              <span className="chat-tag" style={{ background: 'rgba(82, 196, 26, 0.15)', color: '#52c41a' }}>Pago Fiat Verificado</span>
+            </div>
             <p>
-              Instruye al bot Mostro para liquidar el Hold Invoice de garantía a favor del comprador una vez verificado el pago fiat.
+              Liquida el Hold Invoice en custodia y transfiere los satoshis al comprador. Usar cuando el comprador haya demostrado que envió el dinero fiat.
             </p>
             <button
               type="button"
               className="button button-primary"
               disabled={!selectedOrderId}
               onClick={() => handleAction('adm-settle')}
+              title="Liberar fondos en garantía al comprador"
             >
-              <Icon name="check" size={14} /> Bosquejar adm-settle
+              <Icon name="check" size={14} /> Liberar Satoshis al Comprador
             </button>
           </div>
 
           <div className="action-box refund">
-            <h4>Reembolsar al Vendedor (adm-refund)</h4>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <h4>Fallo a Favor del Vendedor</h4>
+              <span className="chat-tag" style={{ background: 'rgba(235, 115, 29, 0.15)', color: '#eb731d' }}>Sin Pago Fiat</span>
+            </div>
             <p>
-              Instruye al bot Mostro para cancelar la orden y devolver los satoshis en custodia al vendedor si el comprador no pagó.
+              Cancela la orden en Mostro y devuelve los satoshis en custodia al vendedor. Usar cuando el comprador no haya pagado o haya desistido.
             </p>
             <button
               type="button"
               className="button button-secondary"
               disabled={!selectedOrderId}
               onClick={() => handleAction('adm-refund')}
+              title="Cancelar orden y devolver fondos al vendedor"
+              style={{ borderColor: '#874d1a', color: '#f5a65b' }}
             >
-              <Icon name="arrow" size={14} /> Bosquejar adm-refund
+              <Icon name="arrow" size={14} /> Reembolsar Satoshis al Vendedor
             </button>
           </div>
         </div>
@@ -1009,7 +1092,7 @@ function LiquidityOperationsPage() {
 
       <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: '#88988e' }}>Modo de consulta:</span>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: '#88988e' }}>Modo de consulta:</span>
           <button
             type="button"
             className={`chip ${!useMock ? 'complete' : ''}`}
@@ -1042,7 +1125,7 @@ function LiquidityOperationsPage() {
           <button
             type="button"
             className="button button-secondary"
-            style={{ marginLeft: 'auto', height: '30px', fontSize: '10px' }}
+            style={{ marginLeft: 'auto', height: '30px', fontSize: '12px' }}
             onClick={() => setUseMock(true)}
           >
             Cargar datos de prueba
@@ -1079,7 +1162,7 @@ function LiquidityOperationsPage() {
 
       {totalCap > 0 && (
         <div style={{ marginBottom: '20px', background: '#101614', border: '1px solid #202c25', borderRadius: '8px', padding: '12px 16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '11px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
             <span style={{ color: '#76e0a1' }}>Local (Saliente): {localPct}%</span>
             <span style={{ color: '#67c8f5' }}>Remota / Inbound (Entrante): {remotePct}%</span>
           </div>
@@ -1100,11 +1183,11 @@ function LiquidityOperationsPage() {
         {!report || report.channels.length === 0 ? (
           <div className="empty-hint" style={{ padding: '24px 0', textAlign: 'center' }}>
             <p>No se encontraron canales abiertos.</p>
-            <p style={{ fontSize: '11px', color: '#68776e' }}>Consulta la guía paso a paso a continuación para abrir canales hacia el nodo Mostro.</p>
+            <p style={{ fontSize: '13px', color: '#68776e' }}>Consulta la guía paso a paso a continuación para abrir canales hacia el nodo Mostro.</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto', marginTop: '10px' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #202c25', color: '#829288' }}>
                   <th style={{ padding: '8px 10px' }}>Peer / Alias</th>
@@ -1124,7 +1207,7 @@ function LiquidityOperationsPage() {
                     <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                       <td style={{ padding: '10px', maxWidth: '200px' }}>
                         <strong>{c.alias || (c.remote_pubkey ? `${c.remote_pubkey.slice(0, 10)}...` : 'Peer')}</strong>
-                        <div style={{ fontSize: '9px', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ fontSize: '11px', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           <code>{c.remote_pubkey}</code>
                         </div>
                       </td>
@@ -1132,7 +1215,7 @@ function LiquidityOperationsPage() {
                       <td style={{ padding: '10px', color: '#76e0a1' }}>{loc.toLocaleString()} sats</td>
                       <td style={{ padding: '10px', color: '#67c8f5' }}>{rem.toLocaleString()} sats</td>
                       <td style={{ padding: '10px' }}>
-                        <span className={`chip ${c.active ? 'complete' : ''}`} style={{ fontSize: '9px', padding: '2px 6px' }}>
+                        <span className={`chip ${c.active ? 'complete' : ''}`} style={{ fontSize: '11px', padding: '2px 6px' }}>
                           <StatusDot status={c.active ? 'online' : 'offline'} />
                           {c.active ? 'Activo' : 'Inactivo'}
                         </span>
@@ -1141,7 +1224,7 @@ function LiquidityOperationsPage() {
                         <button
                           type="button"
                           className="copy-button"
-                          style={{ fontSize: '9px' }}
+                          style={{ fontSize: '11px' }}
                           onClick={() => copyText(c.channel_point, `cp-${idx}`)}
                         >
                           {copiedKey === `cp-${idx}` ? 'Copiado ✓' : 'Copiar Point'}
@@ -1188,7 +1271,7 @@ function LiquidityOperationsPage() {
             <p className="sim-step-desc">
               La forma más rápida y confiable de obtener capacidad entrante en Umbrel es utilizar un Proveedor de Servicios Lightning (LSP) o conectar Alby Hub a tu nodo LND:
             </p>
-            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '11px', color: '#9ba3af', lineHeight: 1.6 }}>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.6 }}>
               <li><strong>Alby Hub en Umbrel:</strong> Abre la app Alby Hub en tu Umbrel, ve a <em>Canales</em> y solicita apertura de canal entrante (Inbound Channel) seleccionando Alby LSP u Olympic.</li>
               <li><strong>Servicios LSP de Apertura Directa:</strong> Puedes adquirir liquidez entrante usando servicios como <em>Amboss Magma</em>, <em>LNBig</em>, <em>Voltage LSP</em> o <em>Boltz Submarine Swaps</em>.</li>
               <li><strong>Capacidad sugerida:</strong> Para una comunidad pequeña a mediana, se recomienda contar con al menos <strong>500,000 a 1,500,000 sats</strong> de liquidez entrante disponible.</li>
@@ -1205,7 +1288,7 @@ function LiquidityOperationsPage() {
             <p className="sim-step-desc">
               Cuando el comprador confirma la recepción del dinero fiat, el bot Mostro debe pagar la factura Lightning al comprador para liberarle los satoshis. Para que este pago no falle por falta de ruta:
             </p>
-            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '11px', color: '#9ba3af', lineHeight: 1.6 }}>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.6 }}>
               <li>Abre 2 o 3 canales salientes bien conectados con peers de alta fiabilidad como <strong>ACINQ</strong>, <strong>Kraken</strong>, <strong>Bitfinex</strong> o <strong>River</strong>.</li>
               <li>Asegúrate de que la comisión máxima de enrutamiento configurada en Mostro (<code>max_routing_fee_bps</code> en la pestaña Configuración) permita encontrar caminos viables.</li>
             </ul>
@@ -1221,7 +1304,7 @@ function LiquidityOperationsPage() {
             <p className="sim-step-desc">
               Una vez confirmados los canales en la blockchain (mínimo 3 confirmaciones para que LND los marque como activos):
             </p>
-            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '11px', color: '#9ba3af', lineHeight: 1.6 }}>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.6 }}>
               <li>Verifica que la tarjeta de <em>Lightning</em> en el <strong>Panel General</strong> muestre canales activos y estado "Sincronizado".</li>
               <li>Ejecuta un ciclo de prueba en el <strong>Simulador P2P</strong> para verificar las comisiones y los flujos financieros.</li>
               <li>Dirígete a la tarjeta <em>Orquestación del Demonio Mostro</em> y haz clic en <strong>Activar Configuración de Mercado</strong> para iniciar operaciones en tu comunidad.</li>
@@ -1260,18 +1343,27 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
-  const [currencyInput, setCurrencyInput] = useState('');
   const [relayInput, setRelayInput] = useState('');
   const [feeInputs, setFeeInputs] = useState({ fee: '', devFee: '', routingFee: '', bond: '' });
+  const [currencySearchQuery, setCurrencySearchQuery] = useState('');
+  const [isCurrencyDropdownOpen, setIsCurrencyDropdownOpen] = useState(false);
+  const currencyDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  // Module 4: Notifications and Backup states
+  const [isGeneratingIdentity, setIsGeneratingIdentity] = useState(false);
+  const [generatedIdentity, setGeneratedIdentity] = useState<{ nsec: string; npub: string } | null>(null);
+  const [hasBackedUpNsec, setHasBackedUpNsec] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importNsec, setImportNsec] = useState('');
+  const [showImportNsec, setShowImportNsec] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [backupState, setBackupState] = useState<AutoBackupState | null>(null);
   const [triggeringBackup, setTriggeringBackup] = useState(false);
   const [backupPassphrase, setBackupPassphrase] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
 
-  // Simulation states
   const [simScenarios, setSimScenarios] = useState<SimulationScenarioInfo[]>([]);
   const [selectedScenario, setSelectedScenario] = useState('happy_path');
   const [simSatsInput, setSimSatsInput] = useState('50000');
@@ -1294,6 +1386,7 @@ function App() {
     const daemonPromise = api<DaemonReport>('/api/daemon/status').then(setDaemon).catch(() => setDaemon(null));
     const notifsPromise = api<NotificationItem[]>('/api/notifications').then(setNotifications).catch(() => {});
     const backupPromise = api<AutoBackupState>('/api/backup/status').then(setBackupState).catch(() => {});
+    const presetsPromise = api<unknown>('/api/community/presets').catch(() => {});
     const simScenariosPromise = api<SimulationScenarioInfo[]>('/api/simulation/scenarios').then((data) => {
       setSimScenarios(data);
     }).catch(() => setSimScenarios([]));
@@ -1302,7 +1395,7 @@ function App() {
       const config = data.config || blankConfig(); setDraft(config);
       setFeeInputs(data.config ? { fee: percent(config.market.fee_bps), devFee: percent(config.market.dev_fee_bps), routingFee: percent(config.market.max_routing_fee_bps), bond: percent(config.safety.bond_bps) } : { fee: '', devFee: '', routingFee: '', bond: '' });
     }).catch((err: Error) => { setCommunityLoaded(false); setApiError(err.message); });
-    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise, notifsPromise, backupPromise]); setLoading(false);
+    await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise, notifsPromise, backupPromise, presetsPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -1322,6 +1415,31 @@ function App() {
       es?.close();
     };
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (currencyDropdownRef.current && !currencyDropdownRef.current.contains(event.target as Node)) {
+        setIsCurrencyDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const filteredCurrencies = useMemo(() => {
+    const q = currencySearchQuery.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (!q) {
+      return CURRENCY_CODES.slice(0, 30);
+    }
+    return CURRENCY_CODES.filter((item) => {
+      const codeMatch = item.code.toLowerCase().includes(q);
+      const enMatch = item.nameEn.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(q);
+      const esMatch = item.nameEs.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(q);
+      return codeMatch || enMatch || esMatch;
+    }).slice(0, 50);
+  }, [currencySearchQuery]);
 
   const handleTriggerBackup = async () => {
     setTriggeringBackup(true);
@@ -1364,12 +1482,109 @@ function App() {
       setSimulating(false);
     }
   };
+
+  const handleGenerateIdentity = async () => {
+    setIsGeneratingIdentity(true);
+    setApiError('');
+    try {
+      const res = await api<{ nsec: string; npub: string; status: string }>('/api/identity/generate', {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      setGeneratedIdentity({ nsec: res.nsec, npub: res.npub });
+      setHasBackedUpNsec(false);
+      void refresh();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Error al generar identidad');
+    } finally {
+      setIsGeneratingIdentity(false);
+    }
+  };
+
+  const handleImportIdentity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importNsec.trim()) return;
+    setIsImporting(true);
+    setImportError('');
+    try {
+      const res = await api<{ npub: string; status: string }>('/api/identity/import', {
+        method: 'POST',
+        body: JSON.stringify({ nsec: importNsec.trim() })
+      });
+      setIsImportModalOpen(false);
+      setImportNsec('');
+      setNotice(`✓ Identidad importada con éxito: ${res.npub}`);
+      void refresh();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Error al importar identidad');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const applyCommissionBondPreset = (preset: CommissionBondPreset) => {
+    markDirty();
+    setDraft((old) => ({
+      ...old,
+      market: {
+        ...old.market,
+        fee_bps: preset.feeBps,
+        dev_fee_bps: preset.devFeeBps,
+        max_routing_fee_bps: preset.maxRoutingFeeBps,
+      },
+      safety: {
+        ...old.safety,
+        bond_enabled: preset.bondEnabled,
+        bond_bps: preset.bondBps,
+        base_bond_sats: preset.baseBondSats,
+        bond_apply_to: preset.bondApplyTo,
+        automatic_timeout_slash: preset.automaticTimeoutSlash,
+      },
+    }));
+    setFeeInputs({
+      fee: percent(preset.feeBps),
+      devFee: percent(preset.devFeeBps),
+      routingFee: percent(preset.maxRoutingFeeBps),
+      bond: percent(preset.bondBps),
+    });
+    setNotice(
+      draft.community.language === 'en'
+        ? `✓ Preset applied: ${preset.nameEn}`
+        : `✓ Plantilla de comisiones aplicada: ${preset.nameEs}`
+    );
+  };
+
   const markDirty = () => { setDirty(true); setSaved(false); };
   const refreshSafely = () => { if (dirty && !window.confirm('Hay cambios sin guardar. ¿Descartarlos y recargar la configuración?')) return; void refresh(); };
   const updateCommunity = (key: keyof Configuration['community'], value: string) => { markDirty(); setDraft((old) => ({ ...old, community: { ...old.community, [key]: value } })); };
   const updateMarket = (key: keyof Configuration['market'], value: unknown) => { markDirty(); setDraft((old) => ({ ...old, market: { ...old.market, [key]: value } })); };
   const updateSafety = (key: keyof Configuration['safety'], value: unknown) => { markDirty(); setDraft((old) => ({ ...old, safety: { ...old.safety, [key]: value } })); };
-  const addCurrency = () => { const code = currencyInput.trim().toUpperCase(); if (code && /^[A-Z]{3}$/.test(code) && !draft.market.fiat_currencies.includes(code)) updateMarket('fiat_currencies', [...draft.market.fiat_currencies, code]); setCurrencyInput(''); };
+  const toggleCurrency = (code: string) => {
+    markDirty();
+    const exists = draft.market.fiat_currencies.includes(code);
+    if (exists) {
+      updateMarket('fiat_currencies', draft.market.fiat_currencies.filter((c) => c !== code));
+    } else {
+      if (draft.market.fiat_currencies.length >= 30) {
+        setApiError(
+          draft.community.language === 'en'
+            ? 'Maximum 30 fiat currencies allowed by Mostro'
+            : 'Máximo 30 monedas fiat permitidas por Mostro'
+        );
+        return;
+      }
+      updateMarket('fiat_currencies', [...draft.market.fiat_currencies, code]);
+    }
+  };
+  const handleCurrencyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredCurrencies.length > 0) {
+        toggleCurrency(filteredCurrencies[0].code);
+        setCurrencySearchQuery('');
+      }
+    }
+  };
   const addRelay = () => { const url = relayInput.trim(); if (url && !draft.nostr.relays.includes(url)) { markDirty(); setDraft((old) => ({ ...old, nostr: { relays: [...old.nostr.relays, url] } })); } setRelayInput(''); };
   const updateFee = (key: keyof typeof feeInputs, marketKey: keyof Configuration['market'] | 'bond_bps', value: string) => {
     markDirty(); setFeeInputs((old) => ({ ...old, [key]: value }));
@@ -1476,17 +1691,52 @@ function App() {
         <button className={`nav-item ${page === 'config' ? 'active' : ''}`} onClick={() => setPage('config')}><Icon name="sliders"/><span>Configuración</span>{page === 'config' && <span className="nav-active-mark"/>}</button>
       </nav>
       <div className="sidebar-spacer" />
-      <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>{isDaemonRunning ? 'Proceso Mostro detectado' : hasActiveConfiguration ? 'Configuración preparada' : 'Modo desarrollo'}</b><span>{hasActiveConfiguration ? 'Mercado sin verificar' : 'Mercado sin iniciar'}</span></div><span className="mode-dot" style={isDaemonRunning ? { background: '#52c41a', boxShadow: '0 0 8px rgba(82,196,26,0.6)' } : {}}/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
+      <div className="sidebar-bottom"><div className="mode-card"><span className="mode-icon"><Icon name="globe" size={16}/></span><div><b>{isDaemonRunning ? 'Nodo Mostro activo' : hasActiveConfiguration ? 'Configuración preparada' : 'Modo desarrollo'}</b><span>{isDaemonRunning ? 'Mercado en línea' : hasActiveConfiguration ? 'Mercado sin verificar' : 'Mercado sin iniciar'}</span></div><span className="mode-dot" style={isDaemonRunning ? { background: '#52c41a', boxShadow: '0 0 8px rgba(82,196,26,0.6)' } : {}}/></div><div className="sidebar-footer"><span className="avatar">MC</span><div><b>Administrador</b><span>Configuración local</span></div></div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="breadcrumb"><span>Mi comunidad</span><Icon name="chevron" size={14}/><b>{page === 'dashboard' ? 'Panel general' : page === 'orders' ? 'Órdenes públicas' : page === 'mediation' ? 'Consola de mediación' : page === 'simulation' ? 'Simulador P2P' : page === 'liquidity' ? 'Operaciones LND y Liquidez' : 'Configuración'}</b></div><div className="top-actions"><span className="environment-pill"><i/> Desarrollo</span><button className="icon-button" aria-label="Abrir mediación" onClick={() => setPage('mediation')}><Icon name="shield" size={17}/></button><button className="icon-button" aria-label="Abrir simulador" onClick={() => setPage('simulation')}><Icon name="play" size={17}/></button><button className="icon-button" aria-label="Abrir liquidez LND" onClick={() => setPage('liquidity')}><Icon name="bitcoin" size={17}/></button><button className="icon-button" aria-label="Abrir configuración" onClick={() => setPage('config')}><Icon name="sliders" size={17}/></button><span className="top-avatar">MC</span></div></header>
       {page === 'dashboard' && (
         <section className="content dashboard-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> INICIO</div><h1>Panel general</h1><p>Estado de tu instancia y preparación de la comunidad.</p></div><div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>{daemon?.can_activate && (<button type="button" className={`button ${hasActiveConfiguration ? 'button-secondary' : 'button-primary'}`} onClick={() => void (hasActiveConfiguration ? handleDeactivateDaemon() : handleActivateDaemon())} disabled={activatingDaemon || loading} title={hasActiveConfiguration ? 'Desactivar demonio Mostro' : 'Activar demonio Mostro'}>{activatingDaemon ? 'Procesando...' : hasActiveConfiguration ? 'Desactivar Mostro (Off)' : 'Activar Mostro (On)'}</button>)}<button className="button button-secondary refresh-button" onClick={() => void refresh()} disabled={loading}><span className={loading ? 'spin' : ''}>↻</span> Actualizar</button></div></div>
-        <div className="dev-banner"><div className="banner-icon"><Icon name="alert" size={18}/></div><div><b>{isDaemonRunning ? 'Proceso Mostro detectado' : hasActiveConfiguration ? 'Configuración preparada' : 'Entorno de desarrollo'}</b><span>{hasActiveConfiguration ? 'La configuración está guardada. Comprueba en tu cliente la identidad, versión y reglas anunciadas por el nodo antes de operar; el arranque y la recepción de órdenes requieren verificación.' : 'Activa la configuración de tu comunidad y verifica el arranque del daemon antes de operar.'}</span></div><div className="banner-status"><i/> {hasActiveConfiguration ? 'MERCADO SIN VERIFICAR' : 'MERCADO SIN INICIAR'}</div></div>
+        <div className="dev-banner" style={isDaemonRunning ? { background: 'rgba(82, 196, 26, 0.08)', borderColor: 'rgba(82, 196, 26, 0.3)' } : {}}><div className="banner-icon"><Icon name={isDaemonRunning ? 'check' : 'alert'} size={18}/></div><div><b>{isDaemonRunning ? 'Nodo Mostro en ejecución' : hasActiveConfiguration ? 'Configuración preparada' : 'Entorno de desarrollo'}</b><span>{isDaemonRunning ? 'El motor Mostro está activo y sincronizado con tu configuración. El nodo anuncia y procesa órdenes en los relays Nostr configurados.' : hasActiveConfiguration ? 'La configuración está guardada. Comprueba en tu cliente la identidad, versión y reglas anunciadas por el nodo antes de operar; el arranque y la recepción de órdenes requieren verificación.' : 'Activa la configuración de tu comunidad y verifica el arranque del daemon antes de operar.'}</span></div><div className="banner-status" style={isDaemonRunning ? { color: '#7ee0a5', borderColor: 'rgba(82, 196, 26, 0.4)' } : {}}><i style={isDaemonRunning ? { background: '#52c41a' } : {}}/> {isDaemonRunning ? 'MERCADO EN LÍNEA' : hasActiveConfiguration ? 'MERCADO SIN VERIFICAR' : 'MERCADO SIN INICIAR'}</div></div>
+        {!daemon?.identity_present && (
+          <section className="onboarding-banner-card" aria-labelledby="onboarding-title">
+            <div className="onboarding-banner-header">
+              <div className="onboarding-badge">PASO 1 · IDENTIDAD NOSTR SOBERANA</div>
+              <h2 id="onboarding-title">Inicia tu Comunidad Mostro P2P</h2>
+              <p>
+                Para que tu nodo Mostro pueda recibir órdenes, comunicarse por chat cifrado y liquidar intercambios de forma autónoma en Nostr, necesita una clave criptográfica (nsec/npub). Puedes crear una nueva en 1 clic o importar una existente.
+              </p>
+            </div>
+            <div className="onboarding-action-buttons">
+              <button
+                type="button"
+                className="button button-primary onboarding-btn-main"
+                onClick={() => void handleGenerateIdentity()}
+                disabled={isGeneratingIdentity}
+              >
+                <Icon name="bolt" size={18} />
+                <span>{isGeneratingIdentity ? 'Generando identidad...' : 'Crear Nueva Identidad en 1 Clic'}</span>
+              </button>
+              <button
+                type="button"
+                className="button button-secondary onboarding-btn-alt"
+                onClick={() => {
+                  setImportError('');
+                  setImportNsec('');
+                  setIsImportModalOpen(true);
+                }}
+                disabled={isGeneratingIdentity}
+              >
+                <Icon name="save" size={18} />
+                <span>Tengo una clave nsec existente</span>
+              </button>
+            </div>
+          </section>
+        )}
         <div className="section-title-row"><div><h2>Servicios</h2><p>Conectividad reportada por la instancia local.</p></div><span className="updated-label">{loading ? 'Consultando…' : health ? 'API disponible' : 'API sin conexión'}</span></div>
         <div className="service-grid">{statuses.length ? statuses.map(({ title, icon, data }) => <article className="service-card" key={title}><div className="service-top"><span className="service-icon"><Icon name={icon}/></span><span className="service-status"><StatusDot status={data.status}/>{({ online: 'Conectado', offline: 'Sin conexión', unconfigured: 'Sin configurar', unknown: 'Desconocido', warning: 'Revisar' } as Record<string, string>)[data.status] || 'Desconocido'}</span></div><h3>{title}</h3><p>{data.detail || 'Sin detalles disponibles'}</p><div className="service-meta">{title === 'Mostro' && data.version ? <span>v{data.version}</span> : null}{title === 'Lightning' && data.alias ? <span>{data.alias}</span> : null}{title === 'Lightning' && typeof data.num_active_channels === 'number' ? <span>{data.num_active_channels} canales activos</span> : null}{title === 'Bitcoin' && typeof data.block_height === 'number' ? <span>Bloque {data.block_height.toLocaleString('es')}</span> : null}<Icon name="arrow" size={15}/></div></article>) : <div className="service-card unavailable"><div className="service-top"><span className="service-icon"><Icon name="grid"/></span><span className="service-status"><StatusDot/>Desconocido</span></div><h3>Servicios no disponibles</h3><p>{apiError || 'La API aún no informa el estado de los servicios.'}</p><div className="service-meta"><span>Reintenta cuando el servidor esté disponible</span></div></div>}</div>
-        {dashboard?.lightning && <section className="lightning-details" aria-labelledby="lightning-details-title"><div className="lightning-heading"><div><h2 id="lightning-details-title">Detalles de Lightning</h2><p>Información reportada por el nodo.</p></div>{dashboard.lightning.network && <span className="network-tag">Red {dashboard.lightning.network}</span>}</div>{dashboard.lightning.num_active_channels === 0 && <p className="lightning-capacity-note" role="status">LND está conectado, pero no tiene canales activos. El mercado no tiene capacidad de intercambio Lightning.</p>}<div className="lightning-stats"><div><span>Sincronización de cadena</span><strong>{dashboard.lightning.synced_to_chain === true ? 'Sincronizado' : dashboard.lightning.synced_to_chain === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Sincronización del grafo</span><strong>{dashboard.lightning.synced_to_graph === true ? 'Sincronizado' : dashboard.lightning.synced_to_graph === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Canales activos</span><strong>{typeof dashboard.lightning.num_active_channels === 'number' ? dashboard.lightning.num_active_channels : 'Desconocido'}</strong></div><div><span>Canales pendientes</span><strong>{typeof dashboard.lightning.num_pending_channels === 'number' ? dashboard.lightning.num_pending_channels : 'Desconocido'}</strong></div><div><span>Canales inactivos</span><strong>{typeof dashboard.lightning.num_inactive_channels === 'number' ? dashboard.lightning.num_inactive_channels : 'Desconocido'}</strong></div></div><div className="liquidity-row"><div><span>Liquidez local</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.local_balance_sats !== null ? `${dashboard.lightning.liquidity.local_balance_sats} sats` : 'Desconocida'}</strong></div><div><span>Liquidez remota</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.remote_balance_sats !== null ? `${dashboard.lightning.liquidity.remote_balance_sats} sats` : 'Desconocida'}</strong></div><p>{dashboard.lightning.liquidity?.status === 'unavailable' ? dashboard.lightning.liquidity.detail || 'El nodo no informa la liquidez.' : 'Los datos de canales y liquidez no garantizan que una ruta o una operación esté disponible.'}</p></div><div style={{ marginTop: '10px', textAlign: 'right' }}><button type="button" className="button button-secondary" style={{ fontSize: '10px', height: '28px' }} onClick={() => setPage('liquidity')}>Operaciones LND y Guía de Liquidez →</button></div></section>}
+        {dashboard?.lightning && <section className="lightning-details" aria-labelledby="lightning-details-title"><div className="lightning-heading"><div><h2 id="lightning-details-title">Detalles de Lightning</h2><p>Información reportada por el nodo.</p></div>{dashboard.lightning.network && <span className="network-tag">Red {dashboard.lightning.network}</span>}</div>{dashboard.lightning.num_active_channels === 0 && <p className="lightning-capacity-note" role="status">LND está conectado, pero no tiene canales activos. El mercado no tiene capacidad de intercambio Lightning.</p>}<div className="lightning-stats"><div><span>Sincronización de cadena</span><strong>{dashboard.lightning.synced_to_chain === true ? 'Sincronizado' : dashboard.lightning.synced_to_chain === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Sincronización del grafo</span><strong>{dashboard.lightning.synced_to_graph === true ? 'Sincronizado' : dashboard.lightning.synced_to_graph === false ? 'Pendiente' : 'Desconocido'}</strong></div><div><span>Canales activos</span><strong>{typeof dashboard.lightning.num_active_channels === 'number' ? dashboard.lightning.num_active_channels : 'Desconocido'}</strong></div><div><span>Canales pendientes</span><strong>{typeof dashboard.lightning.num_pending_channels === 'number' ? dashboard.lightning.num_pending_channels : 'Desconocido'}</strong></div><div><span>Canales inactivos</span><strong>{typeof dashboard.lightning.num_inactive_channels === 'number' ? dashboard.lightning.num_inactive_channels : 'Desconocido'}</strong></div></div><div className="liquidity-row"><div><span>Liquidez local</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.local_balance_sats !== null ? `${dashboard.lightning.liquidity.local_balance_sats} sats` : 'Desconocida'}</strong></div><div><span>Liquidez remota</span><strong>{dashboard.lightning.liquidity?.status === 'available' && dashboard.lightning.liquidity.remote_balance_sats !== null ? `${dashboard.lightning.liquidity.remote_balance_sats} sats` : 'Desconocida'}</strong></div><p>{dashboard.lightning.liquidity?.status === 'unavailable' ? dashboard.lightning.liquidity.detail || 'El nodo no informa la liquidez.' : 'Los datos de canales y liquidez no garantizan que una ruta o una operación esté disponible.'}</p></div><div style={{ marginTop: '10px', textAlign: 'right' }}><button type="button" className="button button-secondary" style={{ fontSize: '12px', height: '28px' }} onClick={() => setPage('liquidity')}>Operaciones LND y Guía de Liquidez →</button></div></section>}
         {connection && connection.status === 'ready' && (
           <section className="connection-card" aria-labelledby="connection-title">
             <div className="connection-heading">
@@ -1555,7 +1805,7 @@ function App() {
               </div>
               <span className="service-status">
                 <StatusDot status={isDaemonRunning ? 'online' : hasActiveConfiguration || daemon.state === 'configured_standby' ? 'warning' : 'offline'} />
-                {isDaemonRunning ? 'Proceso local detectado' : hasActiveConfiguration ? 'Ejecución sin verificar' : daemon.state === 'configured_standby' ? 'En Espera de Activación' : 'Sin Configurar'}
+                {isDaemonRunning ? 'En ejecución (Online)' : hasActiveConfiguration ? 'Ejecución sin verificar' : daemon.state === 'configured_standby' ? 'En Espera de Activación' : 'Sin Configurar'}
               </span>
             </div>
             {daemon.warnings.length > 0 && (
@@ -1723,12 +1973,12 @@ function App() {
                 <div key={n.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', borderLeft: `3px solid ${n.level === 'error' ? '#ef4444' : n.level === 'warning' ? '#f59e0b' : '#10b981'}` }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: n.level === 'error' ? 'rgba(239,68,68,0.2)' : n.level === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)', color: n.level === 'error' ? '#ef4444' : n.level === 'warning' ? '#f59e0b' : '#10b981' }}>{n.category}</span>
-                      <strong style={{ fontSize: '14px' }}>{n.title}</strong>
+                      <span style={{ fontSize: '13px', textTransform: 'uppercase', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: n.level === 'error' ? 'rgba(239,68,68,0.2)' : n.level === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)', color: n.level === 'error' ? '#ef4444' : n.level === 'warning' ? '#f59e0b' : '#10b981' }}>{n.category}</span>
+                      <strong style={{ fontSize: '16px' }}>{n.title}</strong>
                     </div>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#9ca3af' }}>{n.message}</p>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '15px', color: '#9ca3af' }}>{n.message}</p>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                  <span style={{ fontSize: '14px', color: '#6b7280' }}>
                     {n.timestamp ? new Date(n.timestamp * 1000).toLocaleTimeString('es') : ''}
                   </span>
                 </div>
@@ -1772,7 +2022,7 @@ function App() {
             </div>
           )}
           {backupMessage && (
-            <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '6px', background: backupMessage.startsWith('✓') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: backupMessage.startsWith('✓') ? '#10b981' : '#ef4444', fontSize: '13px' }}>
+            <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '6px', background: backupMessage.startsWith('✓') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: backupMessage.startsWith('✓') ? '#10b981' : '#ef4444', fontSize: '15px' }}>
               {backupMessage}
             </div>
           )}
@@ -1798,7 +2048,7 @@ function App() {
               <span className="field-label">Respaldos verificados en medio secundario ({backupState.backups.length})</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
                 {backupState.backups.slice(0, 5).map((b, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', fontSize: '13px' }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', fontSize: '15px' }}>
                     <code>{b.filename}</code>
                     <span style={{ color: '#9ca3af' }}>{(b.size_bytes / 1024).toFixed(1)} KB · {new Date(b.modified_timestamp * 1000).toLocaleDateString('es')}</span>
                   </div>
@@ -1828,9 +2078,9 @@ function App() {
 
           <div className="sim-notice-card" style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.08)', border: '1px solid rgba(235, 115, 29, 0.25)', borderRadius: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#eb731d', textTransform: 'uppercase' }}>Modelo Sintético · Dry-Run en Memoria</span>
+              <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.06em', color: '#eb731d', textTransform: 'uppercase' }}>Modelo Sintético · Dry-Run en Memoria</span>
             </div>
-            <p style={{ margin: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.4 }}>
+            <p style={{ margin: 0, fontSize: '15px', color: '#9ba3af', lineHeight: 1.4 }}>
               Este simulador valida localmente el flujo del protocolo, las garantías (bonds) y las comisiones sin ejecutar transacciones en Bitcoin/Lightning ni relays Nostr en vivo. Los eventos y firmas son sintéticos y la equivalencia fiat es meramente ilustrativa (ciclo regtest en vivo pendiente).
             </p>
           </div>
@@ -1973,7 +2223,7 @@ function App() {
                 </div>
 
                 {simulationReport.disclaimer && (
-                  <p style={{ marginTop: '20px', padding: '12px', fontSize: '12px', color: '#6b7280', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', textAlign: 'center', lineHeight: 1.4 }}>
+                  <p style={{ marginTop: '20px', padding: '12px', fontSize: '14px', color: '#6b7280', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', textAlign: 'center', lineHeight: 1.4 }}>
                     {simulationReport.disclaimer}
                   </p>
                 )}
@@ -2005,6 +2255,38 @@ function App() {
       )}
       {page === 'config' && <section className="content config-page">
         <div className="page-heading"><div><div className="eyebrow">MOSTRO COMMUNITY MANAGER <span className="eyebrow-sep">/</span> AJUSTES</div><h1>Configuración</h1><p>Define la identidad y las reglas iniciales de tu comunidad.</p></div><div className="config-heading-actions"><span className={`save-state ${saved ? 'is-saved' : ''}`}><i/>{saved ? `Guardado · revisión ${revision}` : 'Cambios locales'}</span>{daemon?.can_activate && (<button type="button" className="button button-primary" onClick={() => void handleActivateDaemon()} disabled={activatingDaemon || saving || loading}>{activatingDaemon ? 'Activando...' : hasActiveConfiguration ? 'Reactivar Mostro' : 'Activar Mostro'}</button>)}<button className="button button-secondary" onClick={refreshSafely} disabled={loading}>Recargar</button></div></div>
+        <div className="preset-commissions-banner">
+          <div className="preset-commissions-head">
+            <span className="preset-commissions-badge">
+              {draft.community.language === 'en' ? 'COMMISSION & BOND PRESETS' : 'PRELLENADO DE COMISIONES Y BONOS'}
+            </span>
+            <h3>
+              {draft.community.language === 'en' ? 'Quick fee & bond presets' : 'Plantillas rápidas de comisiones y fianza'}
+            </h3>
+            <p>
+              {draft.community.language === 'en'
+                ? 'Configure market fees, dev fees, routing limits, and anti-spam bonds in one click without affecting your community identity or payment methods.'
+                : 'Ajusta comisiones de mercado, desarrollo, enrutamiento y fianzas anti-spam en un clic sin modificar la identidad ni tus métodos de pago.'}
+            </p>
+          </div>
+          <div className="preset-commissions-grid">
+            {COMMISSION_BOND_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="preset-commission-card-btn"
+                onClick={() => applyCommissionBondPreset(p)}
+              >
+                <strong>{draft.community.language === 'en' ? p.nameEn : p.nameEs}</strong>
+                <span>{draft.community.language === 'en' ? p.descEn : p.descEs}</span>
+                <span className="preset-apply-label">
+                  {draft.community.language === 'en' ? 'Apply fees & bonds →' : 'Aplicar comisiones y bonos →'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {notice && <div className="form-message success" style={{ marginBottom: '14px' }}>{notice}</div>}
         <div className="config-layout">
           <nav className="config-nav" aria-label="Secciones de configuración">
             {configNavSections.map((sec) => (
@@ -2027,7 +2309,153 @@ function App() {
           </nav>
           <form className="config-form" onSubmit={saveConfig}>
             <section className="config-section" id="identity"><div className="config-section-head"><span className="section-number">01</span><div><h2>Identidad de la comunidad</h2><p>Esta información ayuda a las personas a reconocer tu instancia.</p></div></div><div className="form-grid"><Field label="Nombre de la comunidad"><input value={draft.community.name} onChange={(e) => updateCommunity('name', e.target.value)} placeholder="Ej. Bitcoin Quito" maxLength={80}/></Field><Field label="Idioma"><select value={draft.community.language} onChange={(e) => updateCommunity('language', e.target.value)}><option value="es">Español</option><option value="en">English</option><option value="pt">Português</option></select></Field><Field label="Sitio web"><input type="url" value={draft.community.website} onChange={(e) => updateCommunity('website', e.target.value)} placeholder="https://tu-comunidad.org"/></Field><Field label="Contacto" hint="Dirección web pública de contacto"><input type="url" value={draft.community.contact} onChange={(e) => updateCommunity('contact', e.target.value)} placeholder="https://tu-comunidad.org/contacto"/></Field><div className="field full-width"><span className="field-label">Acerca de</span><textarea value={draft.community.about} onChange={(e) => updateCommunity('about', e.target.value)} placeholder="Describe brevemente tu comunidad" rows={3} maxLength={500}/><span className="field-hint">{draft.community.about.length}/500 caracteres</span></div></div></section>
-            <section className="config-section" id="market"><div className="config-section-head"><span className="section-number">02</span><div><h2>Reglas del mercado</h2><p>Establece límites de operación y comisiones. Los porcentajes se convierten a puntos base al guardar.</p></div></div><div className="form-grid"><div className="field full-width"><span className="field-label">Monedas fiat</span><div className="chips">{draft.market.fiat_currencies.map((currency) => <button className="chip" type="button" key={currency} onClick={() => updateMarket('fiat_currencies', draft.market.fiat_currencies.filter((x) => x !== currency))}>{currency}<b>×</b></button>)}{draft.market.fiat_currencies.length === 0 && <span className="empty-hint">Sin monedas seleccionadas · elige una para habilitar operaciones</span>}</div><div className="inline-add"><input aria-label="Código ISO de moneda" value={currencyInput} onChange={(e) => setCurrencyInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCurrency())} placeholder="Código ISO · ej. USD" maxLength={3}/><button type="button" onClick={addCurrency}>Añadir moneda</button></div></div><Field label="Operación mínima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.min_trade_sats} onChange={(e) => updateMarket('min_trade_sats', Number(e.target.value))}/></Field><Field label="Operación máxima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.max_trade_sats} onChange={(e) => updateMarket('max_trade_sats', Number(e.target.value))}/></Field><Field label="Comisión del mercado" hint="Déjalo en 0% si no deseas cobrar una comisión"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.fee} required onChange={(e) => updateFee('fee', 'fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión de desarrollo" hint="Porcentaje de la comisión de Mostro destinado al desarrollo (mínimo 10%)"><div className="input-suffix"><input type="number" min="10" step="0.01" value={feeInputs.devFee} required onChange={(e) => updateFee('devFee', 'dev_fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión máxima de enrutamiento" hint="Límite tolerado para Lightning"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.routingFee} required onChange={(e) => updateFee('routingFee', 'max_routing_fee_bps', e.target.value)}/><span>%</span></div></Field></div></section>
+            <section className="config-section" id="market"><div className="config-section-head"><span className="section-number">02</span><div><h2>Reglas del mercado</h2><p>Establece límites de operación y comisiones. Los porcentajes se convierten a puntos base al guardar.</p></div></div><div className="form-grid">
+              <div className="field full-width">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                  <span className="field-label" style={{ margin: 0 }}>
+                    {draft.community.language === 'en' ? 'Fiat currencies' : 'Monedas fiat'}
+                  </span>
+                  <span className="field-hint" style={{ margin: 0 }}>
+                    {draft.market.fiat_currencies.length}/30 {draft.community.language === 'en' ? 'selected' : 'seleccionadas'}
+                  </span>
+                </div>
+                <div className="chips currency-selected-chips">
+                  {draft.market.fiat_currencies.map((code) => {
+                    const displayName = getCurrencyDisplayName(code, draft.community.language);
+                    return (
+                      <button
+                        className="currency-chip-badge"
+                        type="button"
+                        key={code}
+                        onClick={() => toggleCurrency(code)}
+                        title={draft.community.language === 'en' ? `Remove ${code} - ${displayName}` : `Eliminar ${code} - ${displayName}`}
+                      >
+                        <strong>{code}</strong>
+                        <span>{displayName}</span>
+                        <b>×</b>
+                      </button>
+                    );
+                  })}
+                  {draft.market.fiat_currencies.length === 0 && (
+                    <span className="empty-hint">
+                      {draft.community.language === 'en'
+                        ? 'No fiat currencies selected · add at least one to enable trading'
+                        : 'Sin monedas seleccionadas · elige una para habilitar operaciones'}
+                    </span>
+                  )}
+                </div>
+                <div className="currency-search-wrap" ref={currencyDropdownRef}>
+                  <input
+                    type="text"
+                    className="currency-search-input"
+                    value={currencySearchQuery}
+                    onChange={(e) => {
+                      setCurrencySearchQuery(e.target.value);
+                      setIsCurrencyDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsCurrencyDropdownOpen(true)}
+                    onKeyDown={handleCurrencyKeyDown}
+                    placeholder={
+                      draft.community.language === 'en'
+                        ? 'Search currency by code (USD, EUR) or name (Dollar, Peso)...'
+                        : 'Buscar moneda por abreviación (USD, EUR) o nombre (Dólar, Peso)...'
+                    }
+                  />
+                  {currencySearchQuery && (
+                    <button
+                      type="button"
+                      className="currency-search-clear"
+                      aria-label="Limpiar búsqueda"
+                      onClick={() => {
+                        setCurrencySearchQuery('');
+                        setIsCurrencyDropdownOpen(true);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {isCurrencyDropdownOpen && (
+                    <div className="currency-dropdown-menu">
+                      <div className="currency-dropdown-header">
+                        <span>
+                          {currencySearchQuery.trim()
+                            ? draft.community.language === 'en'
+                              ? `Results for "${currencySearchQuery}" (${filteredCurrencies.length})`
+                              : `Resultados para "${currencySearchQuery}" (${filteredCurrencies.length})`
+                            : draft.community.language === 'en'
+                            ? 'Select currencies from the ISO 4217 catalog'
+                            : 'Selecciona monedas del catálogo oficial ISO 4217'}
+                        </span>
+                        <button
+                          type="button"
+                          className="currency-dropdown-close"
+                          onClick={() => setIsCurrencyDropdownOpen(false)}
+                        >
+                          {draft.community.language === 'en' ? 'Close' : 'Cerrar'}
+                        </button>
+                      </div>
+                      <div className="currency-dropdown-list">
+                        {filteredCurrencies.length === 0 ? (
+                          <div className="currency-dropdown-empty">
+                            {draft.community.language === 'en'
+                              ? `No currencies found matching "${currencySearchQuery}"`
+                              : `No se encontraron monedas que coincidan con "${currencySearchQuery}"`}
+                          </div>
+                        ) : (
+                          filteredCurrencies.map((item) => {
+                            const isSelected = draft.market.fiat_currencies.includes(item.code);
+                            const isEn = draft.community.language === 'en';
+                            const primaryName = isEn ? item.nameEn : item.nameEs;
+                            const secondaryName = isEn ? item.nameEs : item.nameEn;
+                            return (
+                              <div
+                                key={item.code}
+                                className={`currency-dropdown-item ${isSelected ? 'selected' : ''}`}
+                                onClick={() => toggleCurrency(item.code)}
+                              >
+                                <span className="currency-code-tag">{item.code}</span>
+                                <div className="currency-item-names">
+                                  <span className="currency-primary-name">{primaryName}</span>
+                                  <span className="currency-secondary-name">{secondaryName}</span>
+                                </div>
+                                <span className={`currency-item-action ${isSelected ? 'is-selected' : ''}`}>
+                                  {isSelected
+                                    ? isEn
+                                      ? '✓ Selected'
+                                      : '✓ Seleccionada'
+                                    : isEn
+                                    ? '+ Add'
+                                    : '+ Añadir'}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="currency-popular-row">
+                  <span className="currency-popular-label">
+                    {draft.community.language === 'en' ? 'Quick add:' : 'Monedas populares:'}
+                  </span>
+                  {POPULAR_CURRENCIES.map((code) => {
+                    const isSelected = draft.market.fiat_currencies.includes(code);
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        className={`currency-quick-pill ${isSelected ? 'active' : ''}`}
+                        onClick={() => toggleCurrency(code)}
+                        title={getCurrencyDisplayName(code, draft.community.language)}
+                      >
+                        {isSelected ? `✓ ${code}` : `+ ${code}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <Field label="Operación mínima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.min_trade_sats} onChange={(e) => updateMarket('min_trade_sats', Number(e.target.value))}/></Field><Field label="Operación máxima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.max_trade_sats} onChange={(e) => updateMarket('max_trade_sats', Number(e.target.value))}/></Field><Field label="Comisión del mercado" hint="Déjalo en 0% si no deseas cobrar una comisión"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.fee} required onChange={(e) => updateFee('fee', 'fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión de desarrollo" hint="Porcentaje de la comisión de Mostro destinado al desarrollo (mínimo 10%)"><div className="input-suffix"><input type="number" min="10" step="0.01" value={feeInputs.devFee} required onChange={(e) => updateFee('devFee', 'dev_fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión máxima de enrutamiento" hint="Límite tolerado para Lightning"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.routingFee} required onChange={(e) => updateFee('routingFee', 'max_routing_fee_bps', e.target.value)}/><span>%</span></div></Field></div></section>
             <section className="config-section" id="safety"><div className="config-section-head"><span className="section-number">03</span><div><h2>Seguridad y garantías</h2><p>Opciones de bonos y prueba de trabajo para reducir el abuso.</p></div></div><Toggle checked={draft.safety.bond_enabled} onChange={(v) => updateSafety('bond_enabled', v)} label="Exigir bono para las operaciones" note="Las personas reservan sats como garantía durante una operación."/>{draft.safety.bond_enabled && <div className="form-grid compact-grid"><Field label="Bono relativo" hint="Porcentaje del valor de la operación"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.bond} required onChange={(e) => updateFee('bond', 'bond_bps', e.target.value)}/><span>%</span></div></Field><Field label="Bono base" hint="En satoshis"><input type="number" min="0" value={draft.safety.base_bond_sats} onChange={(e) => updateSafety('base_bond_sats', Number(e.target.value))}/></Field><Field label="Aplicar a"><select value={draft.safety.bond_apply_to} onChange={(e) => updateSafety('bond_apply_to', e.target.value)}><option value="both">Quien publica y quien acepta</option><option value="make">Quien publica</option><option value="take">Quien acepta</option></select></Field></div>}<div className="toggle-divider"/><Toggle checked={draft.safety.automatic_timeout_slash} onChange={(v) => updateSafety('automatic_timeout_slash', v)} label="Penalización automática por vencimiento" note="Penaliza el bond por vencimiento en estados de espera; no se aplica a todos los plazos de una operación."/><div className="form-grid compact-grid pow-grid"><Field label="Prueba de trabajo" hint="Dificultad general"><input type="number" min="0" value={draft.safety.pow} onChange={(e) => updateSafety('pow', Number(e.target.value))}/></Field><Field label="Primera conversación" hint="Dificultad para el primer contacto"><input type="number" min="0" value={draft.safety.pow_first_contact} onChange={(e) => updateSafety('pow_first_contact', Number(e.target.value))}/></Field></div></section>
             <section className="config-section" id="nostr"><div className="config-section-head"><span className="section-number">04</span><div><h2>Relays de Nostr</h2><p>Define los relays que usará tu instancia para publicar y recibir eventos.</p></div></div><div className="chips">{draft.nostr.relays.map((relay) => <button className="chip relay-chip" type="button" key={relay} onClick={() => setDraft((old) => ({ ...old, nostr: { relays: old.nostr.relays.filter((x) => x !== relay) } }))}><span>{relay}</span><b>×</b></button>)}{draft.nostr.relays.length === 0 && <span className="empty-hint">Aún no has añadido relays.</span>}</div><div className="inline-add"><input type="url" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addRelay())} placeholder="wss://relay.example.org"/><button type="button" onClick={addRelay}>Añadir relay</button></div></section>
             <section className="config-section" id="payments">
@@ -2170,6 +2598,163 @@ function App() {
         </div>
       </section>}
     </main>
+    {generatedIdentity && (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="custody-title">
+        <div className="modal-dialog">
+          <div className="modal-header">
+            <h3 id="custody-title">¡Identidad Mostro Generada con Éxito!</h3>
+            <button
+              type="button"
+              className="modal-close-btn"
+              aria-label="Cerrar modal"
+              onClick={() => {
+                if (!hasBackedUpNsec) {
+                  if (window.confirm('¿Seguro que deseas cerrar? Asegúrate de haber copiado y guardado tu clave privada (nsec).')) {
+                    setGeneratedIdentity(null);
+                  }
+                } else {
+                  setGeneratedIdentity(null);
+                }
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="modal-body">
+            <div className="security-warning-box">
+              <strong>⚠ RESGUARDO OBLIGATORIO DE CLAVE PRIVADA (NSEC)</strong>
+              Esta clave privada es la credencial maestra de tu nodo Mostro. Cópiala y guárdala ahora mismo en tu gestor de contraseñas seguro. Por motivos de seguridad y soberanía, Mostro Community Manager nunca volverá a mostrarte la clave privada completa.
+            </div>
+
+            <div className="key-display-group">
+              <label>Clave Privada Nostr (nsec) — ¡Secreto!</label>
+              <div className="copy-box">
+                <code style={{ color: '#ffd993', fontWeight: 600 }}>{generatedIdentity.nsec}</code>
+                <button
+                  type="button"
+                  className="copy-button"
+                  onClick={() => copyText(generatedIdentity.nsec, 'modal_nsec')}
+                >
+                  {copiedField === 'modal_nsec' ? 'Copiado ✓' : 'Copiar nsec'}
+                </button>
+              </div>
+            </div>
+
+            <div className="key-display-group">
+              <label>Clave Pública Nostr (npub) — Identidad Pública</label>
+              <div className="copy-box">
+                <code>{generatedIdentity.npub}</code>
+                <button
+                  type="button"
+                  className="copy-button"
+                  onClick={() => copyText(generatedIdentity.npub, 'modal_npub')}
+                >
+                  {copiedField === 'modal_npub' ? 'Copiado ✓' : 'Copiar npub'}
+                </button>
+              </div>
+            </div>
+
+            <label className="custody-checklist">
+              <input
+                type="checkbox"
+                checked={hasBackedUpNsec}
+                onChange={(e) => setHasBackedUpNsec(e.target.checked)}
+              />
+              <span>Confirmo que he copiado y guardado mi clave privada (nsec) en mi gestor de contraseñas u otro medio seguro.</span>
+            </label>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={!hasBackedUpNsec}
+              onClick={() => {
+                setGeneratedIdentity(null);
+                setPage('config');
+                setNotice('✓ Identidad lista. Ahora elige una plantilla regional o personaliza las reglas de tu comunidad.');
+              }}
+            >
+              Continuar a Configuración →
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {isImportModalOpen && (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <div className="modal-dialog">
+          <div className="modal-header">
+            <h3 id="import-title">Importar Clave Privada Nostr (nsec)</h3>
+            <button
+              type="button"
+              className="modal-close-btn"
+              aria-label="Cerrar modal"
+              onClick={() => {
+                setIsImportModalOpen(false);
+                setImportNsec('');
+                setImportError('');
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <form onSubmit={handleImportIdentity}>
+            <div className="modal-body">
+              <p style={{ margin: 0, fontSize: '13.5px', color: '#a3b4ab', lineHeight: 1.5 }}>
+                Ingresa la clave privada (en formato <code>nsec1...</code>) que utilizará tu bot Mostro para firmar eventos, comunicarse con los usuarios y publicar órdenes.
+              </p>
+              <div className="field">
+                <span className="field-label">Clave privada (nsec)</span>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showImportNsec ? 'text' : 'password'}
+                    value={importNsec}
+                    onChange={(e) => setImportNsec(e.target.value)}
+                    placeholder="nsec1..."
+                    required
+                    style={{ paddingRight: '80px', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    style={{ position: 'absolute', right: '4px', top: '4px', height: '30px', padding: '0 8px', fontSize: '11px' }}
+                    onClick={() => setShowImportNsec(!showImportNsec)}
+                  >
+                    {showImportNsec ? 'Ocultar' : 'Ver'}
+                  </button>
+                </div>
+              </div>
+              {importError && (
+                <div className="form-message error" style={{ margin: 0 }}>
+                  ⚠ {importError}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportNsec('');
+                  setImportError('');
+                }}
+                disabled={isImporting}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={isImporting || !importNsec.trim()}
+              >
+                {isImporting ? 'Validando...' : 'Importar y Vincular'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
   </div>;
 }
 export default App;

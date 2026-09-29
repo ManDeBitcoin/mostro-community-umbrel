@@ -135,6 +135,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
+        .route("/api/community/presets", get(community_presets_handler))
+        .route("/api/identity/generate", post(identity_generate_handler))
+        .route("/api/identity/import", post(identity_import_handler))
         .route("/api/connection", get(connection_info_handler))
         .route("/api/daemon/status", get(daemon_status_handler))
         .route(
@@ -264,6 +267,128 @@ async fn connection_info_handler(
     })?;
     let root = store.root().to_path_buf();
     Ok(Json(connection::get_connection_info(&root, &store)))
+}
+
+async fn community_presets_handler() -> Json<Vec<crate::config::RegionalPreset>> {
+    Json(crate::config::get_regional_presets())
+}
+
+#[derive(Deserialize, Default)]
+struct GenerateIdentityRequest {
+    overwrite: Option<bool>,
+}
+
+async fn identity_generate_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, Error> {
+    verify_protection(&headers)?;
+    let root = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .root()
+        .to_path_buf();
+
+    let overwrite = if !body.is_empty() {
+        let req: GenerateIdentityRequest = serde_json::from_slice(&body).unwrap_or_default();
+        req.overwrite.unwrap_or(false)
+    } else {
+        false
+    };
+
+    let (nsec, npub) = identity::generate_with_overwrite(&root, overwrite)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
+
+    let config_opt = state
+        .store
+        .lock()
+        .ok()
+        .and_then(|s| s.document.config.clone());
+    if let Some(config) = config_opt {
+        let _ = state.monitor_tx.send(orders::MonitorCommand {
+            config,
+            npub: Some(npub.clone()),
+        });
+    }
+
+    state
+        .notifications
+        .publish(Notification::system_alert(
+            "Identidad Mostro generada",
+            &format!("Nueva clave pública inicializada: {npub}"),
+            "info",
+            None,
+        ))
+        .await;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "nsec": nsec,
+        "npub": npub
+    })))
+}
+
+#[derive(Deserialize)]
+struct ImportIdentityRequest {
+    nsec: String,
+    overwrite: Option<bool>,
+}
+
+async fn identity_import_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ImportIdentityRequest>,
+) -> Result<Json<Value>, Error> {
+    verify_protection(&headers)?;
+    let root = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .root()
+        .to_path_buf();
+
+    let overwrite = payload.overwrite.unwrap_or(false);
+    let npub = identity::import_nsec_with_overwrite(&root, &payload.nsec, overwrite)
+        .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
+
+    let config_opt = state
+        .store
+        .lock()
+        .ok()
+        .and_then(|s| s.document.config.clone());
+    if let Some(config) = config_opt {
+        let _ = state.monitor_tx.send(orders::MonitorCommand {
+            config,
+            npub: Some(npub.clone()),
+        });
+    }
+
+    state
+        .notifications
+        .publish(Notification::system_alert(
+            "Identidad Mostro importada",
+            &format!("Clave pública vinculada: {npub}"),
+            "info",
+            None,
+        ))
+        .await;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "npub": npub
+    })))
 }
 
 #[derive(Deserialize)]
