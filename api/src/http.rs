@@ -544,6 +544,24 @@ async fn save_community(
             config: request.config,
             npub,
         });
+
+        let active_dir = root.join("active");
+        if active_dir.join("settings.toml").is_file() {
+            let origin = std::fs::read(active_dir.join("status.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<daemon::ActiveStatus>(&b).ok())
+                .map(|s| s.lnd_grpc_origin)
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://{}:{}",
+                        std::env::var("APP_LIGHTNING_NODE_IP")
+                            .unwrap_or_else(|_| "10.21.21.9".into()),
+                        std::env::var("APP_LIGHTNING_NODE_GRPC_PORT")
+                            .unwrap_or_else(|_| "10009".into())
+                    )
+                });
+            let _ = daemon::activate(&root, &origin);
+        }
     }
 
     result

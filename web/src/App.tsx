@@ -1389,6 +1389,7 @@ function App() {
     try {
       const response = await api<CommunityReply>('/api/community', { method: 'PUT', headers: { 'X-Requested-With': 'mostro-community' }, body: JSON.stringify({ revision, config: draft }) });
       setRevision(response.revision); setDraft(response.config || draft); setSaved(true); setDirty(false); setNotice('Configuración guardada.'); setApiError('');
+      await refresh();
     } catch (err) { setNotice(''); setApiError(err instanceof Error ? err.message : 'No se pudo guardar la configuración.'); }
     finally { setSaving(false); }
   };

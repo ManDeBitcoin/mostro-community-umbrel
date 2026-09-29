@@ -368,6 +368,26 @@ async fn daemon_activation_flow_and_dashboard_status() {
     assert_eq!(body["mostro"]["configured_revision"], 1);
     assert!(body["mostro"].get("version").is_none());
 
+    let mut updated_config = config();
+    updated_config["market"]["fee_bps"] = serde_json::json!(75);
+    let res = app
+        .clone()
+        .oneshot(save(1, true, "http://localhost:5173", updated_config))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let active_settings =
+        std::fs::read_to_string(dir.path().join("active").join("settings.toml")).unwrap();
+    assert!(active_settings.contains("fee = 0.0075"));
+
+    let status_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("active").join("status.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status_json["revision"], 2);
+    assert!(dir.path().join(".standby_wake").exists());
+
     // 8. POST /api/daemon/stop deactivates daemon
     let res = app
         .clone()

@@ -1,9 +1,18 @@
 //! Daemon orchestration, runtime validation and safe activation.
 //! Ensures Mostro daemon only starts when all cryptographic and network prerequisites are satisfied.
-use crate::{adapters::Integrations, config::render_settings, identity, store::Document};
+use crate::{
+    adapters::Integrations,
+    config::{BondApply, Configuration, render_settings},
+    identity,
+    store::Document,
+};
+use futures_util::{SinkExt, StreamExt};
+use nostr::{EventBuilder, Kind, Tag, event::tag::TagKind};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
+    borrow::Cow,
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Write},
     os::unix::{
@@ -11,8 +20,10 @@ use std::{
         fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::protocol::Message;
 use url::Url;
 
 const CERT_PATH: &str = "/lnd/tls.cert";
@@ -233,8 +244,11 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
         .and_then(|file| file.sync_all())
         .map_err(|_| "No se pudo sincronizar el directorio activo")?;
 
-    // Despertar o interrumpir el bucle de espera (sleep) del contenedor mostro
     notify_standby(root);
+
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(broadcast_instance_info(root.to_path_buf(), config.clone()));
+    }
 
     Ok(ActivationResult {
         revision: document.revision,
@@ -257,9 +271,14 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
     }
     let _ = fs::remove_file(root.join(".standby_wake"));
     let _ = fs::remove_file(active_dir.join(".standby_wake"));
+    let _ = fs::remove_file(Path::new("/data/.standby_wake"));
+    let _ = fs::remove_file(Path::new("/data/config/.standby_wake"));
+    let _ = fs::remove_file(Path::new("/data/config/active/.standby_wake"));
+    let _ = fs::remove_file(active_dir.join("mostro.pid"));
+    let _ = fs::remove_file(active_dir.join("mostro.heartbeat"));
 
-    // Only signal processes using this instance's settings. Other Mostro
-    // installations may be visible in the same PID namespace.
+    notify_standby(root);
+
     for pid in mostrod_pids(&active_dir) {
         let _ = std::process::Command::new("kill")
             .args(["-TERM", &pid.to_string()])
@@ -270,9 +289,195 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
 }
 
 fn notify_standby(root: &Path) {
-    // The entrypoint checks for settings every second. Do not signal PIDs from
-    // files: they belong to another container's PID namespace and may be reused.
     let _ = File::create(root.join(".standby_wake"));
+    let _ = File::create(root.join("active").join(".standby_wake"));
+    let _ = File::create(Path::new("/data/.standby_wake"));
+    let _ = File::create(Path::new("/data/config/.standby_wake"));
+    let _ = File::create(Path::new("/data/config/active/.standby_wake"));
+}
+
+pub async fn broadcast_instance_info(root: PathBuf, config: Configuration) {
+    let Ok(Some(keys)) = identity::load_identity_keys(&root) else {
+        return;
+    };
+    let pubkey_hex = keys.public_key().to_hex();
+    let fee_str = format!("{}", config.market.fee_bps as f64 / 10000.0);
+    let bond_pct_str = format!("{}", config.safety.bond_bps as f64 / 10000.0);
+    let bond_apply_str = match config.safety.bond_apply_to {
+        BondApply::Make => "make",
+        BondApply::Take => "take",
+        BondApply::Both => "both",
+    };
+
+    let mut preserved_tags = Vec::new();
+    for relay in &config.nostr.relays {
+        let connect_fut = connect_async(relay);
+        if let Ok(Ok((mut ws, _))) = tokio::time::timeout(Duration::from_secs(2), connect_fut).await
+        {
+            let req = serde_json::json!(["REQ", "prev_info", {
+                "authors": [pubkey_hex],
+                "kinds": [38385],
+                "limit": 1
+            }])
+            .to_string();
+            if ws.send(Message::Text(req.into())).await.is_ok() {
+                let fetch_fut = async {
+                    while let Some(Ok(msg)) = ws.next().await {
+                        if let Message::Text(text) = msg
+                            && let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&text)
+                        {
+                            if arr.len() >= 3 && arr[0] == "EVENT" {
+                                if let Ok(ev) =
+                                    serde_json::from_value::<nostr::Event>(arr[2].clone())
+                                {
+                                    return Some(ev);
+                                }
+                            } else if arr.len() >= 2 && arr[0] == "EOSE" {
+                                break;
+                            }
+                        }
+                    }
+                    None
+                };
+                if let Ok(Some(prev_ev)) =
+                    tokio::time::timeout(Duration::from_millis(800), fetch_fut).await
+                {
+                    for tag in prev_ev.tags {
+                        let slice = tag.as_slice();
+                        if let Some(key) = slice.first()
+                            && (key.starts_with("lnd_") || key == "mostro_commit_hash")
+                        {
+                            preserved_tags.push(tag);
+                        }
+                    }
+                    let _ = ws.close(None).await;
+                    break;
+                }
+            }
+            let _ = ws.close(None).await;
+        }
+    }
+
+    let mut tags = vec![
+        Tag::identifier(&pubkey_hex),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("mostro_version")),
+            vec!["0.18.8".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("max_order_amount")),
+            vec![config.market.max_trade_sats.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("min_order_amount")),
+            vec![config.market.min_trade_sats.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("expiration_hours")),
+            vec!["24".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("expiration_seconds")),
+            vec!["900".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("fiat_currencies_accepted")),
+            vec![config.market.fiat_currencies.join(",")],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("max_orders_per_response")),
+            vec!["10".to_string()],
+        ),
+        Tag::custom(TagKind::Custom(Cow::Borrowed("fee")), vec![fee_str]),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("pow")),
+            vec![config.safety.pow.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("pow_first_contact")),
+            vec![config.safety.pow_first_contact.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("protocol_version")),
+            vec!["2".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("hold_invoice_cltv_delta")),
+            vec!["144".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("y")),
+            vec!["mostro".to_string(), config.community.name.clone()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("z")),
+            vec!["info".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("invoice_expiration_window")),
+            vec!["3600".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("hold_invoice_expiration_window")),
+            vec!["300".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_enabled")),
+            vec![config.safety.bond_enabled.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_amount_pct")),
+            vec![bond_pct_str],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_base_amount_sats")),
+            vec![config.safety.base_bond_sats.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_apply_to")),
+            vec![bond_apply_str.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_slash_on_waiting_timeout")),
+            vec![config.safety.automatic_timeout_slash.to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_slash_node_share_pct")),
+            vec!["0.5".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("bond_payout_claim_window_days")),
+            vec!["15".to_string()],
+        ),
+        Tag::custom(
+            TagKind::Custom(Cow::Borrowed("maintenance_mode")),
+            vec!["false".to_string()],
+        ),
+    ];
+
+    tags.extend(preserved_tags);
+
+    let Ok(event) = EventBuilder::new(Kind::Custom(38385), "")
+        .tags(tags)
+        .sign_with_keys(&keys)
+    else {
+        return;
+    };
+
+    let msg = serde_json::json!(["EVENT", event]).to_string();
+
+    for relay in &config.nostr.relays {
+        let relay_url = relay.clone();
+        let msg = msg.clone();
+        tokio::spawn(async move {
+            if let Ok(Ok((mut ws, _))) =
+                tokio::time::timeout(Duration::from_secs(3), connect_async(&relay_url)).await
+            {
+                let _ = ws.send(Message::Text(msg.into())).await;
+                let _ = ws.close(None).await;
+            }
+        });
+    }
 }
 
 fn uses_settings_directory(cmdline: &[u8], settings_dir: &Path) -> bool {
@@ -282,7 +487,22 @@ fn uses_settings_directory(cmdline: &[u8], settings_dir: &Path) -> bool {
 }
 
 fn is_mostrod_running(settings_dir: &Path) -> bool {
-    !mostrod_pids(settings_dir).is_empty()
+    if !mostrod_pids(settings_dir).is_empty() {
+        return true;
+    }
+    let pid_file = settings_dir.join("mostro.pid");
+    if pid_file.is_file() {
+        return true;
+    }
+    let hb_file = settings_dir.join("mostro.heartbeat");
+    if let Ok(meta) = fs::metadata(&hb_file)
+        && let Ok(modified) = meta.modified()
+        && let Ok(elapsed) = SystemTime::now().duration_since(modified)
+        && elapsed.as_secs() < 30
+    {
+        return true;
+    }
+    false
 }
 
 fn mostrod_pids(settings_dir: &Path) -> Vec<u32> {
