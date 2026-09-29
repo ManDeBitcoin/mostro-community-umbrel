@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.png
 category: bitcoin
-version: 1.0.4
+version: 1.0.5
 port: 5173
 description: >-
   Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
@@ -41,27 +41,15 @@ gallery:
 path: ""
 defaultUsername: ""
 defaultPassword: ""
-releaseNotes: >-
-  Patch 1.0.4:
-  - Nueva identidad visual de Mostro Community Manager: logotipo elegido, icono de Umbrel y favicon coherentes con el panel.
-  - Galería y captura del panel actualizadas para mostrar la interfaz vigente.
-
-  Patch 1.0.3:
-  - Navegación de Configuración: Resuelto bug estético donde el indicador highlight quedaba fijo en Identidad. Ahora sigue dinámicamente la sección activa (Identidad, Mercado, Seguridad, Nostr, Métodos de pago) y sincroniza con el scroll.
-  - Métodos de Pago: Sistema interactivo de Tags dinámicos ("TAC") con resumen de categorías en uso y asignación directa con 1 clic para mantener la coherencia del catálogo. Auto-slug para ID de métodos de pago.
-
-  Patch 1.0.2: Implementación completa del flujo de activación del demonio. Mostro ahora arranca atómicamente tras guardar la configuración y publica su Info Event correctamente. Interrupción rápida del standby optimizada en el entrypoint. Nuevos botones de Activación/Desactivación en el Dashboard del mánager.
-
-  Patch 1.0.1: Corrección visual del cursor (loading) en los botones inactivos de la Consola de Mediación.
-
-  Versión de Producción 1.0.0 (Fase Final de Integración y Operador):
-  - Nueva pestaña de Operaciones LND y Gestión de Liquidez con monitor de capacidad, balances entrantes/salientes y manual paso a paso para operadores (Alby Hub, LSPs, rebalanceo).
-  - Nuevo endpoint de solo lectura /api/lnd/channels con datos estructurados de canales y liquidez.
-  - Verificación integral de ciclo completo automatizada (scripts/verify-e2e.sh).
-  - Consola de mediación con chat cifrado en memoria para resolución de conflictos.
-  - Monitor en vivo de órdenes públicas Nostr Kind 38383.
-  - Simulador sintético del protocolo P2P con cálculo exacto de fianzas y comisiones.
-  - Notificaciones en tiempo real vía SSE y backups automáticos offsite con retención programada.
-  - Endurecimiento integral de seguridad: contenedores read-only, cap_drop ALL, red privada segregada y protección anti-CSRF / rate limiting en API.
+releaseNotes: |-
+  Versión 1.0.5
+  
+  Actualización con sincronización reactiva de mercado, monitor de órdenes en vivo y supervisión del daemon.
+  
+  - Sincroniza automáticamente los cambios de comisión de mercado con el daemon activo y publica de inmediato el evento kind 38385 en relays Nostr para clientes como Mostrix.
+  - Supervisa y reinicia el daemon Mostro ante actualizaciones de configuración en caliente desde el panel.
+  - Incorpora barra de herramientas con actualización automática configurable para órdenes públicas (3s, 5s, 10s, 30s) y alertas reactivas.
+  - Habilita la conectividad externa del servicio web a relays Nostr y previene alertas duplicadas de reconexión.
+  - Reporte honesto del estado de ejecución del daemon en el panel general.
 submitter: ManDeBitcoin
 submission: https://github.com/ManDeBitcoin/mostro-community-umbrel
