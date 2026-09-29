@@ -67,6 +67,7 @@ jobs:
       contents: write
       packages: write
       actions: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
@@ -113,16 +114,8 @@ jobs:
           git add README.md mandebitcoin-mostro-manager/umbrel-app.yml mandebitcoin-mostro-manager/docker-compose.yml
           git commit -m "release: promote $GITHUB_REF_NAME in Umbrel store"
           PROMOTION_BRANCH="release-promotion-$VERSION-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          PROMOTION_SHA="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/$PROMOTION_BRANCH"
-          gh workflow run store-guard.yml --ref "$PROMOTION_BRANCH"
-          GUARD_RUN_ID=""
-          for attempt in $(seq 1 30); do
-            GUARD_RUN_ID="$(gh run list --workflow store-guard.yml --branch "$PROMOTION_BRANCH" --event workflow_dispatch --limit 5 --json databaseId,headSha --jq ".[] | select(.headSha == \"$PROMOTION_SHA\") | .databaseId" | head -1)"
-            if [ -n "$GUARD_RUN_ID" ]; then break; fi
-            sleep 2
-          done
-          if [ -z "$GUARD_RUN_ID" ]; then echo 'Store guard did not start' >&2; exit 1; fi
-          gh run watch "$GUARD_RUN_ID" --exit-status
-          git push origin HEAD:main
-          git push origin --delete "$PROMOTION_BRANCH"
+          PR_URL="$(gh pr create --base main --head "$PROMOTION_BRANCH" --title "release: promote $GITHUB_REF_NAME in Umbrel store" --body "Automated promotion for $GITHUB_REF_NAME in Umbrel store")"
+          sleep 5
+          gh pr checks "$PR_URL" --watch --required
+          gh pr merge "$PR_URL" --squash --delete-branch
