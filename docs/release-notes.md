@@ -1,8 +1,9 @@
-# Mostro Community Manager v1.0.4
+# Mostro Community Manager v1.0.5
 
-Actualización de identidad visual para la aplicación de Umbrel.
+Actualización con sincronización reactiva de mercado, monitor de órdenes en vivo y supervisión del daemon.
 
-- Incorpora el logotipo y el icono seleccionados para Mostro Community Manager.
-- Muestra el nuevo icono en la ficha de Umbrel, la navegación del panel y el favicon.
-- Actualiza la galería de Umbrel y la captura de la interfaz actual.
-- Mantiene los flujos de configuración, activación y operación de la versión 1.0.3.
+- Sincroniza automáticamente los cambios de comisión de mercado con el daemon activo y publica de inmediato el evento kind 38385 en relays Nostr para clientes como Mostrix.
+- Supervisa y reinicia el daemon Mostro ante actualizaciones de configuración en caliente desde el panel.
+- Incorpora barra de herramientas con actualización automática configurable para órdenes públicas (3s, 5s, 10s, 30s) y alertas reactivas.
+- Habilita la conectividad externa del servicio web a relays Nostr y previene alertas duplicadas de reconexión.
+- Reporte honesto del estado de ejecución del daemon en el panel general.
