@@ -1775,28 +1775,50 @@ function App() {
             </div>
 
             <div className="connection-body">
-              <div className="qr-format-toggle" style={{ textAlign: 'center', marginBottom: '15px' }}>
-                <label style={{ cursor: 'pointer', fontSize: '0.9rem' }}>
-                  <input type="radio" name="qrFormat" value="uri" checked={qrFormat === 'uri'} onChange={() => setQrFormat('uri')} /> URI
-                </label>
-                &nbsp;&nbsp;
-                <label style={{ cursor: 'pointer', fontSize: '0.9rem' }}>
-                  <input type="radio" name="qrFormat" value="json" checked={qrFormat === 'json'} onChange={() => setQrFormat('json')} /> JSON
-                </label>
+              <div className="connection-qr-pane">
+                <div className="qr-toggle-group">
+                  <button
+                    type="button"
+                    className={`qr-toggle-btn ${qrFormat === 'uri' ? 'active' : ''}`}
+                    onClick={() => setQrFormat('uri')}
+                  >
+                    URI Mostro
+                  </button>
+                  <button
+                    type="button"
+                    className={`qr-toggle-btn ${qrFormat === 'json' ? 'active' : ''}`}
+                    onClick={() => setQrFormat('json')}
+                  >
+                    JSON
+                  </button>
+                </div>
+
+                <div className="qr-box-wrapper">
+                  {qrFormat === 'uri' ? (
+                    connection.qr_svg && (
+                      <div
+                        className="qr-box"
+                        dangerouslySetInnerHTML={{ __html: connection.qr_svg }}
+                        title="Escanea URI Mostro con Mostro App o Mostrix"
+                      />
+                    )
+                  ) : (
+                    connection.qr_json_svg && (
+                      <div
+                        className="qr-box"
+                        dangerouslySetInnerHTML={{ __html: connection.qr_json_svg }}
+                        title="Escanea JSON Comunitario con Mostro App o Mostrix"
+                      />
+                    )
+                  )}
+                </div>
+
+                <span className="qr-hint-caption">
+                  {qrFormat === 'uri'
+                    ? 'Escanea la URI comunitaria (mostro://...)'
+                    : 'Escanea el payload JSON de la comunidad'}
+                </span>
               </div>
-              {qrFormat === 'uri' ? (
-                <>
-                  {connection.qr_svg && (
-                    <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_svg }} title="Escanea con Mostro App" />
-                  )}
-                </>
-              ) : (
-                <>
-                  {connection.qr_json_svg && (
-                    <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_json_svg }} title="Escanea el JSON con Mostro App" />
-                  )}
-                </>
-              )}
 
               <div className="connection-details">
                 <div className="connection-row">
@@ -1808,6 +1830,7 @@ function App() {
                     </button>
                   </div>
                 </div>
+
                 <div className="connection-row">
                   <span className="field-label">Identificador hex del nodo</span>
                   <div className="copy-box">
@@ -1817,17 +1840,33 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {connection.nostr_uri && (
-                  <div className="connection-row">
-                    <span className="field-label">Nostr URI (nprofile con relays)</span>
-                    <div className="copy-box">
-                      <code>{connection.nostr_uri}</code>
-                      <button type="button" className="copy-button" onClick={() => copyText(connection.nostr_uri || '', 'uri')}>
-                        {copiedField === 'uri' ? 'Copiado ✓' : 'Copiar'}
-                      </button>
+
+                {qrFormat === 'uri' ? (
+                  connection.nostr_uri && (
+                    <div className="connection-row">
+                      <span className="field-label">Nostr URI (mostro://community/...)</span>
+                      <div className="copy-box">
+                        <code>{connection.nostr_uri}</code>
+                        <button type="button" className="copy-button" onClick={() => copyText(connection.nostr_uri || '', 'uri')}>
+                          {copiedField === 'uri' ? 'Copiado ✓' : 'Copiar'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )
+                ) : (
+                  connection.json_uri && (
+                    <div className="connection-row">
+                      <span className="field-label">JSON Comunitario (pubkey + relays)</span>
+                      <div className="copy-box">
+                        <code>{connection.json_uri}</code>
+                        <button type="button" className="copy-button" onClick={() => copyText(connection.json_uri || '', 'json_uri')}>
+                          {copiedField === 'json_uri' ? 'Copiado ✓' : 'Copiar'}
+                        </button>
+                      </div>
+                    </div>
+                  )
                 )}
+
                 <div className="connection-relays-row">
                   <span className="field-label">Relays Nostr:</span>
                   {connection.relays.length > 0 ? (
