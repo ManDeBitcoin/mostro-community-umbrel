@@ -17,6 +17,8 @@ pub struct ConnectionInfo {
     pub nprofile: Option<String>,
     pub nostr_uri: Option<String>,
     pub qr_svg: Option<String>,
+    pub qr_json_svg: Option<String>,
+    pub json_uri: Option<String>,
     pub app_download_url: &'static str,
     pub instructions: &'static str,
 }
@@ -40,6 +42,8 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             nprofile: None,
             nostr_uri: None,
             qr_svg: None,
+            qr_json_svg: None,
+            json_uri: None,
             app_download_url: "https://mostro.network",
             instructions: "Importa primero la clave de identidad Nostr de la comunidad.",
         };
@@ -73,6 +77,18 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             .map(|code| code.render::<svg::Color>().build())
     });
 
+
+    let json_uri = pubkey_hex.as_ref().map(|pk| {
+        let relays_json = configured_relays.iter().map(|r| format!("\"{}\"", r)).collect::<Vec<_>>().join(", ");
+        format!("{{\"pubkey\": \"{}\", \"relays\": [{}]}}", pk, relays_json)
+    });
+
+    let qr_json_svg = json_uri.as_ref().and_then(|uri| {
+        QrCode::new(uri.as_bytes())
+            .ok()
+            .map(|code| code.render::<svg::Color>().build())
+    });
+
     ConnectionInfo {
         status: "ready",
         npub,
@@ -81,6 +97,8 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
         nprofile,
         nostr_uri,
         qr_svg,
+        qr_json_svg,
+        json_uri,
         app_download_url: "https://mostro.network",
         instructions: "Usa la clave pública (npub o hex) o escanea el nprofile en Mostro App para conectarte a este nodo.",
     }

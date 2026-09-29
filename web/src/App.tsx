@@ -36,6 +36,8 @@ type ConnectionInfo = {
   nprofile?: string | null;
   nostr_uri?: string | null;
   qr_svg?: string | null;
+  qr_json_svg?: string | null;
+  json_uri?: string | null;
   app_download_url: string;
   instructions: string;
 };
@@ -257,6 +259,28 @@ const blankConfig = (): Configuration => ({
   payment_methods: [],
 });
 const percent = (bps: number) => (bps / 100).toString();
+
+const copyToClipboard = (text: string, onSuccess: () => void) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(onSuccess);
+  } else {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "absolute";
+    textArea.style.left = "-999999px";
+    document.body.prepend(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      onSuccess();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      textArea.remove();
+    }
+  }
+};
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -1057,7 +1081,7 @@ function LiquidityOperationsPage() {
   }, [useMock, fetchChannels]);
 
   const copyText = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() => {
+    copyToClipboard(text, () => {
       setCopiedKey(label);
       setTimeout(() => setCopiedKey(null), 2000);
     });
@@ -1370,9 +1394,10 @@ function App() {
   const [simulating, setSimulating] = useState(false);
   const [simulationReport, setSimulationReport] = useState<SimulationReport | null>(null);
   const [simError, setSimError] = useState('');
+  const [qrFormat, setQrFormat] = useState<'uri' | 'json'>('uri');
 
   const copyText = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() => {
+    copyToClipboard(text, () => {
       setCopiedField(label);
       setTimeout(() => setCopiedField(null), 2000);
     });
@@ -1748,10 +1773,31 @@ function App() {
                 Mostro App ↗
               </a>
             </div>
+
             <div className="connection-body">
-              {connection.qr_svg && (
-                <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_svg }} title="Escanea con Mostro App" />
+              <div className="qr-format-toggle" style={{ textAlign: 'center', marginBottom: '15px' }}>
+                <label style={{ cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input type="radio" name="qrFormat" value="uri" checked={qrFormat === 'uri'} onChange={() => setQrFormat('uri')} /> URI
+                </label>
+                &nbsp;&nbsp;
+                <label style={{ cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input type="radio" name="qrFormat" value="json" checked={qrFormat === 'json'} onChange={() => setQrFormat('json')} /> JSON
+                </label>
+              </div>
+              {qrFormat === 'uri' ? (
+                <>
+                  {connection.qr_svg && (
+                    <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_svg }} title="Escanea con Mostro App" />
+                  )}
+                </>
+              ) : (
+                <>
+                  {connection.qr_json_svg && (
+                    <div className="qr-box" dangerouslySetInnerHTML={{ __html: connection.qr_json_svg }} title="Escanea el JSON con Mostro App" />
+                  )}
+                </>
               )}
+
               <div className="connection-details">
                 <div className="connection-row">
                   <span className="field-label">Clave pública Nostr (npub)</span>

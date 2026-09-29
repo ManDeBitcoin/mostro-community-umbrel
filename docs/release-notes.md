@@ -1,4 +1,4 @@
-# Mostro Community Manager v1.0.7
+# Mostro Community Manager v1.0.8\n\n- Agregado switch para alternar entre formato URI y JSON en el código QR comunitario.\n- Corregido el copiado al portapapeles en entornos HTTP.\n\n# Mostro Community Manager v1.0.7
 
 Actualización del formato de conexión de la URI QR (nostr: -> mostro://community/)
 
