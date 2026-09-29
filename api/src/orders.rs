@@ -560,6 +560,7 @@ async fn run_relay_worker(
     notifications: Option<Arc<crate::notifications::NotificationHub>>,
 ) {
     let mut reconnect_delay = timing.reconnect_initial;
+    let mut notified_down = false;
 
     loop {
         {
@@ -571,7 +572,10 @@ async fn run_relay_worker(
         let ws_res = tokio::time::timeout(timing.connect_timeout, connect_fut).await;
 
         let mut ws_stream = match ws_res {
-            Ok(Ok((ws, _))) => ws,
+            Ok(Ok((ws, _))) => {
+                notified_down = false;
+                ws
+            }
             Ok(Err(e)) => {
                 {
                     let mut w = cache.write().await;
@@ -582,7 +586,9 @@ async fn run_relay_worker(
                         generation,
                     );
                 }
-                if let Some(ref hub) = notifications {
+                if let Some(ref hub) = notifications
+                    && !notified_down
+                {
                     hub.publish(crate::notifications::Notification::relay_alert(
                         "Relay desconectado",
                         &format!("Fallo de conexión con {relay_url}: {e}"),
@@ -590,6 +596,7 @@ async fn run_relay_worker(
                         Some(serde_json::json!({"relay": relay_url})),
                     ))
                     .await;
+                    notified_down = true;
                 }
                 tokio::time::sleep(reconnect_delay).await;
                 reconnect_delay = (reconnect_delay * 2).min(timing.reconnect_max);
@@ -605,7 +612,9 @@ async fn run_relay_worker(
                         generation,
                     );
                 }
-                if let Some(ref hub) = notifications {
+                if let Some(ref hub) = notifications
+                    && !notified_down
+                {
                     hub.publish(crate::notifications::Notification::relay_alert(
                         "Relay desconectado",
                         &format!("Timeout en conexión con {relay_url}"),
@@ -613,6 +622,7 @@ async fn run_relay_worker(
                         Some(serde_json::json!({"relay": relay_url})),
                     ))
                     .await;
+                    notified_down = true;
                 }
                 tokio::time::sleep(reconnect_delay).await;
                 reconnect_delay = (reconnect_delay * 2).min(timing.reconnect_max);

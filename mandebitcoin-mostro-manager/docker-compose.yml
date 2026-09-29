@@ -62,7 +62,7 @@ services:
       LND_TLS_CERT: /lnd/tls.cert
       LND_READONLY_MACAROON: /lnd/readonly.macaroon
       BACKUP_OFFSITE_DIR: /data/backup
-    networks: [manager_private]
+    networks: [default, manager_private]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
