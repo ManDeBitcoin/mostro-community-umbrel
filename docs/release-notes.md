@@ -1,9 +1,8 @@
-# Mostro Community Manager v1.0.5
+# Mostro Community Manager v1.0.6
 
-Actualización con sincronización reactiva de mercado, monitor de órdenes en vivo y supervisión del daemon.
+Onboarding soberano con generación de identidad Nostr, plantillas de comisiones y catálogo bilingüe de divisas ISO 4217.
 
-- Sincroniza automáticamente los cambios de comisión de mercado con el daemon activo y publica de inmediato el evento kind 38385 en relays Nostr para clientes como Mostrix.
-- Supervisa y reinicia el daemon Mostro ante actualizaciones de configuración en caliente desde el panel.
-- Incorpora barra de herramientas con actualización automática configurable para órdenes públicas (3s, 5s, 10s, 30s) y alertas reactivas.
-- Habilita la conectividad externa del servicio web a relays Nostr y previene alertas duplicadas de reconexión.
-- Reporte honesto del estado de ejecución del daemon en el panel general.
+- Generación soberana de clave privada Nostr (nsec/npub) en 1 clic e importación directa desde el panel web con permisos restringidos (0600) y modal de custodia.
+- Prellenado rápido (presets) exclusivo para comisiones de mercado, desarrollo y fianza anti-abuso (sin sobreescribir identidad, relays ni métodos de pago).
+- Selector interactivo de divisas fiat con el catálogo oficial ISO 4217 (174 monedas) y búsqueda bilingüe (español e inglés) insensible a mayúsculas y acentos.
+- Píldoras de acceso rápido para monedas P2P frecuentes (USD, EUR, ARS, VES, COP, BRL, MXN, CLP, PEN, GBP, CHF) y validación de hasta 30 divisas por el protocolo.
