@@ -185,7 +185,7 @@ pub fn render_settings(
         return Err("Las rutas de credenciales LND deben ser absolutas".into());
     }
     let mut doc: toml::Value =
-        toml::from_str(include_str!("../../config/upstream/settings.v0.18.8.toml"))
+        toml::from_str(include_str!("../../config/upstream/settings.v0.19.0.toml"))
             .map_err(|_| "Plantilla inválida")?;
     doc["lightning"]["lnd_grpc_host"] = lnd_host.into();
     doc["lightning"]["lnd_cert_file"] = cert.into();
@@ -232,6 +232,7 @@ pub fn render_settings(
         payout_invoice_window_seconds = 300
         payout_max_retries = 5
         payout_claim_window_days = 15
+        maker_bond_payment_timeout_seconds = 900
     };
     doc.as_table_mut()
         .unwrap()

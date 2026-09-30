@@ -15,7 +15,7 @@ Este repositorio también es una tienda comunitaria de una sola aplicación.
 
 ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
 
-El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel y empaqueta el daemon oficial Mostro v0.18.8.
+El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel y empaqueta el daemon oficial Mostro v0.19.0.
 
 ## Si ya tienes Mostro funcionando
 
@@ -25,7 +25,7 @@ Puedes conservar tu instalación. El Manager incluye su propio daemon Mostro, qu
 
 - Panel React en español y API Rust/Axum.
 - Configuración persistente de comunidad, mercado, seguridad, relays y métodos de pago, con validación y revisiones.
-- Activación y desactivación del daemon Mostro oficial v0.18.8 a partir de la configuración guardada.
+- Activación y desactivación del daemon Mostro oficial v0.19.0 a partir de la configuración guardada.
 - Consulta de LND y panel de liquidez; monitor de órdenes públicas Nostr y simulador P2P.
 - Consola de mediación, notificaciones en vivo y respaldos cifrados.
 
