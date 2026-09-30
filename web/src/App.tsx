@@ -28,6 +28,20 @@ type Dashboard = {
   bitcoin: ServiceInfo;
   market_started: false;
 };
+type CommunityCard = {
+  version: number;
+  name: string;
+  pubkey?: string | null;
+  relays: string[];
+  currency: string;
+  payment_methods: string[];
+  fee_bps: number;
+  bond_percent: number;
+  website: string;
+  contact: string;
+  signature?: string | null;
+};
+
 type ConnectionInfo = {
   status: string;
   npub?: string | null;
@@ -38,6 +52,7 @@ type ConnectionInfo = {
   qr_svg?: string | null;
   qr_json_svg?: string | null;
   json_uri?: string | null;
+  card?: CommunityCard | null;
   app_download_url: string;
   instructions: string;
 };
@@ -1856,7 +1871,7 @@ function App() {
                 ) : (
                   connection.json_uri && (
                     <div className="connection-row">
-                      <span className="field-label">JSON Comunitario (pubkey + relays)</span>
+                      <span className="field-label">JSON Comunitario (Mostro App)</span>
                       <div className="copy-box">
                         <code>{connection.json_uri}</code>
                         <button type="button" className="copy-button" onClick={() => copyText(connection.json_uri || '', 'json_uri')}>

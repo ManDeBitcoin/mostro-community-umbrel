@@ -1,3 +1,10 @@
+# Mostro Community Manager v1.0.10
+
+- Actualización del estándar de JSON comunitario para conexiones con Mostro App (esquema estándar v1 con version, name, pubkey, relays, currency, payment_methods, fee_bps, bond_percent, website, contact, signature).
+- Firma criptográfica Schnorr (BIP-340) generada automáticamente sobre el payload canónico con la identidad Nostr del nodo.
+- Nuevo endpoint público `GET /api/community/card` para consultar la tarjeta de la comunidad directamente.
+- Integración en la interfaz de conexión para copiar el JSON estándar y generar el código QR interactivo correspondiente.
+
 # Mostro Community Manager v1.0.9
 
 - Rediseño estético y armonioso de la tarjeta de Conexión con Mostro App y Mostrix.
