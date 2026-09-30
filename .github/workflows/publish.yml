@@ -96,7 +96,7 @@ jobs:
           fi
       - name: Promote verified image in the Umbrel store
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -116,6 +116,11 @@ jobs:
           PROMOTION_BRANCH="release-promotion-$VERSION-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           git push origin "HEAD:refs/heads/$PROMOTION_BRANCH"
           PR_URL="$(gh pr create --base main --head "$PROMOTION_BRANCH" --title "release: promote $GITHUB_REF_NAME in Umbrel store" --body "Automated promotion for $GITHUB_REF_NAME in Umbrel store")"
-          sleep 5
+          for attempt in $(seq 1 15); do
+            if [ -n "$(gh pr checks "$PR_URL" --json name -q '.[].name' 2>/dev/null)" ]; then
+              break
+            fi
+            sleep 2
+          done
           gh pr checks "$PR_URL" --watch --required
           gh pr merge "$PR_URL" --squash --delete-branch
