@@ -4,11 +4,11 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
     case "$TARGETARCH" in \
-      amd64) artifact=mostrod-x86_64-unknown-linux-musl; checksum=9fa0516a79270dec2dbe074f14cf988c0311a9d56c80f0a00a98e8d579b3cf53 ;; \
-      arm64) artifact=mostrod-aarch64-unknown-linux-musl; checksum=034af649fcad9754e23bee91babdb7b2785431a9cba3ffd91c9b45ac3ccc8b3d ;; \
+      amd64) artifact=mostrod-x86_64-unknown-linux-musl; checksum=ba2819443f6922bfe8db86de0fe907156ca730636b3aeeac26f51a92b435fabb ;; \
+      arm64) artifact=mostrod-aarch64-unknown-linux-musl; checksum=df0c752feb44e9337be2b9d409af1386eb3ad254f975f180f652f885193d4081 ;; \
       *) echo 'Unsupported architecture' >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/MostroP2P/mostro/releases/download/v0.18.8/$artifact" -o /mostrod; \
+    curl -fsSL "https://github.com/MostroP2P/mostro/releases/download/v0.19.0/$artifact" -o /mostrod; \
     echo "$checksum  /mostrod" | sha256sum -c -; \
     chmod 755 /mostrod; \
     TERM=xterm /mostrod --version

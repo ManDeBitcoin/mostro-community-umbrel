@@ -205,7 +205,24 @@ where
     I: IntoIterator<Item = &'a Tag>,
 {
     // 1. Check JSON payload
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(first) = val.as_array().and_then(|arr| arr.first()) {
+            val = first.clone();
+        }
+        for parent_key in ["order", "dispute", "cant-do", "cant_do"] {
+            if let Some(sub) = val.get(parent_key) {
+                if let Some(id_str) = sub.get("id").and_then(|v| v.as_str())
+                    && is_valid_uuid(id_str)
+                {
+                    return Some(id_str.to_string());
+                }
+                if let Some(id_str) = sub.get("order_id").and_then(|v| v.as_str())
+                    && is_valid_uuid(id_str)
+                {
+                    return Some(id_str.to_string());
+                }
+            }
+        }
         if let Some(id_str) = val.get("order_id").and_then(|v| v.as_str())
             && is_valid_uuid(id_str)
         {
@@ -263,22 +280,56 @@ where
 
 /// Extract action code if present in JSON payload.
 pub fn extract_action(content: &str) -> Option<String> {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content)
-        && let Some(act) = val.get("action").and_then(|v| v.as_str())
-    {
-        return Some(act.to_string());
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(first) = val.as_array().and_then(|arr| arr.first()) {
+            val = first.clone();
+        }
+        if let Some(act) = val.get("action").and_then(|v| v.as_str()) {
+            return Some(act.to_string());
+        }
+        for parent_key in ["order", "dispute", "cant-do", "cant_do"] {
+            if let Some(sub) = val.get(parent_key)
+                && let Some(act) = sub.get("action").and_then(|v| v.as_str())
+            {
+                return Some(act.to_string());
+            }
+        }
     }
     None
 }
 
 /// Extract clean human-readable text content from JSON or raw text.
 pub fn extract_display_content(content: &str) -> String {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(first) = val.as_array().and_then(|arr| arr.first()) {
+            val = first.clone();
+        }
         if let Some(text) = val.get("text").and_then(|v| v.as_str()) {
             return text.to_string();
         }
         if let Some(msg) = val.get("message").and_then(|v| v.as_str()) {
             return msg.to_string();
+        }
+        for parent_key in ["order", "dispute", "cant-do", "cant_do"] {
+            if let Some(sub) = val.get(parent_key) {
+                if let Some(text) = sub.get("text").and_then(|v| v.as_str()) {
+                    return text.to_string();
+                }
+                if let Some(msg) = sub.get("message").and_then(|v| v.as_str()) {
+                    return msg.to_string();
+                }
+                if let Some(content_val) = sub.get("content") {
+                    if let Some(text) = content_val.as_str() {
+                        return text.to_string();
+                    }
+                    if let Some(text) = content_val.get("text").and_then(|v| v.as_str()) {
+                        return text.to_string();
+                    }
+                    if let Some(msg) = content_val.get("message").and_then(|v| v.as_str()) {
+                        return msg.to_string();
+                    }
+                }
+            }
         }
         if let Some(content_val) = val.get("content") {
             if let Some(text) = content_val.as_str() {
@@ -348,6 +399,50 @@ pub async fn process_event(
             recipient: recipient_str,
             created_at: event.created_at.as_secs(),
             kind: 4,
+            action,
+            content: display_content,
+            is_from_me,
+        };
+
+        cache.insert(msg.clone());
+        Ok(Some(msg))
+    } else if kind_num == 14 {
+        let recipient = extract_recipient_from_p_tag(event.tags.iter());
+        let is_from_me = event.pubkey == my_pubkey;
+
+        let counterparty = if is_from_me {
+            recipient.ok_or_else(|| "Mensaje propio Kind 14 sin tag 'p'".to_string())?
+        } else if recipient == Some(my_pubkey) {
+            event.pubkey
+        } else {
+            // Not addressed to or sent by this community identity
+            return Ok(None);
+        };
+
+        // Decrypt NIP-44 ciphertext
+        let decrypted_raw = decrypt_nip44(keys.secret_key(), &counterparty, &event.content)?;
+
+        let order_id = match extract_order_id_from_json_or_tags(&decrypted_raw, event.tags.iter()) {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        let action = extract_action(&decrypted_raw);
+        let display_content = extract_display_content(&decrypted_raw);
+
+        let sender_str = event
+            .pubkey
+            .to_bech32()
+            .unwrap_or_else(|_| event.pubkey.to_hex());
+        let recipient_str = recipient.map(|r| r.to_bech32().unwrap_or_else(|_| r.to_hex()));
+
+        let msg = ChatMessage {
+            id: event.id.to_hex(),
+            order_id,
+            sender: sender_str,
+            recipient: recipient_str,
+            created_at: event.created_at.as_secs(),
+            kind: 14,
             action,
             content: display_content,
             is_from_me,
@@ -475,15 +570,14 @@ async fn run_chat_relay_worker(
         reconnect_delay = timing.reconnect_initial;
 
         // Subscriptions:
-        // 1. Kind 4 addressed to community
-        // 2. Kind 4 sent by community
-        // 3. Kind 1059 addressed to community
+        // 1. Kind 4, 14, 1059 addressed to community
+        // 2. Kind 4, 14 sent by community
         let req_recv = format!(
-            "[\"REQ\", \"mostro_chat_recv\", {{\"kinds\": [4, 1059], \"#p\": [\"{}\"]}}]",
+            "[\"REQ\", \"mostro_chat_recv\", {{\"kinds\": [4, 14, 1059], \"#p\": [\"{}\"]}}]",
             pubkey.to_hex()
         );
         let req_sent = format!(
-            "[\"REQ\", \"mostro_chat_sent\", {{\"kinds\": [4], \"authors\": [\"{}\"]}}]",
+            "[\"REQ\", \"mostro_chat_sent\", {{\"kinds\": [4, 14], \"authors\": [\"{}\"]}}]",
             pubkey.to_hex()
         );
 
@@ -626,5 +720,29 @@ pub async fn build_test_gift_wrap_event(
 
     EventBuilder::gift_wrap(sender_keys, recipient_pubkey, rumor, [])
         .await
+        .unwrap()
+}
+
+/// Helper to create a valid Kind 14 (protocol v2 Direct Message) encrypted event for tests.
+pub fn build_test_kind14_event(
+    sender_keys: &Keys,
+    recipient_pubkey: &PublicKey,
+    content: &str,
+    order_id_tag: Option<&str>,
+) -> Event {
+    let ciphertext = nip44::encrypt(
+        sender_keys.secret_key(),
+        recipient_pubkey,
+        content,
+        nip44::Version::V2,
+    )
+    .unwrap();
+    let mut tags = vec![Tag::public_key(*recipient_pubkey)];
+    if let Some(uuid) = order_id_tag {
+        tags.push(Tag::identifier(uuid));
+    }
+    EventBuilder::new(Kind::Custom(14), ciphertext)
+        .tags(tags)
+        .sign_with_keys(sender_keys)
         .unwrap()
 }

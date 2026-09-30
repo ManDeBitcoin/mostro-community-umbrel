@@ -7,7 +7,8 @@ use mostro_community_api::{
     AppState,
     adapters::Integrations,
     chat::{
-        self, ChatCache, build_test_gift_wrap_event, build_test_nip04_event, build_test_nip44_event,
+        self, ChatCache, build_test_gift_wrap_event, build_test_kind14_event,
+        build_test_nip04_event, build_test_nip44_event,
     },
     config::{BondApply, Community, Configuration, Market, Nostr, Safety},
     identity,
@@ -547,4 +548,53 @@ async fn test_chat_worker_with_mock_relay() {
     drop(config_tx);
     worker_handle.abort();
     relay_handle.abort();
+}
+
+#[tokio::test]
+async fn test_kind14_protocol_v2_decryption_and_cache() {
+    let comm_keys = fixture_keys(1);
+    let trader_keys = fixture_keys(2);
+
+    let order_id = "55555555-4444-3333-2222-111111111111";
+    // Protocol v2 3-element tuple payload
+    let payload = serde_json::json!([
+        {
+            "order": {
+                "version": 2,
+                "id": order_id,
+                "action": "FiatSent",
+                "content": {
+                    "text": "Pago enviado mediante transferencia bancaria"
+                }
+            }
+        },
+        null,
+        null
+    ])
+    .to_string();
+
+    let event = build_test_kind14_event(
+        &trader_keys,
+        &comm_keys.public_key(),
+        &payload,
+        Some(order_id),
+    );
+
+    let mut cache = ChatCache::default();
+    let res = chat::process_event(&event, &comm_keys, &mut cache).await;
+    assert!(res.is_ok(), "Kind 14 process_event debe tener éxito");
+    let msg_opt = res.unwrap();
+    assert!(msg_opt.is_some());
+    let msg = msg_opt.unwrap();
+
+    assert_eq!(msg.kind, 14);
+    assert_eq!(msg.order_id, order_id);
+    assert_eq!(msg.action.as_deref(), Some("FiatSent"));
+    assert_eq!(msg.content, "Pago enviado mediante transferencia bancaria");
+    assert!(!msg.is_from_me);
+
+    let history = cache.to_history(order_id);
+    assert_eq!(history.count, 1);
+    assert_eq!(history.messages[0].id, event.id.to_hex());
+    assert_eq!(history.messages[0].kind, 14);
 }

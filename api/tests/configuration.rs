@@ -64,7 +64,12 @@ fn renderer_escapes_text_and_maps_percentage_units() {
         doc["lightning"]["escrow_deadline_margin_blocks"].as_integer(),
         Some(24)
     );
-    assert_eq!(doc["mostro"]["transport"].as_str(), Some("nip44"));
+    // In Mostro v0.19.0, protocol v1 was removed and transport is exclusively protocol v2
+    assert!(doc["mostro"].get("transport").is_none());
+    assert_eq!(
+        doc["anti_abuse_bond"]["maker_bond_payment_timeout_seconds"].as_integer(),
+        Some(900)
+    );
     assert_eq!(
         doc["mostro"]["fiat_currencies_accepted"][0].as_str(),
         Some("EUR")

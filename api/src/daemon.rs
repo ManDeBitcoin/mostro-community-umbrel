@@ -39,6 +39,51 @@ pub enum DaemonState {
     ActiveRunning,
 }
 
+pub const MOSTRO_VERSION: &str = "0.19.0";
+pub const PROTOCOL_VERSION: u32 = 2;
+
+pub fn detect_mostrod_version() -> String {
+    for bin_path in ["/usr/local/bin/mostrod", "mostrod"] {
+        if let Ok(output) = std::process::Command::new(bin_path)
+            .env("TERM", "xterm")
+            .arg("--version")
+            .output()
+            && output.status.success()
+        {
+            let s = String::from_utf8_lossy(&output.stdout);
+            if let Some(v) = s.split_whitespace().last() {
+                return v.trim().to_string();
+            }
+        }
+    }
+    if let Ok(entries) = fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            if let Ok(file_name) = entry.file_name().into_string()
+                && file_name.chars().all(|c| c.is_ascii_digit())
+            {
+                let comm_path = entry.path().join("comm");
+                if let Ok(comm) = fs::read_to_string(&comm_path)
+                    && comm.trim() == "mostrod"
+                {
+                    let exe_path = entry.path().join("exe");
+                    if let Ok(output) = std::process::Command::new(&exe_path)
+                        .env("TERM", "xterm")
+                        .arg("--version")
+                        .output()
+                        && output.status.success()
+                    {
+                        let s = String::from_utf8_lossy(&output.stdout);
+                        if let Some(v) = s.split_whitespace().last() {
+                            return v.trim().to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    MOSTRO_VERSION.to_string()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DaemonReport {
     pub state: DaemonState,
@@ -52,6 +97,8 @@ pub struct DaemonReport {
     pub lnd_synced: bool,
     pub can_activate: bool,
     pub warnings: Vec<String>,
+    pub mostro_version: String,
+    pub protocol_version: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -172,6 +219,9 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
         warnings.push("Hay cambios en el borrador que no están en la configuración activa.".into());
     }
 
+    let mostro_version = detect_mostrod_version();
+    let protocol_version = PROTOCOL_VERSION;
+
     DaemonReport {
         state,
         identity_present,
@@ -184,6 +234,8 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
         lnd_synced,
         can_activate,
         warnings,
+        mostro_version,
+        protocol_version,
     }
 }
 
@@ -362,7 +414,7 @@ pub async fn broadcast_instance_info(root: PathBuf, config: Configuration) {
         Tag::identifier(&pubkey_hex),
         Tag::custom(
             TagKind::Custom(Cow::Borrowed("mostro_version")),
-            vec!["0.18.8".to_string()],
+            vec![detect_mostrod_version()],
         ),
         Tag::custom(
             TagKind::Custom(Cow::Borrowed("max_order_amount")),
