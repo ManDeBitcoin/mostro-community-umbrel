@@ -4,7 +4,7 @@ name: Mostro Community Manager
 tagline: Administra tu comunidad P2P soberana sobre Mostro y Lightning
 icon: https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/assets/icon.png
 category: bitcoin
-version: 1.0.10
+version: 1.0.11
 port: 5173
 description: >-
   Mostro Community Manager es la plataforma nativa para Umbrel diseñada para que
@@ -42,7 +42,15 @@ path: ""
 defaultUsername: ""
 defaultPassword: ""
 releaseNotes: |-
-  Versión 1.0.10
+  Versión 1.0.11
+  
+  - Actualización integral al Protocolo Mostro v0.19.0 (Protocolo de Transporte v2 sobre Nostr Kind 14 con cifrado NIP-44 v2).
+  - Detección e introspección activa de la versión del daemon Mostro en ejecución con reporte en la API (`/api/daemon/status`) y visualización en tiempo real en la tarjeta de servicio y cuadrícula del panel de administración.
+  - Adaptación del canal de mensajería y mediación para decodificar eventos Kind 14 y procesar estructuras de órdenes en tupla de 3 elementos (`[order, signature, proof]`).
+  - Actualización de plantillas de configuración upstream v0.19.0 incorporando el nuevo parámetro `maker_bond_payment_timeout_seconds` y retirando directivas de transporte obsoletas.
+  - Verificación criptográfica SHA-256 de los binarios oficiales upstream de Mostro v0.19.0 para arquitecturas amd64 y arm64.
+  
+  # Mostro Community Manager v1.0.10
   
   - Actualización del estándar de JSON comunitario para conexiones con Mostro App (esquema estándar v1 con version, name, pubkey, relays, currency, payment_methods, fee_bps, bond_percent, website, contact, signature).
   - Firma criptográfica Schnorr (BIP-340) generada automáticamente sobre el payload canónico con la identidad Nostr del nodo.
