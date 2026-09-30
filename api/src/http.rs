@@ -135,6 +135,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
+        .route("/api/community/card", get(community_card_handler))
         .route("/api/community/presets", get(community_presets_handler))
         .route("/api/identity/generate", post(identity_generate_handler))
         .route("/api/identity/import", post(identity_import_handler))
@@ -267,6 +268,19 @@ async fn connection_info_handler(
     })?;
     let root = store.root().to_path_buf();
     Ok(Json(connection::get_connection_info(&root, &store)))
+}
+
+async fn community_card_handler(
+    State(state): State<AppState>,
+) -> Result<Json<connection::CommunityCard>, Error> {
+    let store = state.store.lock().map_err(|_| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Almacenamiento no disponible",
+        )
+    })?;
+    let root = store.root().to_path_buf();
+    Ok(Json(connection::get_community_card(&root, &store)))
 }
 
 async fn community_presets_handler() -> Json<Vec<crate::config::RegionalPreset>> {

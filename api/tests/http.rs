@@ -988,3 +988,24 @@ async fn test_community_presets_and_identity_endpoints() {
     let res_invalid = app2.oneshot(req_invalid).await.unwrap();
     assert_eq!(res_invalid.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn community_card_endpoint_contract() {
+    let (_dir, app) = setup();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/community/card")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let card: mostro_community_api::connection::CommunityCard =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(card.version, 1);
+}
