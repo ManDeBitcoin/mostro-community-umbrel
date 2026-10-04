@@ -648,7 +648,12 @@ git apply /ruta/a/mostro-community-umbrel/docs/patches/bitmaxis-app-venta-simple
 
 **A5. Errores sin traducir.** `rust/src/api/orders.rs:4290-4317` solo da texto propio a nueve motivos. El resto, incluidos `InvalidParameters`, `InvalidFiatCurrency`, `PriceTooStale` y `PendingOrderExists`, llega como `Order rejected by Mostro: <motivo>`, y las hojas del modo simple muestran `e.toString()`. Usar la tabla de la sección 9.
 
-**A6. Estimación de sats.** `simple_sell_screen.dart:78-84` calcula `fiat / (precio × (1 + prima/100))`. El nodo calcula `fiat / precio × (1 − prima/100)`. Usar la fórmula del nodo.
+**A6. Estimación de sats.** La app calcula `fiat / (precio × (1 + prima/100))` y redondea. El nodo calcula `fiat / precio × (1 − prima/100)` y trunca. Con 50 USD, prima +5 % y la cotización de la sección 6.3, la app estima 56 217 sats y el nodo fija 56 076. La fórmula está en dos sitios:
+
+- El cálculo compartido `estimateSats` de `lib/features/order/models/order_detail_rules.dart:65`, que usan las pantallas avanzadas de crear y tomar órdenes (`add_order_screen.dart`, `take_order_screen.dart`) y la lista de operaciones (`trades_list_rules.dart`).
+- El modo simple, en `simple_sell_screen.dart:78-84`. Además, `simple_buy_screen.dart:403` estima los sats al tomar sin aplicar la prima de la orden.
+
+Corregir el cálculo compartido con la fórmula del nodo y usarlo también en el modo simple.
 
 **A7. Garantía fija del 3 %.** `simple_buy_screen.dart:304`, `simple_sell_screen.dart:454` y `simple_sell_confirm_sheet.dart:26,204` muestran un 3 % cuando no hay perfil de comunidad. El nodo BitMaxis anuncia `bond_enabled = false`. Leer la política del evento de información.
 
