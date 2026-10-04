@@ -585,6 +585,89 @@ fn history_is_the_same_whatever_the_delivery_order() {
     );
 }
 
+/// The daemon usually answers within the same second as the request, and
+/// relays deliver equal timestamps in any order.
+#[test]
+fn messages_of_the_same_second_have_a_stable_order() {
+    let node = fixture_keys(1);
+    let seller = fixture_keys(11);
+    let buyer = fixture_keys(12);
+    let order = "aaaaaaaa-0000-4000-8000-000000000001";
+    let base = replay_base();
+    let from_daemon = |to: &Keys, action: &str, at: u64| {
+        build_test_kind14_event(
+            &node,
+            &to.public_key(),
+            &order_message(action, order),
+            Some(at),
+        )
+    };
+    let from_user = |user: &Keys, action: &str, at: u64| {
+        build_test_kind14_event(
+            user,
+            &node.public_key(),
+            &order_message(action, order),
+            Some(at),
+        )
+    };
+    // The order is announced; later, within one second each: the buyer says
+    // the fiat was sent and the daemon tells both parties; the seller releases
+    // and the daemon sends its closing burst.
+    let events = [
+        from_daemon(&seller, "new-order", base - 5),
+        from_user(&buyer, "fiat-sent", base),
+        from_daemon(&buyer, "fiat-sent-ok", base),
+        from_daemon(&seller, "fiat-sent-ok", base),
+        from_user(&seller, "release", base + 1),
+        from_daemon(&buyer, "released", base + 1),
+        from_daemon(&seller, "hold-invoice-payment-settled", base + 1),
+        from_daemon(&buyer, "purchase-completed", base + 1),
+        from_daemon(&seller, "rate", base + 1),
+        from_daemon(&buyer, "rate", base + 1),
+    ];
+    let timeline = |arrival: &[usize]| -> Vec<(String, String)> {
+        let mut cache = ChatCache::new();
+        for index in arrival {
+            chat::process_event(&events[*index], &node, &mut cache).unwrap();
+        }
+        cache
+            .to_history(order)
+            .messages
+            .into_iter()
+            .map(|m| (m.action.unwrap_or_default(), m.id))
+            .collect()
+    };
+    let expected = timeline(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let actions: Vec<&str> = expected.iter().map(|(action, _)| action.as_str()).collect();
+    // A request goes before the answers of its own second, and what the
+    // daemon sends in one second follows the flow of the trade. `released`
+    // and `hold-invoice-payment-settled` are the same step, told to each
+    // party: their order is fixed by the event id.
+    assert_eq!(
+        actions[..5],
+        [
+            "new-order",
+            "fiat-sent",
+            "fiat-sent-ok",
+            "fiat-sent-ok",
+            "release"
+        ]
+    );
+    let mut same_step = actions[5..7].to_vec();
+    same_step.sort_unstable();
+    assert_eq!(same_step, ["hold-invoice-payment-settled", "released"]);
+    assert_eq!(actions[7..], ["purchase-completed", "rate", "rate"]);
+    // Any arrival order gives the same timeline, event by event.
+    for arrival in [
+        [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+        [0, 3, 2, 1, 9, 7, 5, 8, 6, 4],
+        [8, 2, 0, 5, 9, 3, 1, 4, 7, 6],
+        [3, 9, 2, 0, 7, 4, 1, 6, 8, 5],
+    ] {
+        assert_eq!(timeline(&arrival), expected, "arrival {arrival:?}");
+    }
+}
+
 #[test]
 fn a_flood_of_refusals_does_not_push_out_the_real_history() {
     let node = fixture_keys(1);

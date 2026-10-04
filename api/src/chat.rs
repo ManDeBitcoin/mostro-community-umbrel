@@ -241,7 +241,7 @@ impl ChatCache {
         }
         let linked_dispute = message.dispute_id.clone();
         thread.messages.push(message);
-        thread.messages.sort_by_key(|m| m.created_at);
+        sort_timeline(&mut thread.messages);
         self.adopt_orphans(&order_id);
         if let Some(dispute_id) = linked_dispute {
             self.adopt_pending_dispute_messages(&dispute_id, &order_id);
@@ -367,7 +367,7 @@ impl ChatCache {
             }
         }
         thread.messages.push(message);
-        thread.messages.sort_by_key(|m| m.created_at);
+        sort_timeline(&mut thread.messages);
     }
 
     fn adopt_orphans(&mut self, order_id: &str) {
@@ -723,6 +723,55 @@ pub fn summarize_payload(payload: &Value) -> String {
         }
         other => format!("datos: {}", shorten(other, 32)),
     }
+}
+
+/// Where a daemon message sits in the flow of a trade. Only used to order the
+/// messages the daemon sends within one second, which relays deliver in no
+/// particular order: the bond comes before the order it guards, the escrow
+/// before the payout, a resolution before what it triggers.
+fn daemon_flow_rank(action: Option<&str>) -> u8 {
+    match action.unwrap_or_default() {
+        "pay-bond-invoice" => 0,
+        "new-order" => 10,
+        "add-invoice" | "waiting-buyer-invoice" => 30,
+        "pay-invoice" | "waiting-seller-to-pay" => 40,
+        "buyer-took-order" | "hold-invoice-payment-accepted" => 50,
+        "fiat-sent-ok" => 60,
+        "dispute-initiated-by-you" | "dispute-initiated-by-peer" => 70,
+        "admin-took-dispute" => 80,
+        "cooperative-cancel-initiated-by-you" | "cooperative-cancel-initiated-by-peer" => 90,
+        "canceled"
+        | "cooperative-cancel-accepted"
+        | "released"
+        | "hold-invoice-payment-settled"
+        | "hold-invoice-payment-canceled"
+        | "admin-settled"
+        | "admin-canceled" => 100,
+        "purchase-completed" | "bond-slashed" => 110,
+        "rate" | "add-bond-invoice" => 120,
+        "rate-received" | "bond-invoice-accepted" => 130,
+        "bond-payout-completed" => 140,
+        _ => u8::MAX,
+    }
+}
+
+/// Orders a thread by time. Nostr timestamps have one-second resolution and
+/// the daemon usually answers within the same second, so ties are common and
+/// relays deliver them in no particular order. Within a second a request (a
+/// user or a solver) goes before the daemon's messages, those follow the flow
+/// of a trade, and the event id settles the rest, so the timeline is the same
+/// on every load.
+fn sort_timeline(messages: &mut [ChatMessage]) {
+    let key = |m: &ChatMessage| {
+        let from_daemon = m.role == ROLE_DAEMON;
+        let rank = if from_daemon {
+            daemon_flow_rank(m.action.as_deref())
+        } else {
+            0
+        };
+        (m.created_at, from_daemon, rank)
+    };
+    messages.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| a.id.cmp(&b.id)));
 }
 
 /// Summary of a whole message. Same rules as [`summarize_payload`], plus the
