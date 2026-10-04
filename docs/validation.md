@@ -338,13 +338,15 @@ Modo de reputación, con un cliente propio que no usa mostro-core:
 
 El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garantía, su disputa enlazada con la orden y los 26 mensajes de la operación en modo de reputación. Las capturas nuevas se añadieron a los fixtures.
 
+A petición de la sesión que adapta la app, el tráfico cifrado de esas pruebas se descifró después con las claves desechables de los dos nodos de regtest y se guardó por flujos en `protocol-flows.json`: compra, compra con factura incluida, venta con factura adjunta, rango, cancelación de mutuo acuerdo, retirada de quien tomó, vencimiento, tomas simultáneas y disputa con `admin-cancel`. Conserva el orden de llegada al relay y el segundo de cada mensaje. La consola del Manager reproduce los nueve en las pruebas, con el mismo orden sea cual sea el orden de entrega. De ese tráfico sale la tabla de qué mensajes repiten el `request_id`, sección 5.5 de la guía.
+
 ### Tarjeta de la comunidad
 
 - La tarjeta emitida por el Manager, en JSON y como enlace `mostro://community/<base64url>`, verifica con una copia del verificador de la app BitMaxis (`k256`, `verify_raw` sobre el digest de la cadena canónica). Antes del cambio no verificaba.
 
 ### Comprobaciones del repositorio
 
-- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (122 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (124 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
 - Revisión independiente de los cambios en seis frentes (backend, seguridad, script supervisor y empaquetado, interfaz, guía de integración y pruebas), con verificación de cada hallazgo. Los hallazgos se corrigieron antes de cerrar esta validación.
 - Segunda revisión independiente de los cambios del 4 de octubre: sin hallazgos bloqueantes ni mayores. De los menores se corrigieron los de la consola (texto de un remitente en una sola línea y sin caracteres de control, etiquetas del daemon solo para mensajes del daemon, cupo de rechazos, orden de las respuestas), el script de humo, el workflow y la prueba de versiones fijadas, que ahora también corre fuera de la imagen.
 - `npm --prefix web run build` y `python3 -m unittest discover -s scripts/tests`, que incluye la coherencia de la versión y los checksums de mostrod entre `config/versions.json`, los Dockerfile y los scripts de humo.

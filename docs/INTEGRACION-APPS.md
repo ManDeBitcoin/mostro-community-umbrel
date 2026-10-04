@@ -13,7 +13,7 @@ Todo lo que aquí se afirma sobre el daemon se comprobó contra el binario ofici
 5. Una orden lleva **sats fijos o prima, nunca ambos**. `amount ≠ 0` con `premium ≠ 0` devuelve `cant-do: invalid_parameters`.
 6. Una orden a precio de mercado se envía con `amount = 0`. Los sats los fija el daemon cuando alguien la toma.
 7. `fiat_amount`, `min_amount`, `max_amount` y `premium` son **enteros**.
-8. Usa un `request_id` propio en cada petición y correlaciona la respuesta por él. Un rechazo de `new-order` no trae `id`.
+8. Usa un `request_id` propio en cada petición, también en `cancel`, y correlaciona la respuesta por él. Un rechazo de `new-order` no trae `id`. Un mensaje del nodo puede traer el `request_id` de la otra parte o ninguno: entonces es un aviso y se enruta por `id` y `action` (sección 5.5).
 9. Muchos fallos son **silenciosos**: sin respuesta en unos segundos, la petición no se aceptó. No muestres una orden como creada hasta recibir `new-order` del daemon, y no des una orden por libre solo porque figure como `pending`.
 10. No atrases ni aleatorices `created_at` en los mensajes al nodo: un evento con más de 10 s de antigüedad se descarta.
 
@@ -299,6 +299,33 @@ Consecuencia para la app: fija un tiempo de espera por petición (la app BitMaxi
 
 La clave superior es `cant-do`, no `order`. Llega a la clave que envió la petición y repite su `request_id`.
 
+### 5.5 Qué mensajes repiten tu `request_id`
+
+El nodo copia en cada mensaje el `request_id` de la petición que provocó ese paso, sea de quien sea. Quien hizo la petición lo recibe como propio. La otra parte recibe un `request_id` que no es suyo, o ninguno. Lo que provoca un pago Lightning, un plazo o el cobro de una garantía llega sin él.
+
+Lo observado en todas las capturas reales (anexo D):
+
+| Mensaje del nodo | `request_id` que trae |
+| --- | --- |
+| `new-order` | El tuyo al crear la orden. El del `cancel` de quien tomó cuando la orden vuelve a ofrecerse. Ninguno si vuelve por vencimiento |
+| `pay-bond-invoice`, `cant-do`, `dispute-initiated-by-you`, `cooperative-cancel-initiated-by-you`, `hold-invoice-payment-settled`, `rate-received` | Siempre el tuyo |
+| `add-invoice`, `pay-invoice` con factura, `waiting-buyer-invoice`, `waiting-seller-to-pay`, `buyer-took-order`, `hold-invoice-payment-accepted` | El de la petición que provocó el paso: la toma o la factura del comprador. Es el tuyo si la enviaste tú y el de la otra parte si no |
+| `fiat-sent-ok`, `cooperative-cancel-accepted` | El tuyo si lo provocaste tú. Ninguno para la otra parte |
+| `canceled` | El de tu `cancel`. Ninguno si te cancela el nodo, por vencimiento o por perder una toma simultánea |
+| `dispute-initiated-by-peer` | El de quien abrió la disputa |
+| `admin-took-dispute`, `admin-canceled` | El del mediador, también para las partes |
+| `admin-settled` | El del mediador para el mediador. Ninguno para las partes |
+| `rate` | El del `release` o del `admin-settle` para quien no lo envió. Ninguno para quien liberó |
+| `pay-invoice` o `add-invoice` que solo trae `peer`, `released`, `purchase-completed`, `cooperative-cancel-initiated-by-peer`, `bond-slashed`, `add-bond-invoice`, `bond-invoice-accepted`, `bond-payout-completed` | Ninguno |
+
+En una de las dos compras capturadas, `buyer-took-order` llegó también sin `request_id`.
+
+Consecuencias para la app:
+
+- Un `request_id` que no coincide con ninguna petición pendiente **de esa misma clave de operación** no es un error. Procesa el mensaje como aviso y enrútalo por el `id` de la orden y la acción.
+- No esperes el eco para dar por recibida una petición cuya confirmación llega sin `request_id`. Es el caso del cobro de una garantía: tras enviar `add-bond-invoice`, la confirmación es `bond-invoice-accepted` con `request_id: null`.
+- Una petición enviada sin `request_id` no se puede emparejar con su rechazo: solo queda el `id` de la orden para saber a qué se refiere. Un `cancel` rechazado con `not_allowed_by_status` pasa inadvertido en una app que solo empareja por `request_id`.
+
 ## 6. Crear órdenes
 
 ### 6.1 Combinaciones válidas
@@ -422,7 +449,7 @@ Detalles que una app debe contemplar:
 | 12 | | → `release` | |
 | 13 | ← `released`, ← `purchase-completed`, ← `rate` | ← `hold-invoice-payment-settled`, ← `rate` | `success` |
 
-- Aquí es **`add-invoice`** el que llega dos veces al comprador (pasos 6 y 7): uno pide la factura y el otro solo informa de la reputación del vendedor.
+- Aquí es **`add-invoice`** el que llega dos veces al comprador (pasos 6 y 7): uno pide la factura y el otro solo informa de la reputación del vendedor. El aviso llega **después** de la petición, al revés que en una venta, donde el `pay-invoice` de reputación llega antes que el de la factura. No dependas del orden: distingue los dos por su payload.
 - Si el comprador incluye `buyer_invoice` al crear la orden, los pasos 6 a 8 desaparecen: al pagarse la factura retenida la operación pasa directamente a activa. En una orden a precio de mercado esa factura debe ser sin importe.
 
 ### 7.3 Con garantía (bond)
@@ -459,6 +486,7 @@ Cuando el evento de información anuncia `bond_enabled = true`, la parte que ind
 - El paso 2 llega hasta un minuto después de la resolución. La factura del paso 3 debe ser por el importe exacto de `amount`.
 - El plazo para reclamar termina en `slashed_at + bond_payout_claim_window_days × 86 400`.
 - En estos mensajes la orden lleva `status: null`, y `amount` no es el importe de la operación.
+- Ninguno de los cinco trae `request_id`, tampoco las confirmaciones de los pasos 4 y 5. Correlaciónalos por el `id` de la orden.
 - La garantía de la parte no penalizada se devuelve.
 
 ### 7.4 Cancelaciones
@@ -467,7 +495,7 @@ Cuando el evento de información anuncia `bond_enabled = true`, la parte que ind
 | --- | --- | --- |
 | Quien publica cancela una orden sin tomar | → `cancel`; ← `canceled` | `s` público `canceled` |
 | Quien tomó se retira antes de enviar su factura | → `cancel`; ← `canceled`. Quien publicó recibe otra vez ← `new-order` con la misma `id` | La orden vuelve a `pending` y se puede tomar de nuevo |
-| Quien tomó deja vencer `expiration_seconds` sin enviar su factura | El nodo actúa solo: quien tomó ← `canceled` y quien publicó ← `new-order` con la misma `id`. Con un plazo de 900 s llegaron a los 915 s | La orden vuelve a `pending`. Con `bond_slash_on_waiting_timeout = false` la garantía de quien tomó se devuelve |
+| Quien tomó deja vencer `expiration_seconds` sin enviar su factura | El nodo actúa solo: quien tomó ← `canceled` y quien publicó ← `new-order` con la misma `id`. Con un plazo de 900 s llegaron 907 s después de la toma: el nodo revisa los plazos una vez por minuto | La orden vuelve a `pending`. Con `bond_slash_on_waiting_timeout = false` la garantía de quien tomó se devuelve |
 | Cancelación de mutuo acuerdo con la operación activa | A → `cancel`: A ← `cooperative-cancel-initiated-by-you`, B ← `cooperative-cancel-initiated-by-peer`. B → `cancel`: ambos ← `cooperative-cancel-accepted` | Tras el primer `cancel` el depósito sigue retenido. Tras el segundo, el nodo lo cancela y los sats vuelven al vendedor. `s` público `canceled` |
 
 La app de quien publica debe aceptar un segundo `new-order` para una orden que ya conoce: significa que vuelve a estar libre.
@@ -688,3 +716,18 @@ Tras instalar la versión del Manager que incluye mostrod v0.19.2, `mostro_versi
 - El aporte al desarrollo solo se paga con LND en mainnet.
 
 Sin cambios en el transporte, en los kinds, en los estados públicos ni en las reglas de `new-order`.
+
+## Anexo D. Capturas reales para pruebas
+
+En `api/tests/fixtures/mostrod-v0.19.2/` del repositorio del Manager hay tráfico real del binario oficial, capturado en regtest con claves desechables. Sirve para probar los analizadores de una app sin un nodo.
+
+| Archivo | Contenido |
+| --- | --- |
+| `protocol-flows.json` | Nueve flujos con los mensajes ya descifrados, en el orden en que llegaron al relay y con su segundo relativo en `at`: compra tomada, compra con la factura incluida, venta con la factura adjunta, orden de rango, cancelación de mutuo acuerdo, retirada de quien tomó, vencimiento del plazo, dos tomas simultáneas y disputa con `admin-cancel` |
+| `protocol-messages.jsonl` | Venta completa con disputa resuelta con `admin-settle` |
+| `protocol-messages-bond.jsonl` | Venta con garantía de ambas partes y prueba de trabajo de primer contacto |
+| `protocol-messages-reputation.jsonl` | Venta en modo de reputación, con firma interna, prueba de identidad y valoraciones |
+| `protocol-messages-slash.jsonl` | Disputa con `admin-cancel`, garantía penalizada y cobro de la parte del ganador |
+| `public-events.json`, `public-events-2.json` | Eventos públicos firmados por el nodo: órdenes en cada estado, disputas y eventos de información con y sin garantía |
+
+Cada mensaje es un objeto con `dir` (`user->daemon` o `daemon->user`), `party` (`seller`, `buyer`, un segundo tomador `buyer2`, o `admin`) y `plaintext`, el contenido descifrado tal como viaja dentro del evento kind 14.

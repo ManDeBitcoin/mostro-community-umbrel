@@ -42,6 +42,11 @@ const REPUTATION_ORDER: &str = "14fd6884-a025-4165-9571-1fa5c773f22c";
 const SLASH_MESSAGES: &str = include_str!("fixtures/mostrod-v0.19.2/protocol-messages-slash.jsonl");
 const SLASH_ORDER: &str = "3d85146b-12d3-461f-a7e5-3e6acacd5634";
 const SLASH_DISPUTE: &str = "0c436ff2-ac00-4544-a195-14fb9940ed11";
+/// Nine more flows from the same two nodes, in the order the relay received
+/// them and with their real timestamps: buy orders, a range order, a take with
+/// the invoice attached, cancellations, a take that times out, concurrent
+/// takes and a dispute a solver cancels.
+const FLOWS: &str = include_str!("fixtures/mostrod-v0.19.2/protocol-flows.json");
 const REAL_ORDER: &str = "c359c135-f15b-45c8-8c8d-209f0763bd59";
 const REAL_DISPUTE: &str = "3d62ac23-24b6-4846-8047-4eea1bd22235";
 
@@ -584,6 +589,269 @@ fn history_is_the_same_whatever_the_delivery_order() {
             .iter()
             .any(|m| m.action.as_deref() == Some("admin-take-dispute") && m.role == "admin")
     );
+}
+
+/// One flow of `protocol-flows.json`, re-encrypted with test keys.
+struct Flow {
+    order_id: String,
+    events: Vec<nostr::Event>,
+    /// Messages that name the order or its dispute: what a thread can hold.
+    linked: usize,
+    /// Every invoice that travelled in the flow.
+    invoices: Vec<String>,
+}
+
+fn load_flow(name: &str, node: &Keys, base: u64) -> Flow {
+    let doc: serde_json::Value = serde_json::from_str(FLOWS).unwrap();
+    let flow = &doc["flows"][name];
+    assert!(flow.is_object(), "no flow named {name}");
+    let party = |name: &str| match name {
+        "seller" => fixture_keys(11),
+        "buyer" => fixture_keys(12),
+        "buyer2" => fixture_keys(13),
+        "buyer3" => fixture_keys(14),
+        other => panic!("unknown party {other}"),
+    };
+    let mut events = Vec::new();
+    let mut linked = 0;
+    let mut invoices = Vec::new();
+    for row in flow["messages"].as_array().unwrap() {
+        let plaintext = row["plaintext"].as_str().unwrap();
+        let name = row["party"].as_str().unwrap();
+        let at = Some(base + row["at"].as_u64().unwrap());
+        let tuple: serde_json::Value = serde_json::from_str(plaintext).unwrap();
+        let inner = tuple[0].as_object().unwrap().values().next().unwrap();
+        if inner["id"].is_string() {
+            linked += 1;
+        }
+        if let Some(invoice) = inner["payload"]["payment_request"][1].as_str() {
+            invoices.push(invoice.to_string());
+        }
+        events.push(match (name, row["dir"] == "daemon->user") {
+            ("admin", _) => build_test_kind14_event(node, &node.public_key(), plaintext, at),
+            (_, true) => build_test_kind14_event(node, &party(name).public_key(), plaintext, at),
+            (_, false) => build_test_kind14_event(&party(name), &node.public_key(), plaintext, at),
+        });
+    }
+    Flow {
+        order_id: flow["order_id"].as_str().unwrap().to_string(),
+        events,
+        linked,
+        invoices,
+    }
+}
+
+/// `role:action` of every message of a thread, in timeline order.
+fn steps(history: &chat::ChatHistory) -> Vec<String> {
+    history
+        .messages
+        .iter()
+        .map(|m| format!("{}:{}", m.role, m.action.as_deref().unwrap_or_default()))
+        .collect()
+}
+
+fn count_of(steps: &[String], step: &str) -> usize {
+    steps.iter().filter(|s| s.as_str() == step).count()
+}
+
+/// Every flow decodes whole, in the same order whatever the delivery order,
+/// although many of its messages share a second, and no invoice gets through.
+#[test]
+fn replays_nine_more_real_flows() {
+    let node = fixture_keys(1);
+    let names = [
+        "inline_invoice_take",
+        "range_order",
+        "buy_order_taken",
+        "dispute_admin_cancel",
+        "cooperative_cancel",
+        "taker_leaves",
+        "take_timeout",
+        "buy_order_with_invoice",
+        "concurrent_takes",
+    ];
+    let doc: serde_json::Value = serde_json::from_str(FLOWS).unwrap();
+    assert_eq!(doc["flows"].as_object().unwrap().len(), names.len());
+    for name in names {
+        let flow = load_flow(name, &node, replay_base());
+        let replay = |newest_first: bool| {
+            let mut cache = ChatCache::new();
+            let mut stored = 0;
+            let mut order: Vec<&nostr::Event> = flow.events.iter().collect();
+            if newest_first {
+                order.reverse();
+            }
+            for event in order {
+                if chat::process_event(event, &node, &mut cache)
+                    .unwrap()
+                    .is_some()
+                {
+                    stored += 1;
+                }
+            }
+            (stored, cache.to_history(&flow.order_id))
+        };
+        let (stored, history) = replay(false);
+        // Only the maker's first request names no order yet.
+        assert_eq!(flow.linked, flow.events.len() - 1, "{name}");
+        assert_eq!(stored, flow.linked, "{name}");
+        assert_eq!(history.count, flow.linked, "{name}");
+        assert!(
+            history
+                .messages
+                .windows(2)
+                .all(|w| w[0].created_at <= w[1].created_at),
+            "{name}: not in time order"
+        );
+        let ties = history
+            .messages
+            .windows(2)
+            .filter(|w| w[0].created_at == w[1].created_at)
+            .count();
+        assert!(ties > 0, "{name}: real traffic has same-second messages");
+
+        let (_, reversed) = replay(true);
+        let ids = |h: &chat::ChatHistory| -> Vec<String> {
+            h.messages.iter().map(|m| m.id.clone()).collect()
+        };
+        assert_eq!(
+            ids(&reversed),
+            ids(&history),
+            "{name}: order depends on delivery"
+        );
+
+        let dump = serde_json::to_string(&history).unwrap();
+        assert!(
+            !flow.invoices.is_empty() || name == "taker_leaves",
+            "{name}"
+        );
+        for invoice in &flow.invoices {
+            assert!(
+                !dump.contains(invoice.as_str()),
+                "{name}: an invoice leaked"
+            );
+        }
+    }
+}
+
+/// What the flows of the integration guide look like in the console.
+#[test]
+fn real_flows_read_as_the_guide_describes_them() {
+    let node = fixture_keys(1);
+    let thread = |name: &str| {
+        let flow = load_flow(name, &node, replay_base());
+        let mut cache = ChatCache::new();
+        for event in &flow.events {
+            chat::process_event(event, &node, &mut cache).unwrap();
+        }
+        cache.to_history(&flow.order_id)
+    };
+    let contents = |history: &chat::ChatHistory, role: &str, action: &str| -> Vec<String> {
+        history
+            .messages
+            .iter()
+            .filter(|m| m.role == role && m.action.as_deref() == Some(action))
+            .map(|m| m.content.clone())
+            .collect()
+    };
+
+    // A buy order: the buyer is asked for the invoice only once the seller
+    // paid the escrow, and gets a second `add-invoice` that carries nothing
+    // but the seller's reputation.
+    let buy = thread("buy_order_taken");
+    let asked = contents(&buy, "daemon", "add-invoice");
+    assert_eq!(asked.len(), 2);
+    assert_eq!(
+        asked
+            .iter()
+            .filter(|c| c.starts_with("contraparte"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        asked
+            .iter()
+            .filter(|c| c.starts_with("compra · estado waiting-buyer-invoice"))
+            .count(),
+        1
+    );
+    let buy_steps = steps(&buy);
+    assert_eq!(count_of(&buy_steps, "user:take-buy"), 1);
+    assert_eq!(count_of(&buy_steps, "user:add-invoice"), 1);
+    assert_eq!(count_of(&buy_steps, "daemon:pay-invoice"), 1);
+    // With the invoice already in the order nobody is asked for one.
+    let prepaid = steps(&thread("buy_order_with_invoice"));
+    assert!(!prepaid.iter().any(|s| s.ends_with(":add-invoice")));
+    assert_eq!(count_of(&prepaid, "daemon:pay-bond-invoice"), 2);
+
+    // A take with the invoice attached: one `pay-invoice`, with the invoice.
+    let inline = thread("inline_invoice_take");
+    let escrow = contents(&inline, "daemon", "pay-invoice");
+    assert_eq!(escrow.len(), 1);
+    assert!(escrow[0].contains("factura Lightning lnbcrt"));
+    assert!(!steps(&inline).iter().any(|s| s.ends_with(":add-invoice")));
+
+    // A range order cannot be taken without an amount.
+    let range = thread("range_order");
+    assert_eq!(
+        contents(&range, "daemon", "cant-do"),
+        ["motivo: out_of_range_sats_amount"]
+    );
+    assert_eq!(count_of(&steps(&range), "user:take-sell"), 2);
+
+    // The taker walks away, or lets the deadline pass: the maker is sent the
+    // order again and it is on offer once more.
+    let leaves = thread("taker_leaves");
+    assert_eq!(count_of(&steps(&leaves), "daemon:new-order"), 2);
+    let mut reasons = contents(&leaves, "daemon", "cant-do");
+    reasons.sort();
+    assert_eq!(
+        reasons,
+        ["motivo: invalid_order_status", "motivo: invalid_pubkey"]
+    );
+    let timeout = thread("take_timeout");
+    let offers: Vec<u64> = timeout
+        .messages
+        .iter()
+        .filter(|m| m.role == "daemon" && m.action.as_deref() == Some("new-order"))
+        .map(|m| m.created_at)
+        .collect();
+    assert_eq!(offers.len(), 2);
+    // The node's deadline for a taken order was 900 s.
+    assert!((900..960).contains(&(offers[1] - offers[0])), "{offers:?}");
+    assert_eq!(count_of(&steps(&timeout), "daemon:canceled"), 2);
+    assert_eq!(count_of(&steps(&timeout), "user:cancel"), 1);
+
+    // Two takers ask for the same bonded order: the one who loses is told.
+    let race = steps(&thread("concurrent_takes"));
+    assert_eq!(count_of(&race, "daemon:pay-bond-invoice"), 3);
+    assert_eq!(count_of(&race, "user:take-sell"), 3);
+    assert_eq!(count_of(&race, "daemon:cant-do"), 1);
+
+    // Both parties must ask before an active trade is cancelled.
+    let cooperative = steps(&thread("cooperative_cancel"));
+    assert_eq!(count_of(&cooperative, "user:cancel"), 2);
+    assert_eq!(
+        count_of(&cooperative, "daemon:cooperative-cancel-initiated-by-you"),
+        1
+    );
+    assert_eq!(
+        count_of(&cooperative, "daemon:cooperative-cancel-initiated-by-peer"),
+        1
+    );
+    assert_eq!(
+        count_of(&cooperative, "daemon:cooperative-cancel-accepted"),
+        2
+    );
+
+    // A solver refunds the seller: the thread carries the dispute and the
+    // solver's two requests.
+    let refund = thread("dispute_admin_cancel");
+    assert!(refund.dispute_id.is_some());
+    let refund_steps = steps(&refund);
+    assert_eq!(count_of(&refund_steps, "admin:admin-take-dispute"), 1);
+    assert_eq!(count_of(&refund_steps, "admin:admin-cancel"), 1);
+    assert_eq!(count_of(&refund_steps, "daemon:admin-canceled"), 3);
 }
 
 /// The daemon usually answers within the same second as the request, and
