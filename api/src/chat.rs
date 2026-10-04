@@ -218,9 +218,11 @@ impl ChatCache {
         if is_refusal(&message) {
             // Refusals have their own small allowance: a flood of them only
             // replaces older refusals, never the history of the trade.
-            let refusals = thread.messages.iter().filter(|m| is_refusal(m)).count();
+            // Only the node's own: a `cant-do` sent by a user is a user message.
+            let node_refusal = |m: &ChatMessage| m.is_from_me && is_refusal(m);
+            let refusals = thread.messages.iter().filter(|m| node_refusal(m)).count();
             if refusals >= MAX_REFUSALS_PER_ORDER
-                && let Some(oldest) = thread.messages.iter().position(is_refusal)
+                && let Some(oldest) = thread.messages.iter().position(node_refusal)
             {
                 thread.messages.remove(oldest);
             }
@@ -572,9 +574,36 @@ pub fn attribute_message(
     (message.id.clone(), dispute_from_payload)
 }
 
+/// Characters that draw nothing but change how the text around them is laid
+/// out: zero-width marks and the bidirectional controls.
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+/// The first `keep` characters of a value a sender controls, on one line: the
+/// timeline shows this text as is, so line breaks and other control characters
+/// become spaces and invisible formatting characters are dropped.
 fn shorten(value: &str, keep: usize) -> String {
-    let mut out: String = value.chars().take(keep).collect();
-    if value.chars().count() > keep {
+    let mut clean = value
+        .chars()
+        .filter(|c| !is_invisible_format(*c))
+        .map(|c| if c.is_control() { ' ' } else { c });
+    let mut out: String = clean.by_ref().take(keep).collect();
+    if clean.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// Enough of an invoice to recognise it, never enough to pay or to claim it.
+/// A BOLT11 invoice is ASCII letters and digits; anything else is dropped.
+fn invoice_prefix(invoice: &str) -> String {
+    let mut clean = invoice.chars().filter(char::is_ascii_alphanumeric);
+    let mut out: String = clean.by_ref().take(14).collect();
+    if clean.next().is_some() {
         out.push('…');
     }
     out
@@ -635,7 +664,7 @@ pub fn summarize_payload(payload: &Value) -> String {
                 out.push(summarize_order(order));
             }
             if let Some(invoice) = parts.get(1).and_then(Value::as_str) {
-                out.push(format!("factura Lightning {}", shorten(invoice, 14)));
+                out.push(format!("factura Lightning {}", invoice_prefix(invoice)));
             }
             if let Some(amount) = parts.get(2).and_then(Value::as_i64) {
                 out.push(format!("{amount} sats"));
@@ -755,28 +784,44 @@ fn daemon_flow_rank(action: Option<&str>) -> u8 {
     }
 }
 
+/// Position of a message among those of its own second.
+///
+/// What a user or a solver sends is a request and goes first: the daemon's
+/// messages of that second are its answers. The exceptions are the answers to
+/// something the daemon asked for, which an app can send within the second:
+/// they go right after the daemon's request.
+fn flow_position(message: &ChatMessage) -> u16 {
+    let action = message.action.as_deref();
+    let after_daemon_step = |rank: u8| 1000 + u16::from(rank) * 10 + 5;
+    if message.role == ROLE_DAEMON {
+        return 1000 + u16::from(daemon_flow_rank(action)) * 10;
+    }
+    match action.unwrap_or_default() {
+        "add-invoice" => after_daemon_step(daemon_flow_rank(Some("add-invoice"))),
+        "add-bond-invoice" => after_daemon_step(daemon_flow_rank(Some("add-bond-invoice"))),
+        "rate-user" => after_daemon_step(daemon_flow_rank(Some("rate"))),
+        _ => 0,
+    }
+}
+
 /// Orders a thread by time. Nostr timestamps have one-second resolution and
 /// the daemon usually answers within the same second, so ties are common and
-/// relays deliver them in no particular order. Within a second a request (a
-/// user or a solver) goes before the daemon's messages, those follow the flow
-/// of a trade, and the event id settles the rest, so the timeline is the same
-/// on every load.
+/// relays deliver them in no particular order. Within a second the messages
+/// follow [`flow_position`] and the event id settles the rest, so the timeline
+/// is the same on every load.
 fn sort_timeline(messages: &mut [ChatMessage]) {
-    let key = |m: &ChatMessage| {
-        let from_daemon = m.role == ROLE_DAEMON;
-        let rank = if from_daemon {
-            daemon_flow_rank(m.action.as_deref())
-        } else {
-            0
-        };
-        (m.created_at, from_daemon, rank)
-    };
+    let key = |m: &ChatMessage| (m.created_at, flow_position(m));
     messages.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| a.id.cmp(&b.id)));
 }
 
 /// Summary of a whole message. Same rules as [`summarize_payload`], plus the
 /// cases where the action changes what the payload means.
-pub fn summarize_message(action: &str, payload: &Value) -> String {
+pub fn summarize_message(action: &str, payload: &Value, from_daemon: bool) -> String {
+    // Only the daemon speaks with these words. The same action sent by a user
+    // gets the plain summary of its payload.
+    if !from_daemon {
+        return summarize_payload(payload);
+    }
     // In `pay-bond-invoice` the embedded order is a carrier: its `amount` is
     // the bond, not the trade, and its status is a neutral `pending`.
     if action == "pay-bond-invoice"
@@ -791,7 +836,7 @@ pub fn summarize_message(action: &str, payload: &Value) -> String {
             None => "garantía".to_string(),
         }];
         if let Some(invoice) = parts.get(1).and_then(Value::as_str) {
-            out.push(format!("factura Lightning {}", shorten(invoice, 14)));
+            out.push(format!("factura Lightning {}", invoice_prefix(invoice)));
         }
         return out.join(" · ");
     }
@@ -875,7 +920,7 @@ pub fn process_event(
         created_at: event.created_at.as_secs(),
         kind: PROTOCOL_MESSAGE_KIND,
         action: Some(message.action.clone()),
-        content: summarize_message(&message.action, &message.payload),
+        content: summarize_message(&message.action, &message.payload, role == ROLE_DAEMON),
         is_from_me: is_from_node,
         role: role.to_string(),
         variant: message.variant.clone(),

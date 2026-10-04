@@ -6,6 +6,12 @@ temp_dir=$(mktemp -d)
 entry_pid=
 cleanup() {
     [ -z "$entry_pid" ] || kill -KILL "$entry_pid" 2>/dev/null || true
+    # A killed supervisor cannot stop the stand-in daemons it started.
+    if [ -f "$temp_dir/pids" ]; then
+        while read -r pid; do
+            [ "$(cat "/proc/$pid/comm" 2>/dev/null)" != sleep ] || kill -KILL "$pid" 2>/dev/null || true
+        done < "$temp_dir/pids"
+    fi
     rm -rf "$temp_dir"
 }
 trap cleanup EXIT HUP INT TERM
@@ -146,6 +152,10 @@ second=$(cat "$active/mostro.pid")
 rm "$active/settings.toml"
 wait_for 8 sh -c "! kill -0 '$second' 2>/dev/null" || fail 'the daemon kept running without settings'
 wait_for 5 sh -c "[ ! -e '$active/mostro.pid' ] && [ ! -e '$active/mostro.heartbeat' ]" || fail 'runtime markers left after deactivation'
+# The standby loop writes this file on every turn and removes it when a daemon
+# starts, so it proves the supervisor went back to waiting rather than being
+# on its way out.
+wait_for 5 test -s "$standby_dir/.mostro_standby.pid.sleep" || fail 'the supervisor did not return to standby'
 kill -0 "$entry_pid" 2>/dev/null || fail 'the supervisor exited instead of returning to standby'
 kill -TERM "$entry_pid"
 wait "$entry_pid" || true

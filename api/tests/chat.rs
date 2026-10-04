@@ -472,7 +472,8 @@ fn decodes_a_real_trade_in_reputation_mode() {
         "50b1e698415e5d357613052ac9b19da865e7701d0978744aa5e5a96c21151709",
     ] {
         assert!(REPUTATION_MESSAGES.contains(identity));
-        assert!(!dump.contains(identity), "an identity key leaked");
+        // A shortened form would be a leak too.
+        assert!(!dump.contains(&identity[..12]), "an identity key leaked");
     }
 }
 
@@ -610,22 +611,31 @@ fn messages_of_the_same_second_have_a_stable_order() {
             Some(at),
         )
     };
-    // The order is announced; later, within one second each: the buyer says
-    // the fiat was sent and the daemon tells both parties; the seller releases
-    // and the daemon sends its closing burst.
+    // Four seconds of a trade, each with several messages:
+    //  base     the bond request and the order it guards
+    //  base+10  the daemon asks the buyer for an invoice and the app answers
+    //           at once; the seller is then asked to pay
+    //  base+20  the buyer says the fiat was sent and the daemon tells both
+    //  base+30  the seller releases and the daemon sends its closing burst,
+    //           which the buyer's app answers with a rating
     let events = [
-        from_daemon(&seller, "new-order", base - 5),
-        from_user(&buyer, "fiat-sent", base),
-        from_daemon(&buyer, "fiat-sent-ok", base),
-        from_daemon(&seller, "fiat-sent-ok", base),
-        from_user(&seller, "release", base + 1),
-        from_daemon(&buyer, "released", base + 1),
-        from_daemon(&seller, "hold-invoice-payment-settled", base + 1),
-        from_daemon(&buyer, "purchase-completed", base + 1),
-        from_daemon(&seller, "rate", base + 1),
-        from_daemon(&buyer, "rate", base + 1),
+        from_daemon(&seller, "pay-bond-invoice", base),
+        from_daemon(&seller, "new-order", base),
+        from_daemon(&buyer, "add-invoice", base + 10),
+        from_user(&buyer, "add-invoice", base + 10),
+        from_daemon(&seller, "pay-invoice", base + 10),
+        from_user(&buyer, "fiat-sent", base + 20),
+        from_daemon(&buyer, "fiat-sent-ok", base + 20),
+        from_daemon(&seller, "fiat-sent-ok", base + 20),
+        from_user(&seller, "release", base + 30),
+        from_daemon(&buyer, "released", base + 30),
+        from_daemon(&seller, "hold-invoice-payment-settled", base + 30),
+        from_daemon(&buyer, "purchase-completed", base + 30),
+        from_daemon(&buyer, "rate", base + 30),
+        from_user(&buyer, "rate-user", base + 30),
+        from_daemon(&buyer, "rate-received", base + 30),
     ];
-    let timeline = |arrival: &[usize]| -> Vec<(String, String)> {
+    let timeline = |arrival: &[usize]| -> Vec<(String, String, String)> {
         let mut cache = ChatCache::new();
         for index in arrival {
             chat::process_event(&events[*index], &node, &mut cache).unwrap();
@@ -634,37 +644,54 @@ fn messages_of_the_same_second_have_a_stable_order() {
             .to_history(order)
             .messages
             .into_iter()
-            .map(|m| (m.action.unwrap_or_default(), m.id))
+            .map(|m| (m.role, m.action.unwrap_or_default(), m.id))
             .collect()
     };
-    let expected = timeline(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    let actions: Vec<&str> = expected.iter().map(|(action, _)| action.as_str()).collect();
-    // A request goes before the answers of its own second, and what the
-    // daemon sends in one second follows the flow of the trade. `released`
-    // and `hold-invoice-payment-settled` are the same step, told to each
-    // party: their order is fixed by the event id.
+    let in_order: Vec<usize> = (0..events.len()).collect();
+    let expected = timeline(&in_order);
+    let steps: Vec<String> = expected
+        .iter()
+        .map(|(role, action, _)| format!("{role}:{action}"))
+        .collect();
+    // `released` and `hold-invoice-payment-settled` are one step told to each
+    // party, and so are the two `fiat-sent-ok`: the event id orders them.
+    let mut closing = steps[9..11].to_vec();
+    closing.sort_unstable();
     assert_eq!(
-        actions[..5],
+        closing,
+        ["daemon:hold-invoice-payment-settled", "daemon:released"]
+    );
+    assert_eq!(
+        [&steps[..9], &steps[11..]].concat(),
         [
-            "new-order",
-            "fiat-sent",
-            "fiat-sent-ok",
-            "fiat-sent-ok",
-            "release"
+            "daemon:pay-bond-invoice",
+            "daemon:new-order",
+            "daemon:add-invoice",
+            "user:add-invoice",
+            "daemon:pay-invoice",
+            "user:fiat-sent",
+            "daemon:fiat-sent-ok",
+            "daemon:fiat-sent-ok",
+            "user:release",
+            "daemon:purchase-completed",
+            "daemon:rate",
+            "user:rate-user",
+            "daemon:rate-received",
         ]
     );
-    let mut same_step = actions[5..7].to_vec();
-    same_step.sort_unstable();
-    assert_eq!(same_step, ["hold-invoice-payment-settled", "released"]);
-    assert_eq!(actions[7..], ["purchase-completed", "rate", "rate"]);
-    // Any arrival order gives the same timeline, event by event.
-    for arrival in [
-        [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-        [0, 3, 2, 1, 9, 7, 5, 8, 6, 4],
-        [8, 2, 0, 5, 9, 3, 1, 4, 7, 6],
-        [3, 9, 2, 0, 7, 4, 1, 6, 8, 5],
-    ] {
-        assert_eq!(timeline(&arrival), expected, "arrival {arrival:?}");
+    // Any arrival order gives the same timeline, event by event: newest
+    // first, as a relay returns stored events, a user message first, and two
+    // scrambles.
+    let mut newest_first = in_order.clone();
+    newest_first.reverse();
+    let arrivals = [
+        newest_first,
+        vec![5, 0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        vec![13, 2, 9, 0, 14, 5, 11, 3, 7, 1, 12, 8, 4, 10, 6],
+        vec![7, 12, 1, 10, 3, 14, 0, 8, 5, 13, 2, 9, 6, 11, 4],
+    ];
+    for arrival in &arrivals {
+        assert_eq!(timeline(arrival), expected, "arrival {arrival:?}");
     }
 }
 
@@ -712,6 +739,50 @@ fn a_flood_of_refusals_does_not_push_out_the_real_history() {
         cache.order_for_dispute(REAL_DISPUTE).as_deref(),
         Some(REAL_ORDER)
     );
+
+    // A `cant-do` sent by a user is a user message. Twenty of them, dated
+    // after everything else, must not use up the allowance of the daemon's
+    // refusals: the next real ones would evict each other.
+    let kept: Vec<String> = history
+        .messages
+        .iter()
+        .filter(|m| m.role == "daemon" && m.action.as_deref() == Some("cant-do"))
+        .map(|m| m.id.clone())
+        .collect();
+    assert_eq!(kept.len(), 20);
+    for i in 0..20u64 {
+        let event = build_test_kind14_event(
+            &attacker,
+            &node.public_key(),
+            &refusal(REAL_ORDER, "invalid_peer"),
+            Some(base + 700 + i),
+        );
+        chat::process_event(&event, &node, &mut cache).unwrap();
+    }
+    let event = build_test_kind14_event(
+        &node,
+        &attacker.public_key(),
+        &refusal(REAL_ORDER, "not_found"),
+        Some(base + 650),
+    );
+    chat::process_event(&event, &node, &mut cache).unwrap();
+    let history = cache.to_history(REAL_ORDER);
+    let from_daemon: Vec<&str> = history
+        .messages
+        .iter()
+        .filter(|m| m.role == "daemon" && m.action.as_deref() == Some("cant-do"))
+        .map(|m| m.id.as_str())
+        .collect();
+    // One more real refusal replaced exactly one, the oldest.
+    assert_eq!(from_daemon.len(), 20);
+    assert_eq!(
+        from_daemon
+            .iter()
+            .filter(|id| kept.iter().any(|k| k == *id))
+            .count(),
+        19
+    );
+    assert!(!from_daemon.contains(&kept[0].as_str()));
 }
 
 #[test]
@@ -1119,12 +1190,42 @@ fn summaries_are_built_from_known_fields_only() {
         null
     ]});
     assert_eq!(
-        summarize_message("pay-bond-invoice", &bond_request),
+        summarize_message("pay-bond-invoice", &bond_request, true),
         "garantía de 1056 sats · factura Lightning lnbcrt10560n1p…"
     );
     assert_eq!(
-        summarize_message("pay-invoice", &bond_request),
+        summarize_message("pay-invoice", &bond_request, true),
         "venta · estado pending · 30 USD · 1056 sats · Transferencia bancaria · factura Lightning lnbcrt10560n1p…"
+    );
+    // Only the daemon speaks with the daemon's words: the same action sent by
+    // a user gets the plain summary of its payload.
+    let payout = serde_json::json!({"order": {"kind": "sell", "amount": 527, "fiat_code": "USD", "fiat_amount": 30}});
+    assert_eq!(
+        summarize_message("bond-payout-completed", &payout, true),
+        "parte de la garantía pagada: 527 sats"
+    );
+    assert_eq!(
+        summarize_message("bond-payout-completed", &payout, false),
+        "venta · 30 USD · 527 sats"
+    );
+    assert!(!summarize_message("pay-bond-invoice", &bond_request, false).contains("garantía"));
+    // Text a sender controls is shown on one line, without characters that
+    // would change how the timeline is laid out.
+    let crafted = payload(serde_json::json!({"order": {
+        "kind": "sell", "amount": 0, "fiat_code": "USD", "fiat_amount": 30,
+        "payment_method": "Banco\n\u{202E}odneuqes\u{200B} real\ty\r\nmás"
+    }}));
+    assert_eq!(
+        crafted,
+        "venta · 30 USD · a precio de mercado · Banco odneuqes real y  más"
+    );
+    assert!(!crafted.chars().any(|c| c.is_control()));
+    // An invoice is ASCII letters and digits; nothing else gets through.
+    assert_eq!(
+        payload(
+            serde_json::json!({"payment_request": [null, "lnbc1\n<b>\u{202E}xy z0123456789abcdef", null]})
+        ),
+        "factura Lightning lnbc1bxyz01234…"
     );
     // Unknown payloads show their name, never their content.
     assert_eq!(

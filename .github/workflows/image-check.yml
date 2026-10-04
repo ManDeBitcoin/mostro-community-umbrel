@@ -15,6 +15,19 @@ on:
       - 'Cargo.lock'
       - '.dockerignore'
       - '.github/workflows/image-check.yml'
+  # Also on main, so pull requests start from its build cache instead of cold.
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'web/**'
+      - 'docker/**'
+      - 'config/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.dockerignore'
+      - '.github/workflows/image-check.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,6 +45,7 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     env:
       IMAGE: mostro-community-umbrel:check-${{ matrix.arch }}
     steps:

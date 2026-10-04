@@ -1082,9 +1082,11 @@ function MediationConsole({
             ) : !history || timelineMessages.length === 0 ? (
               <div className="chat-empty">
                 <Icon name="message" size={32} />
-                <b>Sin mensajes para la orden {selectedOrderId.slice(0, 8)}…</b>
+                <b>{error ? 'No se pudieron cargar los mensajes' : `Sin mensajes para la orden ${selectedOrderId.slice(0, 8)}…`}</b>
                 <p>
-                  Los relays conservan los mensajes del daemon unos 30 días. Una orden que nadie ha tomado solo tiene el mensaje de creación.
+                  {error
+                    ? 'El panel no pudo leer el historial de esta orden. El motivo aparece arriba; se reintenta cada pocos segundos.'
+                    : 'Los relays conservan los mensajes del daemon unos 30 días. Una orden que nadie ha tomado solo tiene el mensaje de creación.'}
                 </p>
               </div>
             ) : (
@@ -1190,6 +1192,12 @@ function MediationConsole({
             </div>
           )}
 
+          {selectedOrderId && !selectedDispute && (
+            <p style={{ margin: 0, fontSize: '13px', color: '#d6b25e', lineHeight: 1.4 }}>
+              Esta orden no tiene ninguna disputa anunciada por el nodo. Los pasos de abajo solo se aplican a una orden en disputa.
+            </p>
+          )}
+
           <div className="action-box settle">
             <h4>1. Tomar la disputa</h4>
             <p>El mediador la toma con su clave. La disputa pasa a «En mediación» y Mostro le entrega los datos de la orden y el canal con cada parte.</p>
@@ -1199,13 +1207,13 @@ function MediationConsole({
           <div className="action-box settle">
             <h4>2a. El comprador demostró el pago</h4>
             <p>Mostro cobra el depósito del vendedor y paga al comprador.</p>
-            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admsettle -o {selectedOrderId || '<id-de-la-orden>'}</code>
+            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admsettle -o {(selectedDispute && selectedOrderId) || '<id-de-la-orden>'}</code>
           </div>
 
           <div className="action-box refund">
             <h4>2b. El pago fiat no existió</h4>
             <p>Mostro cancela el depósito y los sats vuelven al vendedor.</p>
-            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admcancel -o {selectedOrderId || '<id-de-la-orden>'}</code>
+            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admcancel -o {(selectedDispute && selectedOrderId) || '<id-de-la-orden>'}</code>
           </div>
 
           <p style={{ margin: 0, fontSize: '12px', color: '#829288', lineHeight: 1.4 }}>
