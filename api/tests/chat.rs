@@ -1,3 +1,4 @@
+//! Mediation console: protocol-v2 message decoding against real mostrod v0.19.2 traffic.
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -7,21 +8,37 @@ use mostro_community_api::{
     AppState,
     adapters::Integrations,
     chat::{
-        self, ChatCache, build_test_gift_wrap_event, build_test_kind14_event,
-        build_test_nip04_event, build_test_nip44_event,
+        self, ChatCache, ChatMessage, build_test_kind14_event, parse_protocol_plaintext,
+        summarize_message, summarize_payload,
     },
     config::{BondApply, Community, Configuration, Market, Nostr, Safety},
     identity,
-    orders::{MonitorCommand, MonitorTiming, OrdersCache},
+    orders::{DisputeSummary, MonitorCommand, MonitorTiming, OrdersCache},
     router,
     store::Store,
 };
-use nostr::{EventBuilder, Keys, Kind, SecretKey, Tag, ToBech32};
+use nostr::{EventBuilder, Keys, Kind, SecretKey, Tag, Timestamp, ToBech32, nips::nip04};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tower::ServiceExt;
+
+/// Decrypted protocol messages of one complete trade with a dispute, captured
+/// from the official mostrod v0.19.2 binary on regtest (see the fixture folder).
+const REAL_MESSAGES: &str = include_str!("fixtures/mostrod-v0.19.2/protocol-messages.jsonl");
+/// One complete trade on a node with the anti-abuse bond enabled for both
+/// sides and first-contact proof of work, captured the same way.
+const BOND_MESSAGES: &str = include_str!("fixtures/mostrod-v0.19.2/protocol-messages-bond.jsonl");
+const BOND_ORDER: &str = "6e07c373-b827-465b-8c77-af4b59fe8cfa";
+/// One complete trade in reputation mode: every user message carries the
+/// inner trade signature and the identity proof. Same bonded node.
+const REPUTATION_MESSAGES: &str =
+    include_str!("fixtures/mostrod-v0.19.2/protocol-messages-reputation.jsonl");
+const REPUTATION_ORDER: &str = "14fd6884-a025-4165-9571-1fa5c773f22c";
+const REAL_ORDER: &str = "c359c135-f15b-45c8-8c8d-209f0763bd59";
+const REAL_DISPUTE: &str = "3d62ac23-24b6-4846-8047-4eea1bd22235";
 
 fn fixture_keys(byte: u8) -> Keys {
     Keys::new(SecretKey::from_slice(&[byte; 32]).unwrap())
@@ -106,369 +123,1103 @@ async fn spawn_mock_relay() -> (
     (url, req_rx, resp_tx, handle)
 }
 
-#[tokio::test]
-async fn test_kind4_nip04_valid_decryption_and_cache() {
-    let root = tempfile::tempdir().unwrap();
-    let community_keys = fixture_keys(1);
-    let comm_nsec = community_keys.secret_key().to_bech32().unwrap();
-    let comm_npub = community_keys.public_key().to_bech32().unwrap();
-
-    identity::import(root.path(), &comm_nsec, &comm_npub).unwrap();
-    let loaded_keys = identity::load_identity_keys(root.path())
-        .unwrap()
-        .expect("Clave privada debe cargarse");
-
-    let trader_keys = fixture_keys(2);
-    let order_id = "11111111-2222-3333-4444-555555555555";
-
-    let message_json = serde_json::json!({
-        "order_id": order_id,
-        "action": "dispute",
-        "content": "No he recibido el pago en mi cuenta bancaria"
-    })
-    .to_string();
-
-    let event = build_test_nip04_event(
-        &trader_keys,
-        &community_keys.public_key(),
-        &message_json,
-        Some(order_id),
-    );
-
-    let mut cache = ChatCache::new();
-    let processed = chat::process_event(&event, &loaded_keys, &mut cache)
-        .await
-        .unwrap();
-
-    assert!(processed.is_some());
-    let msg = processed.unwrap();
-    assert_eq!(msg.order_id, order_id);
-    assert_eq!(msg.kind, 4);
-    assert_eq!(msg.action.as_deref(), Some("dispute"));
-    assert_eq!(msg.content, "No he recibido el pago en mi cuenta bancaria");
-    assert!(!msg.is_from_me);
-    assert_eq!(msg.sender, trader_keys.public_key().to_bech32().unwrap());
-
-    // Verify cache content
-    let history = cache.to_history(order_id);
-    assert_eq!(history.count, 1);
-    assert_eq!(history.messages[0].id, event.id.to_hex());
+/// Re-encrypts the captured plaintexts with test keys and feeds them to the
+/// decoder in order. In the capture the admin acted with the node key, so
+/// those messages are signed by the node and addressed to the node.
+fn replay_real_traffic(node: &Keys, cache: &mut ChatCache) -> (HashMap<String, Keys>, usize) {
+    replay_real_traffic_in(node, cache, false, replay_base())
 }
 
-#[tokio::test]
-async fn test_kind4_nip04_sent_by_community() {
-    let community_keys = fixture_keys(1);
-    let trader_keys = fixture_keys(2);
-    let order_id = "22222222-3333-4444-5555-666666666666";
+/// Timestamp of the first replayed message.
+fn replay_base() -> u64 {
+    Timestamp::now().as_secs() - 10_000
+}
 
-    let payload = serde_json::json!({
-        "order_id": order_id,
-        "action": "adm-message",
-        "text": "Estimado usuario, el mediador ha sido asignado al caso."
-    })
-    .to_string();
+/// `newest_first` delivers the events the way a relay answers a history
+/// request: latest event first.
+fn replay_real_traffic_in(
+    node: &Keys,
+    cache: &mut ChatCache,
+    newest_first: bool,
+    base: u64,
+) -> (HashMap<String, Keys>, usize) {
+    replay_capture(REAL_MESSAGES, node, cache, newest_first, base)
+}
 
-    let event = build_test_nip04_event(
-        &community_keys,
-        &trader_keys.public_key(),
-        &payload,
-        Some(order_id),
-    );
+/// Re-encrypts a capture with test keys and feeds it to the decoder.
+fn replay_capture(
+    capture: &str,
+    node: &Keys,
+    cache: &mut ChatCache,
+    newest_first: bool,
+    base: u64,
+) -> (HashMap<String, Keys>, usize) {
+    let parties: HashMap<String, Keys> = [("seller", 11u8), ("buyer", 12u8)]
+        .into_iter()
+        .map(|(name, seed)| (name.to_string(), fixture_keys(seed)))
+        .collect();
+    let mut stored = 0;
+    let mut lines: Vec<(usize, &str)> = capture.lines().enumerate().collect();
+    if newest_first {
+        lines.reverse();
+    }
+    for (index, line) in lines {
+        let row: serde_json::Value = serde_json::from_str(line).unwrap();
+        let plaintext = row["plaintext"].as_str().unwrap();
+        let party = row["party"].as_str().unwrap();
+        let from_daemon = row["dir"] == "daemon->user";
+        let created_at = Some(base + index as u64);
+        let event = match (party, from_daemon) {
+            ("admin", _) => {
+                build_test_kind14_event(node, &node.public_key(), plaintext, created_at)
+            }
+            (_, true) => {
+                build_test_kind14_event(node, &parties[party].public_key(), plaintext, created_at)
+            }
+            (_, false) => {
+                build_test_kind14_event(&parties[party], &node.public_key(), plaintext, created_at)
+            }
+        };
+        if chat::process_event(&event, node, cache).unwrap().is_some() {
+            stored += 1;
+        }
+    }
+    (parties, stored)
+}
 
+#[test]
+fn decodes_a_real_v0_19_2_trade_with_dispute() {
+    let node = fixture_keys(1);
     let mut cache = ChatCache::new();
-    let processed = chat::process_event(&event, &community_keys, &mut cache)
-        .await
-        .unwrap();
+    let (parties, stored) = replay_real_traffic(&node, &mut cache);
 
-    assert!(processed.is_some());
-    let msg = processed.unwrap();
-    assert!(msg.is_from_me);
-    assert_eq!(msg.action.as_deref(), Some("adm-message"));
+    // 27 captured messages. Only the maker's new-order request stays out of
+    // the thread: it carries no order id yet. The admin's admin-take-dispute
+    // names the dispute, which the daemon had already linked to the order.
+    assert_eq!(REAL_MESSAGES.lines().count(), 27);
+    assert_eq!(stored, 26);
+    assert_eq!(cache.order_count(), 1);
+
+    let history = cache.to_history(REAL_ORDER);
+    assert_eq!(history.count, 26);
+    assert_eq!(history.dispute_id.as_deref(), Some(REAL_DISPUTE));
     assert_eq!(
-        msg.content,
-        "Estimado usuario, el mediador ha sido asignado al caso."
-    );
-}
-
-#[tokio::test]
-async fn test_kind1059_gift_wrap_decryption() {
-    let community_keys = fixture_keys(1);
-    let trader_keys = fixture_keys(3);
-    let order_id = "33333333-4444-5555-6666-777777777777";
-
-    let payload = serde_json::json!({
-        "order_id": order_id,
-        "action": "chat",
-        "content": "Adjunto justificante de transferencia SEPA"
-    })
-    .to_string();
-
-    let event = build_test_gift_wrap_event(
-        &trader_keys,
-        &community_keys.public_key(),
-        &payload,
-        Some(order_id),
-    )
-    .await;
-
-    let mut cache = ChatCache::new();
-    let processed = chat::process_event(&event, &community_keys, &mut cache)
-        .await
-        .unwrap();
-
-    assert!(processed.is_some());
-    let msg = processed.unwrap();
-    assert_eq!(msg.order_id, order_id);
-    assert_eq!(msg.kind, 1059);
-    assert_eq!(msg.action.as_deref(), Some("chat"));
-    assert_eq!(msg.content, "Adjunto justificante de transferencia SEPA");
-    assert!(!msg.is_from_me);
-}
-
-#[tokio::test]
-async fn test_kind4_nip44_decryption() {
-    let community_keys = fixture_keys(1);
-    let trader_keys = fixture_keys(4);
-    let order_id = "44444444-5555-6666-7777-888888888888";
-
-    let payload = serde_json::json!({
-        "order_id": order_id,
-        "action": "dispute",
-        "content": "Mensaje cifrado con NIP-44 V2 directo"
-    })
-    .to_string();
-
-    let event = build_test_nip44_event(
-        &trader_keys,
-        &community_keys.public_key(),
-        &payload,
-        Some(order_id),
+        cache.order_for_dispute(REAL_DISPUTE).as_deref(),
+        Some(REAL_ORDER)
     );
 
-    let mut cache = ChatCache::new();
-    let processed = chat::process_event(&event, &community_keys, &mut cache)
-        .await
-        .unwrap();
-
-    assert!(processed.is_some());
-    let msg = processed.unwrap();
-    assert_eq!(msg.order_id, order_id);
-    assert_eq!(msg.content, "Mensaje cifrado con NIP-44 V2 directo");
-}
-
-#[tokio::test]
-async fn test_invalid_events_are_rejected() {
-    let community_keys = fixture_keys(1);
-    let trader_keys = fixture_keys(2);
-    let other_party = fixture_keys(9);
-    let order_id = "55555555-6666-7777-8888-999999999999";
-
-    let mut cache = ChatCache::new();
-
-    // 1. Event directed to someone else (not community)
-    let wrong_recipient_event = build_test_nip04_event(
-        &trader_keys,
-        &other_party.public_key(),
-        "Hola",
-        Some(order_id),
-    );
-    let res = chat::process_event(&wrong_recipient_event, &community_keys, &mut cache).await;
-    assert_eq!(res.unwrap(), None);
-
-    // 2. Corrupted ciphertext (invalid IV format or bad base64)
-    let bad_cipher_event = EventBuilder::new(Kind::EncryptedDirectMessage, "bad-corrupted-cipher")
-        .tags(vec![
-            Tag::public_key(community_keys.public_key()),
-            Tag::identifier(order_id),
-        ])
-        .sign_with_keys(&trader_keys)
-        .unwrap();
-    let res = chat::process_event(&bad_cipher_event, &community_keys, &mut cache).await;
+    let actions: Vec<&str> = history
+        .messages
+        .iter()
+        .filter_map(|m| m.action.as_deref())
+        .collect();
+    for expected in [
+        "new-order",
+        "take-sell",
+        "add-invoice",
+        "waiting-buyer-invoice",
+        "pay-invoice",
+        "waiting-seller-to-pay",
+        "buyer-took-order",
+        "hold-invoice-payment-accepted",
+        "fiat-sent",
+        "fiat-sent-ok",
+        "dispute",
+        "dispute-initiated-by-you",
+        "dispute-initiated-by-peer",
+        "admin-take-dispute",
+        "admin-took-dispute",
+        "admin-settle",
+        "admin-settled",
+        "purchase-completed",
+        "rate",
+    ] {
+        assert!(actions.contains(&expected), "missing action {expected}");
+    }
+    assert!(history.messages.iter().all(|m| m.kind == 14));
     assert!(
-        res.is_err(),
-        "Descifrado con ciphertext inválido debe fallar"
+        history
+            .messages
+            .windows(2)
+            .all(|pair| pair[0].created_at <= pair[1].created_at)
     );
 
-    // 3. Event without order_id
-    let no_order_event = build_test_nip04_event(
-        &trader_keys,
-        &community_keys.public_key(),
-        "Mensaje general sin referencia de orden",
+    // Roles: the daemon, the two traders and the operator acting as admin.
+    let buyer = parties["buyer"].public_key().to_bech32().unwrap();
+    let seller = parties["seller"].public_key().to_bech32().unwrap();
+    let role_of = |action: &str, sender: &str| {
+        history
+            .messages
+            .iter()
+            .find(|m| m.action.as_deref() == Some(action) && m.sender == sender)
+            .map(|m| (m.role.clone(), m.is_from_me, m.acknowledged))
+    };
+    assert_eq!(
+        role_of("take-sell", &buyer),
+        Some(("user".into(), false, true))
+    );
+    assert_eq!(
+        role_of("fiat-sent", &buyer),
+        Some(("user".into(), false, true))
+    );
+    let node_npub = node.public_key().to_bech32().unwrap();
+    assert_eq!(
+        role_of("purchase-completed", &node_npub),
+        Some(("daemon".into(), true, true))
+    );
+    // With the node key acting as solver, requests and answers are both
+    // node-signed and self-addressed: the action tells them apart.
+    for request in ["admin-take-dispute", "admin-settle"] {
+        assert_eq!(
+            role_of(request, &node_npub),
+            Some(("admin".into(), true, true)),
+            "{request}"
+        );
+    }
+    for answer in ["admin-took-dispute", "admin-settled", "rate"] {
+        assert!(
+            history
+                .messages
+                .iter()
+                .filter(|m| m.action.as_deref() == Some(answer))
+                .all(|m| m.role == "daemon"),
+            "{answer}"
+        );
+    }
+    assert!(
+        history
+            .messages
+            .iter()
+            .all(|m| m.sender != seller || m.acknowledged)
+    );
+
+    // The summary is rebuilt from known fields: no raw JSON, no full invoice,
+    // no signatures.
+    let dump = serde_json::to_string(&history).unwrap();
+    assert!(!dump.contains("request_id"));
+    assert!(!dump.contains("trade_index"));
+    assert!(!dump.contains("lnbcrt470890n1p4vzavhpp5tff7"));
+    // mostrod hands the solver the hash and the PREIMAGE of the escrow hold
+    // invoice in `admin-took-dispute`. With the node key acting as solver the
+    // panel decrypts that message; neither value may ever leave the API.
+    assert!(REAL_MESSAGES.contains("preimage") && REAL_MESSAGES.contains("d911ec67fb78a65c"));
+    for secret in ["d911ec67fb78a65c", "62c41f99509e4b36", "preimage", "hash"] {
+        assert!(!dump.contains(secret), "{secret} leaked into the console");
+    }
+    let hold = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("pay-invoice") && m.content.contains("factura"))
+        .expect("pay-invoice with the hold invoice");
+    assert!(hold.content.contains("47373 sats"));
+    assert!(hold.content.contains("factura Lightning lnbcrt473730n1…"));
+    let opened = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("dispute-initiated-by-you"))
+        .unwrap();
+    assert_eq!(opened.content, format!("disputa {REAL_DISPUTE}"));
+    assert_eq!(opened.dispute_id.as_deref(), Some(REAL_DISPUTE));
+}
+
+#[test]
+fn decodes_a_real_trade_with_bonds_for_both_sides() {
+    let node = fixture_keys(1);
+    let mut cache = ChatCache::new();
+    let (parties, stored) = replay_capture(BOND_MESSAGES, &node, &mut cache, false, replay_base());
+    // 24 captured messages. The maker asked twice (the first request lacked
+    // the first-contact proof of work and the daemon dropped it); neither
+    // request names an order yet, so 22 messages form the thread.
+    assert_eq!(BOND_MESSAGES.lines().count(), 24);
+    assert_eq!(stored, 22);
+    let history = cache.to_history(BOND_ORDER);
+    assert_eq!(history.count, 22);
+    assert_eq!(history.dispute_id, None);
+
+    // With a maker bond the daemon's first answer is the bond request, and
+    // the order confirmation only follows once the bond is paid.
+    let daemon_actions: Vec<&str> = history
+        .messages
+        .iter()
+        .filter(|m| m.role == "daemon")
+        .filter_map(|m| m.action.as_deref())
+        .collect();
+    assert_eq!(&daemon_actions[..2], ["pay-bond-invoice", "new-order"]);
+
+    // Both parties were asked for a bond. The embedded order of that message
+    // carries the bond in `amount`; the console must not present it as the
+    // amount of the trade.
+    let bonds: Vec<&ChatMessage> = history
+        .messages
+        .iter()
+        .filter(|m| m.action.as_deref() == Some("pay-bond-invoice"))
+        .collect();
+    assert_eq!(bonds.len(), 2);
+    for bond in &bonds {
+        assert_eq!(
+            bond.content,
+            "garantía de 1056 sats · factura Lightning lnbcrt10560n1p…"
+        );
+    }
+    let recipients: Vec<&str> = bonds
+        .iter()
+        .filter_map(|m| m.recipient.as_deref())
+        .collect();
+    let seller = parties["seller"].public_key().to_bech32().unwrap();
+    let buyer = parties["buyer"].public_key().to_bech32().unwrap();
+    assert_eq!(recipients, [seller.as_str(), buyer.as_str()]);
+
+    // The trade itself: escrow of the trade plus the seller's fee, and the
+    // buyer's payout minus the buyer's fee.
+    let escrow = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("pay-invoice") && m.content.contains("factura"))
+        .unwrap();
+    assert!(escrow.content.contains("35292 sats"));
+    let payout = history
+        .messages
+        .iter()
+        .find(|m| m.role == "daemon" && m.action.as_deref() == Some("add-invoice"))
+        .unwrap();
+    assert!(payout.content.contains("35080 sats"));
+    let dump = serde_json::to_string(&history).unwrap();
+    assert!(
+        !dump.contains("lnbcrt10560n1p4vyl"),
+        "a full bond invoice leaked"
+    );
+    assert!(history.messages.iter().all(|m| m.acknowledged));
+}
+
+/// The BitMaxis app and every client built on mostro-core send signed tuples:
+/// `[message, trade signature, [identity pubkey, identity signature]]`.
+#[test]
+fn decodes_a_real_trade_in_reputation_mode() {
+    let node = fixture_keys(1);
+    let mut cache = ChatCache::new();
+    let (_, stored) = replay_capture(REPUTATION_MESSAGES, &node, &mut cache, false, replay_base());
+    // 27 captured messages; only the maker's first request names no order.
+    assert_eq!(REPUTATION_MESSAGES.lines().count(), 27);
+    assert_eq!(stored, 26);
+    let history = cache.to_history(REPUTATION_ORDER);
+    assert_eq!(history.count, 26);
+
+    let tuples: Vec<serde_json::Value> = REPUTATION_MESSAGES
+        .lines()
+        .map(|line| {
+            let row: serde_json::Value = serde_json::from_str(line).unwrap();
+            serde_json::from_str(row["plaintext"].as_str().unwrap()).unwrap()
+        })
+        .collect();
+    let signed = tuples
+        .iter()
+        .filter(|tuple| tuple[1].is_string() && tuple[2].is_array())
+        .count();
+    // Everything the users sent is signed; nothing the daemon sent is.
+    assert_eq!(signed, 8);
+    assert_eq!(tuples.iter().filter(|tuple| tuple[1].is_null()).count(), 19);
+
+    let user_actions: Vec<&str> = history
+        .messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .filter_map(|m| m.action.as_deref())
+        .collect();
+    // The seller rated twice: the daemon dropped the first attempt (the trade
+    // key was no longer known and the event had no first-contact proof of
+    // work). The console shows both requests and a single `rate-received`.
+    assert_eq!(
+        user_actions,
+        [
+            "take-sell",
+            "add-invoice",
+            "fiat-sent",
+            "release",
+            "rate-user",
+            "rate-user",
+            "rate-user"
+        ]
+    );
+    let received: Vec<&str> = history
+        .messages
+        .iter()
+        .filter(|m| m.action.as_deref() == Some("rate-received"))
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(received, ["valoración 5", "valoración 4"]);
+
+    // In reputation mode the maker is told the taker's reputation.
+    let peer = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("pay-invoice") && !m.content.contains("factura"))
+        .unwrap();
+    assert_eq!(
+        peer.content,
+        "contraparte · reputación 0.0 en 0 valoraciones"
+    );
+
+    // The identity keys behind the trade keys travel inside the encrypted
+    // tuple. The console has no use for them and must not show them.
+    let dump = serde_json::to_string(&history).unwrap();
+    for identity in [
+        "d14757da9a3af37eaaed673de4a6ed8314c1f9e12be8605597b30bd93c0d32ac",
+        "50b1e698415e5d357613052ac9b19da865e7701d0978744aa5e5a96c21151709",
+    ] {
+        assert!(REPUTATION_MESSAGES.contains(identity));
+        assert!(!dump.contains(identity), "an identity key leaked");
+    }
+}
+
+/// Relays return stored events newest first and the two subscriptions
+/// interleave, so the result must not depend on arrival order.
+#[test]
+fn history_is_the_same_whatever_the_delivery_order() {
+    let node = fixture_keys(1);
+    // One base for both replays: the comparison below includes timestamps.
+    let base = replay_base();
+    let mut in_order = ChatCache::new();
+    replay_real_traffic_in(&node, &mut in_order, false, base);
+    let mut reversed = ChatCache::new();
+    let (_, accepted) = replay_real_traffic_in(&node, &mut reversed, true, base);
+    // Every message with an order or a dispute is taken in, even those that
+    // arrive before the daemon message that gives them a thread.
+    assert_eq!(accepted, 26);
+
+    let expected = in_order.to_history(REAL_ORDER);
+    let actual = reversed.to_history(REAL_ORDER);
+    assert_eq!(actual.count, 26);
+    assert_eq!(actual.dispute_id, expected.dispute_id);
+    let ids = |history: &chat::ChatHistory| {
+        let mut ids: Vec<String> = history.messages.iter().map(|m| m.id.clone()).collect();
+        ids.sort();
+        ids
+    };
+    // Event ids differ between the two replays (fresh signatures), so compare
+    // what was said, by whom and when.
+    let shape = |history: &chat::ChatHistory| {
+        let mut rows: Vec<(u64, String, String, bool)> = history
+            .messages
+            .iter()
+            .map(|m| {
+                (
+                    m.created_at,
+                    m.action.clone().unwrap_or_default(),
+                    m.role.clone(),
+                    m.acknowledged,
+                )
+            })
+            .collect();
+        rows.sort();
+        rows
+    };
+    assert_eq!(shape(&actual), shape(&expected));
+    assert_eq!(ids(&actual).len(), 26);
+    assert_eq!(reversed.orphan_count(), 0);
+    assert_eq!(
+        reversed.order_for_dispute(REAL_DISPUTE).as_deref(),
+        Some(REAL_ORDER)
+    );
+    // The solver's request names only the dispute; it waited for the link.
+    assert!(
+        actual
+            .messages
+            .iter()
+            .any(|m| m.action.as_deref() == Some("admin-take-dispute") && m.role == "admin")
+    );
+}
+
+#[test]
+fn a_flood_of_refusals_does_not_push_out_the_real_history() {
+    let node = fixture_keys(1);
+    let attacker = fixture_keys(3);
+    let mut cache = ChatCache::new();
+    replay_real_traffic(&node, &mut cache);
+    let before: Vec<String> = cache
+        .to_history(REAL_ORDER)
+        .messages
+        .iter()
+        .map(|m| m.id.clone())
+        .collect();
+    assert_eq!(before.len(), 26);
+
+    // Anyone can make the daemon refuse 600 invalid requests about a real
+    // order. Each refusal names that order.
+    let base = Timestamp::now().as_secs() - 5_000;
+    for i in 0..600u64 {
+        let event = build_test_kind14_event(
+            &node,
+            &attacker.public_key(),
+            &refusal(REAL_ORDER, "is_not_your_order"),
+            Some(base + i),
+        );
+        chat::process_event(&event, &node, &mut cache).unwrap();
+    }
+    let history = cache.to_history(REAL_ORDER);
+    let refusals = history
+        .messages
+        .iter()
+        .filter(|m| m.action.as_deref() == Some("cant-do"))
+        .count();
+    assert_eq!(refusals, 20, "only the latest refusals are kept");
+    for id in &before {
+        assert!(
+            history.messages.iter().any(|m| &m.id == id),
+            "a real message was evicted"
+        );
+    }
+    assert_eq!(history.count, 46);
+    assert_eq!(
+        cache.order_for_dispute(REAL_DISPUTE).as_deref(),
+        Some(REAL_ORDER)
+    );
+}
+
+#[test]
+fn replaying_the_same_events_does_not_duplicate() {
+    let node = fixture_keys(1);
+    let buyer = fixture_keys(12);
+    let mut cache = ChatCache::new();
+    let line = REAL_MESSAGES
+        .lines()
+        .find(|l| l.contains(r#"\"action\":\"add-invoice\""#) && l.contains("daemon->user"))
+        .unwrap();
+    let row: serde_json::Value = serde_json::from_str(line).unwrap();
+    let event = build_test_kind14_event(
+        &node,
+        &buyer.public_key(),
+        row["plaintext"].as_str().unwrap(),
         None,
     );
-    let res = chat::process_event(&no_order_event, &community_keys, &mut cache).await;
-    assert_eq!(res.unwrap(), None);
-
-    // 4. Duplicate event (deduplication check)
-    let valid_event = build_test_nip04_event(
-        &trader_keys,
-        &community_keys.public_key(),
-        &serde_json::json!({"order_id": order_id, "text": "Mensaje único"}).to_string(),
-        Some(order_id),
+    assert!(
+        chat::process_event(&event, &node, &mut cache)
+            .unwrap()
+            .is_some()
     );
-    let res1 = chat::process_event(&valid_event, &community_keys, &mut cache)
-        .await
-        .unwrap();
-    assert!(res1.is_some());
-    assert_eq!(cache.to_history(order_id).count, 1);
-
-    // Insert same event again -> cache returns false, count remains 1
-    assert!(!cache.insert(res1.unwrap()));
-    assert_eq!(cache.to_history(order_id).count, 1);
+    // Same event from a second relay.
+    assert!(
+        chat::process_event(&event, &node, &mut cache)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(cache.to_history(REAL_ORDER).count, 1);
 }
 
-#[tokio::test]
-async fn test_chat_cache_ordering_and_limits() {
+fn order_message(action: &str, order_id: &str) -> String {
+    serde_json::json!([
+        {"order": {"version": 2, "request_id": 1, "trade_index": null, "id": order_id, "action": action, "payload": null}},
+        null,
+        null
+    ])
+    .to_string()
+}
+
+#[test]
+fn a_user_cannot_open_a_thread_or_pose_as_a_participant() {
+    let node = fixture_keys(1);
+    let maker = fixture_keys(2);
+    let stranger = fixture_keys(3);
     let mut cache = ChatCache::new();
-    let order_id = "66666666-7777-8888-9999-000000000000";
+    let order_id = "11111111-2222-3333-4444-555555555555";
 
-    // Insert out of chronological order
-    let msg1 = chat::ChatMessage {
-        id: "msg1".into(),
-        order_id: order_id.into(),
-        sender: "npub1".into(),
-        recipient: Some("npub2".into()),
-        created_at: 1000,
-        kind: 4,
-        action: None,
-        content: "Primero en tiempo".into(),
-        is_from_me: false,
-    };
-    let msg2 = chat::ChatMessage {
-        id: "msg2".into(),
-        order_id: order_id.into(),
-        sender: "npub2".into(),
-        recipient: Some("npub1".into()),
-        created_at: 1050,
-        kind: 4,
-        action: None,
-        content: "Segundo en tiempo".into(),
-        is_from_me: true,
-    };
-    let msg3 = chat::ChatMessage {
-        id: "msg3".into(),
-        order_id: order_id.into(),
-        sender: "npub1".into(),
-        recipient: Some("npub2".into()),
-        created_at: 950,
-        kind: 4,
-        action: None,
-        content: "El más antiguo".into(),
-        is_from_me: false,
-    };
+    // Anyone can address a well-formed message to the node about any public
+    // order id. Until the daemon answers about that order nothing is shown.
+    let early = build_test_kind14_event(
+        &stranger,
+        &node.public_key(),
+        &order_message("fiat-sent", order_id),
+        None,
+    );
+    assert!(
+        chat::process_event(&early, &node, &mut cache)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(cache.order_count(), 0);
+    assert_eq!(cache.orphan_count(), 1);
+    assert_eq!(cache.to_history(order_id).count, 0);
 
-    cache.insert(msg1);
-    cache.insert(msg2);
-    cache.insert(msg3);
-
+    // The daemon answers the maker: the thread exists and waiting messages join it.
+    let reply = build_test_kind14_event(
+        &node,
+        &maker.public_key(),
+        &order_message("new-order", order_id),
+        None,
+    );
+    assert!(
+        chat::process_event(&reply, &node, &mut cache)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(cache.orphan_count(), 0);
     let history = cache.to_history(order_id);
-    assert_eq!(history.count, 3);
-    assert_eq!(history.messages[0].id, "msg3");
-    assert_eq!(history.messages[1].id, "msg1");
-    assert_eq!(history.messages[2].id, "msg2");
+    assert_eq!(history.count, 2);
+
+    let from_stranger = history.messages.iter().find(|m| !m.is_from_me).unwrap();
+    assert!(
+        !from_stranger.acknowledged,
+        "the daemon never addressed this key"
+    );
+
+    // A refusal does not turn its recipient into a participant.
+    let refused = build_test_kind14_event(
+        &node,
+        &stranger.public_key(),
+        &refusal(order_id, "is_not_your_order"),
+        None,
+    );
+    assert!(
+        chat::process_event(&refused, &node, &mut cache)
+            .unwrap()
+            .is_some()
+    );
+    let history = cache.to_history(order_id);
+    assert!(
+        history
+            .messages
+            .iter()
+            .filter(|m| !m.is_from_me)
+            .all(|m| !m.acknowledged)
+    );
+    let refusal_line = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("cant-do"))
+        .unwrap();
+    assert_eq!(refusal_line.content, "motivo: is_not_your_order");
+    assert_eq!(refusal_line.variant, "cant-do");
+
+    // The maker, addressed by the daemon, is acknowledged.
+    let cancel = build_test_kind14_event(
+        &maker,
+        &node.public_key(),
+        &order_message("cancel", order_id),
+        None,
+    );
+    chat::process_event(&cancel, &node, &mut cache).unwrap();
+    let history = cache.to_history(order_id);
+    let from_maker = history
+        .messages
+        .iter()
+        .find(|m| m.action.as_deref() == Some("cancel"))
+        .unwrap();
+    assert!(from_maker.acknowledged);
 }
 
-#[tokio::test]
-async fn test_http_chat_endpoint_contract() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    let comm_keys = fixture_keys(1);
-    identity::import(
-        root,
-        &comm_keys.secret_key().to_bech32().unwrap(),
-        &comm_keys.public_key().to_bech32().unwrap(),
-    )
-    .unwrap();
+fn refusal(order_id: &str, reason: &str) -> String {
+    serde_json::json!([
+        {"cant-do": {"version": 2, "request_id": 1, "trade_index": null, "id": order_id, "action": "cant-do", "payload": {"cant_do": reason}}},
+        null,
+        null
+    ])
+    .to_string()
+}
 
+#[test]
+fn a_refusal_cannot_open_a_thread() {
+    let node = fixture_keys(1);
+    let attacker = fixture_keys(3);
+    let mut cache = ChatCache::new();
+    // Anyone can make the daemon answer `cant-do` about an order id of their
+    // choosing: the refusal echoes the id of the request. If refusals opened
+    // threads, a thousand of them would push every real order out of the
+    // console.
+    for i in 0..5u64 {
+        let invented = format!("12121212-0000-0000-0000-{i:012}");
+        let event = build_test_kind14_event(
+            &node,
+            &attacker.public_key(),
+            &refusal(&invented, "not_found"),
+            None,
+        );
+        assert_eq!(chat::process_event(&event, &node, &mut cache), Ok(None));
+        assert_eq!(cache.to_history(&invented).count, 0);
+    }
+    assert_eq!(cache.order_count(), 0);
+    assert_eq!(cache.orphan_count(), 0);
+}
+
+#[test]
+fn threads_with_a_dispute_are_the_last_to_be_evicted() {
+    let node = fixture_keys(1);
+    let maker = fixture_keys(2);
+    let mut cache = ChatCache::new();
+    let base = Timestamp::now().as_secs() - 100_000;
+    let disputed = "abababab-0000-0000-0000-000000000001";
+    let dispute_id = "cdcdcdcd-0000-0000-0000-000000000001";
+
+    // The oldest thread of all is the one with an open dispute.
+    let opened = serde_json::json!([
+        {"order": {"version": 2, "request_id": 1, "trade_index": null, "id": disputed, "action": "dispute-initiated-by-you", "payload": {"dispute": [dispute_id, null]}}},
+        null,
+        null
+    ])
+    .to_string();
+    let event = build_test_kind14_event(&node, &maker.public_key(), &opened, Some(base));
+    chat::process_event(&event, &node, &mut cache).unwrap();
+
+    for i in 0..1005u64 {
+        let other = format!("bbbbbbbb-0000-0000-0000-{i:012}");
+        let event = build_test_kind14_event(
+            &node,
+            &maker.public_key(),
+            &order_message("new-order", &other),
+            Some(base + 10 + i),
+        );
+        chat::process_event(&event, &node, &mut cache).unwrap();
+    }
+    assert_eq!(cache.order_count(), 1000);
+    assert_eq!(cache.to_history(disputed).count, 1);
+    assert_eq!(
+        cache.order_for_dispute(dispute_id).as_deref(),
+        Some(disputed)
+    );
+    // The stalest threads without a dispute left instead.
+    assert_eq!(
+        cache
+            .to_history("bbbbbbbb-0000-0000-0000-000000000000")
+            .count,
+        0
+    );
+    assert_eq!(
+        cache
+            .to_history("bbbbbbbb-0000-0000-0000-000000001004")
+            .count,
+        1
+    );
+}
+
+#[test]
+fn backdated_user_messages_are_not_part_of_the_history() {
+    let node = fixture_keys(1);
+    let maker = fixture_keys(2);
+    let stranger = fixture_keys(3);
+    let mut cache = ChatCache::new();
+    let order_id = "56565656-0000-0000-0000-000000000001";
+    let opened_at = Timestamp::now().as_secs() - 5_000;
+
+    let opened = build_test_kind14_event(
+        &node,
+        &maker.public_key(),
+        &order_message("new-order", order_id),
+        Some(opened_at),
+    );
+    chat::process_event(&opened, &node, &mut cache).unwrap();
+
+    // The daemon only acts on requests a few seconds old, so nothing a user
+    // sent can predate the order. A message dated an hour before it is an
+    // attempt to plant history, whoever signs it.
+    for (keys, when) in [(&stranger, opened_at - 3_600), (&maker, opened_at - 3_600)] {
+        let planted = build_test_kind14_event(
+            keys,
+            &node.public_key(),
+            &order_message("fiat-sent", order_id),
+            Some(when),
+        );
+        chat::process_event(&planted, &node, &mut cache).unwrap();
+    }
+    assert_eq!(cache.to_history(order_id).count, 1);
+
+    // A message sent after the order exists is shown.
+    let genuine = build_test_kind14_event(
+        &maker,
+        &node.public_key(),
+        &order_message("cancel", order_id),
+        Some(opened_at + 30),
+    );
+    chat::process_event(&genuine, &node, &mut cache).unwrap();
+    let history = cache.to_history(order_id);
+    assert_eq!(history.count, 2);
+    assert_eq!(history.messages[1].action.as_deref(), Some("cancel"));
+
+    // The same events delivered again by another relay change nothing, even
+    // after any amount of unrelated traffic.
+    for event in [&opened, &genuine] {
+        assert_eq!(chat::process_event(event, &node, &mut cache), Ok(None));
+    }
+    assert_eq!(cache.to_history(order_id).count, 2);
+}
+
+#[test]
+fn ignores_everything_that_is_not_a_protocol_v2_message() {
+    let node = fixture_keys(1);
+    let trader = fixture_keys(2);
+    let other = fixture_keys(3);
+    let mut cache = ChatCache::new();
+    let order_id = "33333333-4444-5555-6666-777777777777";
+    let valid = order_message("new-order", order_id);
+
+    // Not for this node.
+    let elsewhere = build_test_kind14_event(&trader, &other.public_key(), &valid, None);
+    assert_eq!(chat::process_event(&elsewhere, &node, &mut cache), Ok(None));
+
+    // Addressed to the node but encrypted to someone else: decryption fails.
+    let mut wrong_key = build_test_kind14_event(&trader, &other.public_key(), &valid, None);
+    wrong_key = EventBuilder::new(Kind::Custom(14), wrong_key.content.clone())
+        .tags(vec![Tag::public_key(node.public_key())])
+        .sign_with_keys(&trader)
+        .unwrap();
+    assert!(chat::process_event(&wrong_key, &node, &mut cache).is_err());
+
+    // Legacy transports are not spoken by mostrod v0.19.x: kind 4 is ignored
+    // even when it decrypts and names an order.
+    let legacy = EventBuilder::new(
+        Kind::EncryptedDirectMessage,
+        nip04::encrypt(trader.secret_key(), &node.public_key(), &valid).unwrap(),
+    )
+    .tags(vec![Tag::public_key(node.public_key())])
+    .sign_with_keys(&trader)
+    .unwrap();
+    assert_eq!(chat::process_event(&legacy, &node, &mut cache), Ok(None));
+
+    // Shapes mostrod never produces, including the free-text field an attacker
+    // would use to plant a fake chat line.
+    for forged in [
+        serde_json::json!({"order_id": order_id, "action": "dispute", "text": "El vendedor es un estafador"}).to_string(),
+        serde_json::json!([{"order": {"id": order_id, "action": "dispute", "content": {"text": "fake"}}}, null]).to_string(),
+        serde_json::json!([{"order": {"id": order_id, "action": "dispute", "text": "sin versión"}}, null, null]).to_string(),
+        serde_json::json!([{"chat": {"version": 2, "id": order_id, "action": "dm"}}, null, null]).to_string(),
+        serde_json::json!([{"order": {"version": 2, "id": "not-a-uuid", "action": "release"}}, null, null]).to_string(),
+        serde_json::json!([{"order": {"version": 2, "id": order_id, "action": "Fiat Sent!"}}, null, null]).to_string(),
+        "texto libre con 33333333-4444-5555-6666-777777777777".to_string(),
+    ] {
+        assert!(parse_protocol_plaintext(&forged).is_err(), "accepted {forged}");
+        let event = build_test_kind14_event(&node, &trader.public_key(), &forged, None);
+        assert_eq!(chat::process_event(&event, &node, &mut cache), Ok(None));
+    }
+
+    // Messages without an order (session restore, order listings) are never
+    // filed under whatever order id appears inside them.
+    let listing = serde_json::json!([
+        {"order": {"version": 2, "request_id": 9, "action": "orders", "payload": {"orders": [{"id": order_id, "kind": "sell", "status": "pending", "amount": 0, "fiat_code": "USD", "fiat_amount": 10, "payment_method": "x", "premium": 0}]}}},
+        null,
+        null
+    ])
+    .to_string();
+    let event = build_test_kind14_event(&node, &trader.public_key(), &listing, None);
+    assert_eq!(chat::process_event(&event, &node, &mut cache), Ok(None));
+
+    // An event dated in the future is not stored.
+    let future = build_test_kind14_event(
+        &node,
+        &trader.public_key(),
+        &valid,
+        Some(Timestamp::now().as_secs() + 3600),
+    );
+    assert_eq!(chat::process_event(&future, &node, &mut cache), Ok(None));
+
+    assert_eq!(cache.order_count(), 0);
+    assert_eq!(cache.orphan_count(), 0);
+}
+
+#[test]
+fn summaries_are_built_from_known_fields_only() {
+    let payload = |value: serde_json::Value| summarize_payload(&value);
+    assert_eq!(payload(serde_json::Value::Null), "");
+    assert_eq!(
+        payload(
+            serde_json::json!({"order": {"kind": "sell", "status": "pending", "amount": 0, "fiat_code": "USD", "fiat_amount": 100, "payment_method": "Transferencia bancaria", "premium": 5}})
+        ),
+        "venta · estado pending · 100 USD · a precio de mercado · prima +5 % · Transferencia bancaria"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"order": {"kind": "buy", "status": "pending", "amount": 0, "fiat_code": "USD", "min_amount": 50, "max_amount": 200, "fiat_amount": 0, "payment_method": "Zelle", "premium": -3}})
+        ),
+        "compra · estado pending · 50–200 USD · a precio de mercado · prima -3 % · Zelle"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"payment_request": [null, "lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygs", 1500]})
+        ),
+        "factura Lightning lnbc1pvjluezsp… · 1500 sats"
+    );
+    assert_eq!(
+        payload(serde_json::json!({"cant_do": "invalid_parameters"})),
+        "motivo: invalid_parameters"
+    );
+    assert_eq!(
+        payload(serde_json::json!({"rating_user": 5})),
+        "valoración 5"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"peer": {"pubkey": "72ac6257298054706845515ce7f87ce3ab9f8f6e7b0a2247465435b00a896e08", "reputation": {"rating": 4.5, "reviews": 12, "operating_days": 30}}})
+        ),
+        "contraparte 72ac62572980… · reputación 4.5 en 12 valoraciones"
+    );
+    // Bond payloads.
+    assert_eq!(
+        payload(
+            serde_json::json!({"bond_resolution": {"slash_seller": false, "slash_buyer": true}})
+        ),
+        "ejecuta la garantía del comprador"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"bond_resolution": {"slash_seller": false, "slash_buyer": false}})
+        ),
+        "sin ejecutar garantías"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"bond_payout_request": {"order": {"id": "x", "amount": 528}, "slashed_at": 1791000000}})
+        ),
+        "garantía ejecutada: 528 sats a reclamar con una factura"
+    );
+    assert_eq!(
+        payload(
+            serde_json::json!({"payment_failed": {"payment_attempts": 3, "payment_retries_interval": 60}})
+        ),
+        "pago al comprador fallido: 3 intentos, uno cada 60 s"
+    );
+    // The same payload means different things under different actions.
+    let bond_request = serde_json::json!({"payment_request": [
+        {"kind": "sell", "status": "pending", "amount": 1056, "fiat_code": "USD", "fiat_amount": 30, "payment_method": "Transferencia bancaria", "premium": 0},
+        "lnbcrt10560n1p4vylxyzxyzxyzxyzxyzxyzxyzxyz",
+        null
+    ]});
+    assert_eq!(
+        summarize_message("pay-bond-invoice", &bond_request),
+        "garantía de 1056 sats · factura Lightning lnbcrt10560n1p…"
+    );
+    assert_eq!(
+        summarize_message("pay-invoice", &bond_request),
+        "venta · estado pending · 30 USD · 1056 sats · Transferencia bancaria · factura Lightning lnbcrt10560n1p…"
+    );
+    // Unknown payloads show their name, never their content.
+    assert_eq!(
+        payload(serde_json::json!({"restore_data": {"orders": [], "secret": "x"}})),
+        "datos: restore_data"
+    );
+    // A direct-message text is the only free text shown, and it is capped.
+    let long = "a".repeat(2000);
+    let shown = payload(serde_json::json!({"text_message": long}));
+    assert_eq!(shown.chars().count(), 501);
+}
+
+#[test]
+fn caches_are_bounded() {
+    let node = fixture_keys(1);
+    let maker = fixture_keys(2);
+    let spammer = fixture_keys(3);
+    let mut cache = ChatCache::new();
+    let order_id = "44444444-5555-6666-7777-888888888888";
+    let base = Timestamp::now().as_secs() - 100_000;
+
+    let opened = build_test_kind14_event(
+        &node,
+        &maker.public_key(),
+        &order_message("new-order", order_id),
+        Some(base),
+    );
+    chat::process_event(&opened, &node, &mut cache).unwrap();
+    let genuine = build_test_kind14_event(
+        &maker,
+        &node.public_key(),
+        &order_message("cancel", order_id),
+        Some(base + 1),
+    );
+    chat::process_event(&genuine, &node, &mut cache).unwrap();
+
+    // A flood from a key the daemon never answered cannot push out the
+    // participant's message nor grow without limit.
+    for i in 0..400u64 {
+        let junk = build_test_kind14_event(
+            &spammer,
+            &node.public_key(),
+            &order_message("fiat-sent", order_id),
+            Some(base + 2 + i),
+        );
+        chat::process_event(&junk, &node, &mut cache).unwrap();
+    }
+    let history = cache.to_history(order_id);
+    let user_messages: Vec<&ChatMessage> =
+        history.messages.iter().filter(|m| !m.is_from_me).collect();
+    assert_eq!(user_messages.len(), 300);
+    assert!(
+        user_messages
+            .iter()
+            .any(|m| m.action.as_deref() == Some("cancel") && m.acknowledged)
+    );
+
+    // Orphans (messages about orders the daemon never mentioned) are capped
+    // per sender, so one key cannot flush everyone else's pending requests...
+    for i in 0..120u64 {
+        let unknown = format!("99999999-0000-0000-0000-{i:012}");
+        let junk = build_test_kind14_event(
+            &spammer,
+            &node.public_key(),
+            &order_message("release", &unknown),
+            Some(base + 1000 + i),
+        );
+        chat::process_event(&junk, &node, &mut cache).unwrap();
+    }
+    assert_eq!(cache.orphan_count(), 50);
+    assert_eq!(cache.order_count(), 1);
+    // ...and in total, whatever the number of keys.
+    for i in 0..2100u64 {
+        let message = ChatMessage {
+            id: format!("{i:064x}"),
+            order_id: format!("88888888-0000-0000-0000-{i:012}"),
+            sender: format!("npub-{i}"),
+            recipient: None,
+            created_at: base + 2000 + i,
+            kind: 14,
+            action: Some("release".into()),
+            content: String::new(),
+            is_from_me: false,
+            role: "user".into(),
+            variant: "order".into(),
+            dispute_id: None,
+            acknowledged: false,
+        };
+        assert!(cache.insert_user_message(message, format!("{i:064x}")));
+    }
+    assert_eq!(cache.orphan_count(), 2000);
+    assert_eq!(cache.order_count(), 1);
+
+    // Threads are capped at 1000 orders: the stalest one leaves first.
+    for i in 0..1000u64 {
+        let other = format!("aaaaaaaa-0000-0000-0000-{i:012}");
+        let event = build_test_kind14_event(
+            &node,
+            &maker.public_key(),
+            &order_message("new-order", &other),
+            Some(base + 5000 + i),
+        );
+        chat::process_event(&event, &node, &mut cache).unwrap();
+    }
+    assert_eq!(cache.order_count(), 1000);
+    assert_eq!(cache.to_history(order_id).count, 0, "oldest thread evicted");
+}
+
+fn test_app(root: &std::path::Path, orders: OrdersCache, chat_cache: ChatCache) -> axum::Router {
     let initial_config: Configuration =
         serde_json::from_str(include_str!("fixtures/community.json")).unwrap();
     let (tx, _rx) = watch::channel(MonitorCommand {
         config: initial_config,
         npub: None,
     });
-
-    let chat_cache = Arc::new(RwLock::new(ChatCache::new()));
-    let order_id = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
-
-    // Preload one message in cache
-    {
-        let mut w = chat_cache.write().await;
-        w.insert(chat::ChatMessage {
-            id: "event-123".into(),
-            order_id: order_id.into(),
-            sender: "npub-trader".into(),
-            recipient: Some("npub-comm".into()),
-            created_at: 1700000000,
-            kind: 4,
-            action: Some("dispute".into()),
-            content: "Pago no recibido".into(),
-            is_from_me: false,
-        });
-    }
-
-    let app = router(AppState::new(
+    router(AppState::new(
         Arc::new(Mutex::new(Store::open(root.into()).unwrap())),
         Integrations::default(),
-        Arc::new(RwLock::new(OrdersCache::new())),
-        chat_cache,
+        Arc::new(RwLock::new(orders)),
+        Arc::new(RwLock::new(chat_cache)),
         tx,
-    ));
+    ))
+}
+
+async fn get_json(app: &axum::Router, uri: &str, protected: bool) -> (StatusCode, Vec<u8>) {
+    let mut request = Request::builder().method("GET").uri(uri);
+    if protected {
+        request = request.header("x-requested-with", "mostro-community");
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    (status, body.to_vec())
+}
+
+#[tokio::test]
+async fn test_http_chat_endpoint_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = fixture_keys(1);
+    identity::import(
+        dir.path(),
+        &node.secret_key().to_bech32().unwrap(),
+        &node.public_key().to_bech32().unwrap(),
+    )
+    .unwrap();
+    let mut cache = ChatCache::new();
+    replay_real_traffic(&node, &mut cache);
+    let app = test_app(dir.path(), OrdersCache::new(), cache);
 
     // 1. Missing protection header -> 403 Forbidden
-    let req = Request::builder()
-        .method("GET")
-        .uri(format!("/api/chat/{order_id}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let (status, _) = get_json(&app, &format!("/api/chat/{REAL_ORDER}"), false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     // 2. Invalid UUID format -> 400 Bad Request
-    let req = Request::builder()
-        .method("GET")
-        .uri("/api/chat/not-a-valid-uuid")
-        .header("x-requested-with", "mostro-community")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let (status, _) = get_json(&app, "/api/chat/not-a-valid-uuid", true).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // 3. Valid UUID with no messages -> 200 OK with empty count
     let other_uuid = "00000000-0000-0000-0000-000000000000";
-    let req = Request::builder()
-        .method("GET")
-        .uri(format!("/api/chat/{other_uuid}"))
-        .header("x-requested-with", "mostro-community")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let history: chat::ChatHistory = serde_json::from_slice(&body_bytes).unwrap();
+    let (status, body) = get_json(&app, &format!("/api/chat/{other_uuid}"), true).await;
+    assert_eq!(status, StatusCode::OK);
+    let history: chat::ChatHistory = serde_json::from_slice(&body).unwrap();
     assert_eq!(history.order_id, other_uuid);
     assert_eq!(history.count, 0);
     assert!(history.messages.is_empty());
+    assert_eq!(history.dispute_id, None);
 
-    // 4. Valid UUID with message -> 200 OK with history
-    let req = Request::builder()
-        .method("GET")
-        .uri(format!("/api/chat/{order_id}"))
-        .header("x-requested-with", "mostro-community")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let history: chat::ChatHistory = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(history.order_id, order_id);
-    assert_eq!(history.count, 1);
-    assert_eq!(history.messages[0].content, "Pago no recibido");
-    assert_eq!(history.messages[0].action.as_deref(), Some("dispute"));
+    // 4. Valid UUID with messages -> 200 OK with history
+    let (status, body) = get_json(&app, &format!("/api/chat/{REAL_ORDER}"), true).await;
+    assert_eq!(status, StatusCode::OK);
+    let history: chat::ChatHistory = serde_json::from_slice(&body).unwrap();
+    assert_eq!(history.order_id, REAL_ORDER);
+    assert_eq!(history.count, 26);
+    assert_eq!(history.dispute_id.as_deref(), Some(REAL_DISPUTE));
+    assert_eq!(history.messages[0].action.as_deref(), Some("new-order"));
+    assert_eq!(history.messages[0].role, "daemon");
 
     // 5. Ensure nsec or secrets are NEVER in response
-    let json_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+    let json_text = String::from_utf8(body).unwrap();
     assert!(!json_text.contains("nsec"));
     assert!(!json_text.contains("secret"));
+    assert!(!json_text.contains("preimage"));
+    assert!(!json_text.contains("d911ec67fb78a65c"));
+}
+
+#[tokio::test]
+async fn test_http_disputes_endpoint_links_public_disputes_to_orders() {
+    let dir = tempfile::tempdir().unwrap();
+    let node = fixture_keys(1);
+    let mut cache = ChatCache::new();
+    replay_real_traffic(&node, &mut cache);
+
+    let mut orders = OrdersCache::new();
+    let dispute = |id: &str, status: &str, updated_at: u64| DisputeSummary {
+        id: id.into(),
+        event_id: "e".repeat(64),
+        status: status.into(),
+        initiator: Some("buyer".into()),
+        published_at: Some(1_791_063_450),
+        updated_at,
+    };
+    assert_eq!(
+        orders.try_insert_dispute(dispute(REAL_DISPUTE, "initiated", 10), 0),
+        Some(None)
+    );
+    let unknown = "55555555-6666-7777-8888-999999999999";
+    assert_eq!(
+        orders.try_insert_dispute(dispute(unknown, "settled", 5), 0),
+        Some(None)
+    );
+    let app = test_app(dir.path(), orders, cache);
+
+    let (status, _) = get_json(&app, "/api/disputes", false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = get_json(&app, "/api/disputes", true).await;
+    assert_eq!(status, StatusCode::OK);
+    let disputes: Vec<chat::DisputeView> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(disputes.len(), 2);
+    // Newest first. The order is known only for the dispute the daemon's own
+    // messages mentioned; the public event never carries it.
+    assert_eq!(disputes[0].dispute.id, REAL_DISPUTE);
+    assert_eq!(disputes[0].order_id.as_deref(), Some(REAL_ORDER));
+    assert!(disputes[0].is_open);
+    assert_eq!(disputes[1].dispute.id, unknown);
+    assert_eq!(disputes[1].order_id, None);
+    assert!(!disputes[1].is_open);
+    let flat: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(flat[0]["status"], "initiated");
+    assert_eq!(flat[0]["initiator"], "buyer");
 }
 
 #[tokio::test]
@@ -502,29 +1253,32 @@ async fn test_chat_worker_with_mock_relay() {
         timing,
     ));
 
-    // Verify worker connected and sent REQ
-    let req1 = req_rx.recv().await.expect("Subscription 1");
-    assert!(req1.contains("REQ"));
+    // The worker subscribes to protocol v2 only: kind 14 to and from the node,
+    // bounded in time and size.
+    let node_hex = comm_keys.public_key().to_hex();
+    for (sub, selector) in [("mostro_chat_recv", "#p"), ("mostro_chat_sent", "authors")] {
+        let req = req_rx.recv().await.expect("subscription");
+        let parsed: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(parsed[0], "REQ");
+        assert_eq!(parsed[1], sub);
+        assert_eq!(parsed[2]["kinds"], serde_json::json!([14]));
+        assert_eq!(parsed[2][selector], serde_json::json!([node_hex]));
+        assert!(parsed[2]["since"].as_u64().is_some());
+        assert_eq!(parsed[2]["limit"], 2000);
+    }
 
     let order_id = "88888888-9999-aaaa-bbbb-cccccccccccc";
-    let payload = serde_json::json!({
-        "order_id": order_id,
-        "action": "dispute",
-        "text": "Comprobante falso presentado por comprador"
-    })
-    .to_string();
-
-    let event = build_test_nip04_event(
-        &trader_keys,
-        &comm_keys.public_key(),
-        &payload,
-        Some(order_id),
+    let reply = build_test_kind14_event(
+        &comm_keys,
+        &trader_keys.public_key(),
+        &order_message("dispute-initiated-by-you", order_id),
+        None,
     );
-
-    // Send EVENT from mock relay to chat worker
-    let event_json = serde_json::to_string(&event).unwrap();
     resp_tx
-        .send(format!("[\"EVENT\", \"mostro_chat_recv\", {}]", event_json))
+        .send(format!(
+            r#"["EVENT", "mostro_chat_sent", {}]"#,
+            serde_json::to_string(&reply).unwrap()
+        ))
         .await
         .unwrap();
 
@@ -536,65 +1290,16 @@ async fn test_chat_worker_with_mock_relay() {
         let history = r.to_history(order_id);
         assert_eq!(
             history.count, 1,
-            "El mensaje de disputa debe ser recibido y descifrado por el chat_worker"
+            "El mensaje del daemon debe ser recibido y descifrado por el chat_worker"
         );
-        assert_eq!(history.messages[0].id, event.id.to_hex());
+        assert_eq!(history.messages[0].id, reply.id.to_hex());
         assert_eq!(
-            history.messages[0].content,
-            "Comprobante falso presentado por comprador"
+            history.messages[0].action.as_deref(),
+            Some("dispute-initiated-by-you")
         );
     }
 
     drop(config_tx);
     worker_handle.abort();
     relay_handle.abort();
-}
-
-#[tokio::test]
-async fn test_kind14_protocol_v2_decryption_and_cache() {
-    let comm_keys = fixture_keys(1);
-    let trader_keys = fixture_keys(2);
-
-    let order_id = "55555555-4444-3333-2222-111111111111";
-    // Protocol v2 3-element tuple payload
-    let payload = serde_json::json!([
-        {
-            "order": {
-                "version": 2,
-                "id": order_id,
-                "action": "FiatSent",
-                "content": {
-                    "text": "Pago enviado mediante transferencia bancaria"
-                }
-            }
-        },
-        null,
-        null
-    ])
-    .to_string();
-
-    let event = build_test_kind14_event(
-        &trader_keys,
-        &comm_keys.public_key(),
-        &payload,
-        Some(order_id),
-    );
-
-    let mut cache = ChatCache::default();
-    let res = chat::process_event(&event, &comm_keys, &mut cache).await;
-    assert!(res.is_ok(), "Kind 14 process_event debe tener éxito");
-    let msg_opt = res.unwrap();
-    assert!(msg_opt.is_some());
-    let msg = msg_opt.unwrap();
-
-    assert_eq!(msg.kind, 14);
-    assert_eq!(msg.order_id, order_id);
-    assert_eq!(msg.action.as_deref(), Some("FiatSent"));
-    assert_eq!(msg.content, "Pago enviado mediante transferencia bancaria");
-    assert!(!msg.is_from_me);
-
-    let history = cache.to_history(order_id);
-    assert_eq!(history.count, 1);
-    assert_eq!(history.messages[0].id, event.id.to_hex());
-    assert_eq!(history.messages[0].kind, 14);
 }

@@ -64,8 +64,10 @@ impl Notification {
         }
     }
 
+    /// `reference` is the dispute id announced by the daemon in kind 38386.
+    /// That event never names the order, so neither does this alert.
     pub fn dispute_alert(
-        order_id: &str,
+        reference: &str,
         message: &str,
         details: Option<serde_json::Value>,
     ) -> Self {
@@ -77,7 +79,7 @@ impl Notification {
             id: format!("dispute-{timestamp}-{}", fastrand()),
             level: "warning".to_string(),
             category: "dispute".to_string(),
-            title: format!("Disputa en orden {order_id}"),
+            title: format!("Disputa abierta {reference}"),
             message: message.to_string(),
             timestamp,
             details,

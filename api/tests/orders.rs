@@ -2,11 +2,14 @@ use futures_util::{SinkExt, StreamExt};
 use mostro_community_api::{
     config::{BondApply, Community, Configuration, Market, Nostr, Safety},
     orders::{
-        MonitorCommand, MonitorState, MonitorTiming, OrdersCache, SharedOrders, is_valid_uuid,
-        parse_and_validate_order_event,
+        MonitorCommand, MonitorState, MonitorTiming, OrdersCache, PUBLIC_ORDER_STATUSES,
+        SharedOrders, is_closed_status, is_open_dispute_status, is_valid_status, is_valid_uuid,
+        parse_and_validate_order_event, parse_dispute_event, parse_node_info_event,
     },
 };
-use nostr::{EventBuilder, Keys, SecretKey, Tag, Timestamp, ToBech32, event::tag::TagKind};
+use nostr::{
+    Event, EventBuilder, Keys, PublicKey, SecretKey, Tag, Timestamp, ToBech32, event::tag::TagKind,
+};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc, watch};
@@ -576,4 +579,645 @@ async fn test_monitor_unconfigured_state_when_missing_identity() {
 
     drop(config_tx);
     worker_handle.abort();
+}
+
+// ── Real events published by mostrod v0.19.2 on regtest ───────────────────────
+
+/// Events captured from the official v0.19.2 binary (see the fixture folder).
+struct RealEvents {
+    node: PublicKey,
+    doc: serde_json::Value,
+}
+
+impl RealEvents {
+    fn load() -> Self {
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/mostrod-v0.19.2/public-events.json"))
+                .unwrap();
+        let node = PublicKey::from_hex(doc["node_pubkey"].as_str().unwrap()).unwrap();
+        Self { node, doc }
+    }
+
+    fn order(&self, name: &str) -> Vec<Event> {
+        serde_json::from_value(self.doc["orders"][name].clone()).unwrap()
+    }
+
+    fn list(&self, key: &str) -> Vec<Event> {
+        serde_json::from_value(self.doc[key].clone()).unwrap()
+    }
+}
+
+/// Flows the first capture did not cover (2026-10-04): a take with the invoice
+/// attached, a range order, a taken buy order, a taker who walks away, a
+/// cooperative cancel, a dispute refunded to the seller, and a node with the
+/// anti-abuse bond enabled.
+struct MoreRealEvents {
+    node: PublicKey,
+    bonded_node: PublicKey,
+    doc: serde_json::Value,
+}
+
+impl MoreRealEvents {
+    fn load() -> Self {
+        let doc: serde_json::Value = serde_json::from_str(include_str!(
+            "fixtures/mostrod-v0.19.2/public-events-2.json"
+        ))
+        .unwrap();
+        let key = |name: &str| PublicKey::from_hex(doc[name].as_str().unwrap()).unwrap();
+        Self {
+            node: key("node_pubkey"),
+            bonded_node: key("bonded_node_pubkey"),
+            doc: doc.clone(),
+        }
+    }
+
+    fn order(&self, name: &str) -> Vec<Event> {
+        serde_json::from_value(self.doc["orders"][name].clone()).unwrap()
+    }
+
+    fn dispute(&self, name: &str) -> Vec<Event> {
+        serde_json::from_value(self.doc["disputes"][name].clone()).unwrap()
+    }
+
+    fn bonded_info(&self) -> Event {
+        serde_json::from_value(self.doc["bonded_info"].clone()).unwrap()
+    }
+
+    /// `status:sats:fiat` of every published revision of an order.
+    fn flow(&self, name: &str, node: &PublicKey) -> Vec<String> {
+        self.order(name)
+            .iter()
+            .map(|event| {
+                let (summary, _) = parse_and_validate_order_event(event, node, seen_at(event), 60)
+                    .expect("a real mostrod event must parse");
+                format!(
+                    "{}:{}:{}",
+                    summary.status,
+                    summary.amount_sats,
+                    summary.fiat_amount_range.join("-")
+                )
+            })
+            .collect()
+    }
+}
+
+/// The captured events carry a NIP-40 expiration, so they are parsed as of
+/// the moment they were published.
+fn seen_at(event: &Event) -> u64 {
+    event.created_at.as_secs() + 5
+}
+
+#[test]
+fn parses_every_order_shape_mostrod_v0_19_2_publishes() {
+    let real = RealEvents::load();
+    let parse = |event: &Event| {
+        parse_and_validate_order_event(event, &real.node, seen_at(event), 60)
+            .expect("a real mostrod event must parse")
+    };
+
+    // Fixed price: sats set by the maker, premium 0.
+    let (fixed, closed) = parse(&real.order("fixed_sats_premium_0")[0]);
+    assert_eq!(
+        (fixed.kind.as_str(), fixed.status.as_str()),
+        ("sell", "pending")
+    );
+    assert_eq!(fixed.amount_sats, 118_055);
+    assert_eq!(fixed.premium, 0);
+    assert_eq!(fixed.fiat_code, "USD");
+    assert_eq!(fixed.fiat_amount_range, ["100"]);
+    assert_eq!(fixed.payment_methods, ["Transferencia bancaria"]);
+    assert_eq!(fixed.published_at, Some(1_791_062_849));
+    assert_eq!(fixed.expires_at, Some(1_791_149_249));
+    assert!(!closed);
+
+    // Market price: amt 0 and the premium the maker asked for.
+    let (market, _) = parse(&real.order("market_premium_5")[0]);
+    assert_eq!((market.amount_sats, market.premium), (0, 5));
+    let (negative, _) = parse(&real.order("market_premium_negative")[0]);
+    assert_eq!((negative.amount_sats, negative.premium), (0, -3));
+    let (buy, _) = parse(&real.order("buy_market_premium_3")[0]);
+    assert_eq!((buy.kind.as_str(), buy.premium), ("buy", 3));
+
+    // Range order: two values in `fa`, amt 0.
+    let (range, _) = parse(&real.order("range_premium_2")[0]);
+    assert_eq!(range.fiat_amount_range, ["50", "200"]);
+    assert_eq!((range.amount_sats, range.premium), (0, 2));
+}
+
+#[test]
+fn follows_a_real_trade_from_pending_to_success() {
+    let real = RealEvents::load();
+    let revisions = real.order("full_trade");
+    let statuses: Vec<(String, u64, bool)> = revisions
+        .iter()
+        .map(|event| {
+            let (summary, closed) =
+                parse_and_validate_order_event(event, &real.node, seen_at(event), 60).unwrap();
+            (summary.status, summary.amount_sats, closed)
+        })
+        .collect();
+    // A taken order is published as `in-progress` with the sats the daemon
+    // priced at take time; the old whitelist rejected it and froze the order
+    // as an open offer.
+    assert_eq!(
+        statuses,
+        [
+            ("pending".to_string(), 0, false),
+            ("in-progress".to_string(), 56_076, false),
+            ("success".to_string(), 56_076, true),
+        ]
+    );
+
+    let mut cache = OrdersCache::new();
+    for event in revisions.iter().take(2) {
+        let (summary, closed) =
+            parse_and_validate_order_event(event, &real.node, seen_at(event), 60).unwrap();
+        assert!(cache.try_insert_event(event.clone(), summary.id, closed, 0));
+    }
+    let id = "4bba5a60-ed92-4419-b96d-370844ea575e";
+    assert_eq!(
+        cache.events[id].id, revisions[1].id,
+        "in-progress replaced pending"
+    );
+
+    let (summary, closed) =
+        parse_and_validate_order_event(&revisions[2], &real.node, seen_at(&revisions[2]), 60)
+            .unwrap();
+    assert!(cache.try_insert_event(revisions[2].clone(), summary.id, closed, 0));
+    assert!(cache.closed_orders.contains_key(id));
+    // A relay replaying the stale open revisions cannot reopen a closed order.
+    assert!(!cache.try_insert_event(revisions[0].clone(), id.into(), false, 0));
+    assert!(!cache.try_insert_event(revisions[1].clone(), id.into(), false, 0));
+}
+
+#[test]
+fn status_rules_match_what_mostrod_publishes() {
+    for status in PUBLIC_ORDER_STATUSES {
+        assert!(is_valid_status(status), "{status} must be accepted");
+    }
+    for closed in ["success", "canceled", "completed-by-admin"] {
+        assert!(is_closed_status(closed));
+    }
+    for open in ["pending", "in-progress"] {
+        assert!(!is_closed_status(open));
+    }
+    // A status added by a later daemon is kept, not dropped.
+    assert!(is_valid_status("some-future-status"));
+    for malformed in ["", "Pending", "in progress", "<script>", &"x".repeat(41)] {
+        assert!(
+            !is_valid_status(malformed),
+            "{malformed:?} must be rejected"
+        );
+    }
+
+    // An admin-resolved order closes like any other.
+    let keys = Keys::new(SecretKey::from_slice(&[1; 32]).unwrap());
+    let now = Timestamp::now().as_secs();
+    let uuid = "550e8400-e29b-41d4-a716-446655440000";
+    let event = build_order_event(&keys, uuid, "sell", "completed-by-admin", now, None, None);
+    let (summary, closed) =
+        parse_and_validate_order_event(&event, &keys.public_key(), now, 60).unwrap();
+    assert_eq!(summary.status, "completed-by-admin");
+    assert!(closed);
+}
+
+#[test]
+fn an_order_without_currency_is_rejected() {
+    let keys = Keys::new(SecretKey::from_slice(&[1; 32]).unwrap());
+    let now = Timestamp::now().as_secs();
+    let event = EventBuilder::new(nostr::Kind::Custom(38383), "")
+        .tags(vec![
+            Tag::custom(TagKind::Custom("y".into()), vec!["mostro"]),
+            Tag::custom(TagKind::Custom("z".into()), vec!["order"]),
+            Tag::identifier("550e8400-e29b-41d4-a716-446655440000"),
+            Tag::custom(TagKind::Custom("k".into()), vec!["sell"]),
+            Tag::custom(TagKind::Custom("s".into()), vec!["pending"]),
+            Tag::custom(TagKind::Custom("f".into()), vec!["DOLLARS"]),
+        ])
+        .sign_with_keys(&keys)
+        .unwrap();
+    // mostrod always sends a 3-letter `f` tag; inventing a currency would
+    // show a false market.
+    assert!(parse_and_validate_order_event(&event, &keys.public_key(), now, 60).is_err());
+}
+
+#[test]
+fn parses_real_dispute_events_and_tracks_their_status() {
+    let real = RealEvents::load();
+    let events = real.list("disputes");
+    let parsed: Vec<_> = events
+        .iter()
+        .map(|event| parse_dispute_event(event, &real.node, seen_at(event), 60).unwrap())
+        .collect();
+    let id = "3d62ac23-24b6-4846-8047-4eea1bd22235";
+    assert!(parsed.iter().all(|d| d.id == id));
+    assert!(
+        parsed
+            .iter()
+            .all(|d| d.initiator.as_deref() == Some("buyer"))
+    );
+    assert!(parsed.iter().all(|d| d.published_at == Some(1_791_063_450)));
+    assert_eq!(
+        parsed.iter().map(|d| d.status.as_str()).collect::<Vec<_>>(),
+        ["initiated", "in-progress", "settled"]
+    );
+    assert!(is_open_dispute_status("initiated"));
+    assert!(is_open_dispute_status("in-progress"));
+    assert!(!is_open_dispute_status("settled"));
+    assert!(!is_open_dispute_status("seller-refunded"));
+
+    let mut cache = OrdersCache::new();
+    // A worker left over from a previous identity or relay set (another
+    // generation) cannot write into the current cache, even news.
+    assert_eq!(cache.try_insert_dispute(parsed[0].clone(), 1), None);
+    assert!(cache.to_snapshot().disputes.is_empty());
+    assert_eq!(cache.try_insert_dispute(parsed[0].clone(), 0), Some(None));
+    // The same revision from a second relay is not news.
+    assert_eq!(cache.try_insert_dispute(parsed[0].clone(), 0), None);
+    assert_eq!(
+        cache.try_insert_dispute(parsed[2].clone(), 0),
+        Some(Some("initiated".into()))
+    );
+    // A stale revision never overwrites the resolution.
+    assert_eq!(cache.try_insert_dispute(parsed[1].clone(), 0), None);
+    let snapshot = cache.to_snapshot();
+    assert_eq!(snapshot.disputes.len(), 1);
+    assert_eq!(snapshot.disputes[0].status, "settled");
+
+    // An order event is not a dispute, and another author is not the node.
+    let order = &real.order("full_trade")[0];
+    assert!(parse_dispute_event(order, &real.node, seen_at(order), 60).is_err());
+    let stranger = Keys::new(SecretKey::from_slice(&[9; 32]).unwrap()).public_key();
+    assert!(parse_dispute_event(&events[0], &stranger, seen_at(&events[0]), 60).is_err());
+}
+
+#[test]
+fn reads_the_version_the_daemon_announces_about_itself() {
+    let real = RealEvents::load();
+    let event = &real.list("info")[0];
+    let info = parse_node_info_event(event, &real.node, seen_at(event), 60).unwrap();
+    assert_eq!(info.mostro_version.as_deref(), Some("0.19.2"));
+    assert_eq!(info.protocol_version.as_deref(), Some("2"));
+    assert_eq!(info.name.as_deref(), Some("BitMaxis - Regtest"));
+    assert_eq!(info.tags["fee"], "0.006");
+    assert_eq!(info.tags["min_order_amount"], "1000");
+    assert_eq!(info.tags["max_order_amount"], "1000000");
+    assert_eq!(info.tags["fiat_currencies_accepted"], "USD");
+    assert_eq!(info.tags["bond_enabled"], "false");
+    assert_eq!(info.tags["maintenance_mode"], "false");
+    assert_eq!(info.tags["lnd_networks"], "regtest");
+    // With the bond disabled mostrod sends no bond detail tags.
+    assert!(!info.tags.contains_key("bond_amount_pct"));
+
+    let mut cache = OrdersCache::new();
+    assert!(
+        !cache.try_set_node_info(info.clone(), 7),
+        "a worker of another generation cannot set the node info"
+    );
+    assert!(cache.to_snapshot().node_info.is_none());
+    assert!(cache.try_set_node_info(info.clone(), 0));
+    assert!(
+        !cache.try_set_node_info(info.clone(), 0),
+        "same event again"
+    );
+    let mut newer = info.clone();
+    newer.created_at += 300;
+    newer.mostro_version = Some("9.9.9".into());
+    assert!(
+        cache.try_set_node_info(newer, 0),
+        "a newer announcement replaces it"
+    );
+    assert!(
+        !cache.try_set_node_info(info.clone(), 0),
+        "an older one does not"
+    );
+    assert!(cache.try_set_node_info(
+        {
+            let mut latest = info.clone();
+            latest.created_at += 600;
+            latest
+        },
+        0
+    ));
+    assert_eq!(cache.node_info_age_secs(info.created_at + 642), Some(42));
+    let snapshot = cache.to_snapshot();
+    assert_eq!(
+        snapshot.node_info.unwrap().mostro_version.as_deref(),
+        Some("0.19.2")
+    );
+
+    // Only the node's own info event counts.
+    let stranger = Keys::new(SecretKey::from_slice(&[9; 32]).unwrap()).public_key();
+    assert!(parse_node_info_event(event, &stranger, seen_at(event), 60).is_err());
+    let order = &real.order("full_trade")[0];
+    assert!(parse_node_info_event(order, &real.node, seen_at(order), 60).is_err());
+}
+
+/// Signs, with a test key and the current time, an event carrying the same
+/// tags as a captured one. The captured events have absolute timestamps and a
+/// NIP-40 expiration, so the live worker can only be fed fresh copies.
+fn resign_now(captured: &Event, keys: &Keys, now: u64) -> Event {
+    let tags: Vec<Tag> = captured
+        .tags
+        .iter()
+        .map(|tag| {
+            let parts = tag.as_slice();
+            let values: Vec<String> = match parts[0].as_str() {
+                // The info event is addressed by the node's own pubkey.
+                "d" if captured.kind.as_u16() == 38385 => vec![keys.public_key().to_hex()],
+                "expiration" => vec![(now + 3600).to_string()],
+                "published_at" => vec![now.to_string()],
+                _ => parts[1..].to_vec(),
+            };
+            Tag::custom(TagKind::Custom(parts[0].clone().into()), values)
+        })
+        .collect();
+    EventBuilder::new(captured.kind, "")
+        .tags(tags)
+        .custom_created_at(Timestamp::from(now))
+        .sign_with_keys(keys)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_monitor_subscribes_to_orders_info_and_disputes() {
+    let real = RealEvents::load();
+    let keys = Keys::new(SecretKey::from_slice(&[77; 32]).unwrap());
+    let npub = keys.public_key().to_bech32().unwrap();
+    let (relay_url, mut req_rx, resp_tx, relay_handle) = spawn_mock_relay().await;
+
+    let cache: SharedOrders = Arc::new(RwLock::new(OrdersCache::new()));
+    let (config_tx, config_rx) = watch::channel(MonitorCommand {
+        config: valid_config(vec![relay_url]),
+        npub: Some(npub),
+    });
+    let worker = tokio::spawn(mostro_community_api::orders::monitor_worker(
+        cache.clone(),
+        config_rx,
+        MonitorTiming::test_timing(),
+    ));
+
+    let req = tokio::time::timeout(std::time::Duration::from_millis(500), req_rx.recv())
+        .await
+        .expect("REQ")
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&req).unwrap();
+    assert_eq!(parsed[2]["kinds"], serde_json::json!([38383, 38385, 38386]));
+    assert_eq!(
+        parsed[2]["authors"],
+        serde_json::json!([keys.public_key().to_hex()])
+    );
+
+    // The tag sets are the ones mostrod v0.19.2 really publishes.
+    let now = Timestamp::now().as_secs();
+    let dispute = resign_now(&real.list("disputes")[2], &keys, now);
+    let info = resign_now(&real.list("info")[0], &keys, now);
+    let order = resign_now(&real.order("full_trade")[1], &keys, now);
+    // Events signed by anyone else are not the node's.
+    let stranger = Keys::new(SecretKey::from_slice(&[78; 32]).unwrap());
+    let forged_info = resign_now(&real.list("info")[0], &stranger, now + 1);
+    for event in [&dispute, &info, &order, &forged_info] {
+        resp_tx
+            .send(format!(
+                r#"["EVENT", "mostro_monitor", {}]"#,
+                serde_json::to_string(event).unwrap()
+            ))
+            .await
+            .unwrap();
+    }
+    resp_tx
+        .send(r#"["EOSE", "mostro_monitor"]"#.to_string())
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    {
+        let snapshot = cache.read().await.to_snapshot();
+        assert_eq!(snapshot.state, MonitorState::Live);
+        let announced = snapshot.node_info.expect("node info from the relay");
+        assert_eq!(announced.event_id, info.id.to_hex());
+        assert_eq!(announced.mostro_version.as_deref(), Some("0.19.2"));
+        assert!(snapshot.node_info_age_secs.is_some_and(|age| age < 30));
+        assert_eq!(snapshot.disputes.len(), 1);
+        assert_eq!(snapshot.disputes[0].status, "settled");
+        assert_eq!(snapshot.disputes[0].event_id, dispute.id.to_hex());
+        assert_eq!(snapshot.orders.len(), 1);
+        assert_eq!(snapshot.orders[0].status, "in-progress");
+        assert_eq!(snapshot.orders[0].amount_sats, 56_076);
+    }
+
+    drop(config_tx);
+    worker.abort();
+    relay_handle.abort();
+}
+
+#[test]
+fn closed_orders_make_room_for_new_ones() {
+    let keys = Keys::new(SecretKey::from_slice(&[1; 32]).unwrap());
+    let now = Timestamp::now().as_secs();
+    let mut cache = OrdersCache::new();
+    let uuid = |i: usize| format!("00000000-0000-0000-0000-{i:012}");
+
+    // 1000 orders: the first 10 closed, the rest open.
+    for i in 0..1000 {
+        let status = if i < 10 { "success" } else { "pending" };
+        let event = build_order_event(
+            &keys,
+            &uuid(i),
+            "sell",
+            status,
+            now - 5000 + i as u64,
+            None,
+            None,
+        );
+        assert!(cache.try_insert_event(event, uuid(i), i < 10, 0));
+    }
+    assert_eq!(cache.events.len(), 1000);
+
+    // A new order evicts the oldest closed one instead of being dropped.
+    let event = build_order_event(&keys, &uuid(5000), "buy", "pending", now, None, None);
+    assert!(cache.try_insert_event(event, uuid(5000), false, 0));
+    assert_eq!(cache.events.len(), 1000);
+    assert!(!cache.events.contains_key(&uuid(0)));
+    assert!(cache.events.contains_key(&uuid(1)));
+    // Its tombstone stays, so a replayed open revision cannot bring it back.
+    assert!(cache.closed_orders.contains_key(&uuid(0)));
+
+    // With only open orders left there is nothing safe to evict.
+    for i in 1..10 {
+        let event = build_order_event(&keys, &uuid(6000 + i), "buy", "pending", now, None, None);
+        assert!(cache.try_insert_event(event, uuid(6000 + i), false, 0));
+    }
+    let event = build_order_event(&keys, &uuid(7000), "buy", "pending", now, None, None);
+    assert!(!cache.try_insert_event(event, uuid(7000), false, 0));
+    assert_eq!(cache.events.len(), 1000);
+}
+
+/// What mostrod v0.19.2 really publishes for each kind of flow. The public
+/// status is coarse: it is what a monitor can know, no more.
+#[test]
+fn public_status_of_every_real_flow() {
+    let real = MoreRealEvents::load();
+    let flow = |name: &str| real.flow(name, &real.node);
+
+    // A sell order taken with the buyer's invoice attached skips the wait for
+    // the invoice: it is never published as in-progress and stays `pending`
+    // on the relays until it closes.
+    assert_eq!(
+        flow("inline_invoice_take"),
+        ["pending:0:30", "success:35184:30"]
+    );
+    // A range order publishes both bounds; once taken, the chosen amount.
+    assert_eq!(
+        flow("range_taken"),
+        [
+            "pending:0:20-60",
+            "in-progress:34480:30",
+            "success:34480:30"
+        ]
+    );
+    assert_eq!(
+        flow("buy_taken"),
+        ["pending:0:30", "in-progress:35184:30", "success:35184:30"]
+    );
+    // A solver's refund and a cooperative cancel look the same in public.
+    for canceled in ["admin_canceled", "cooperative_cancel"] {
+        assert_eq!(
+            flow(canceled),
+            ["pending:0:30", "in-progress:35184:30", "canceled:35184:30"]
+        );
+    }
+    // The taker left before sending the invoice: the order is offered again.
+    assert_eq!(
+        flow("taker_walked_away"),
+        [
+            "pending:0:30",
+            "in-progress:35184:30",
+            "pending:0:30",
+            "canceled:0:30"
+        ]
+    );
+    // With bonds the published statuses are the same.
+    assert_eq!(
+        real.flow("bonded_trade", &real.bonded_node),
+        ["pending:0:30", "in-progress:35186:30", "success:35186:30"]
+    );
+    // A maker in reputation mode: the pending revision carries the maker's
+    // rating, which does not change how the order is read.
+    let bonded = |name: &str| real.flow(name, &real.bonded_node);
+    assert_eq!(
+        bonded("reputation_trade"),
+        ["pending:0:30", "in-progress:35169:30", "success:35169:30"]
+    );
+    assert_eq!(
+        bonded("rated_maker_canceled"),
+        ["pending:0:30", "canceled:0:30"]
+    );
+    let rating_of = |name: &str| -> serde_json::Value {
+        let pending = &real.order(name)[0];
+        let tag = pending
+            .tags
+            .iter()
+            .find(|tag| tag.kind().to_string() == "rating")
+            .expect("a pending order carries the maker rating");
+        serde_json::from_str(tag.content().unwrap()).unwrap()
+    };
+    // Reputation mode adds `since`; a full-privacy maker has no history.
+    assert_eq!(rating_of("rated_maker_canceled")[1]["total_reviews"], 1);
+    assert!(rating_of("rated_maker_canceled")[1]["since"].is_u64());
+    assert!(rating_of("inline_invoice_take")[1].get("since").is_none());
+}
+
+#[test]
+fn an_order_is_open_again_when_the_taker_walks_away() {
+    let real = MoreRealEvents::load();
+    let revisions = real.order("taker_walked_away");
+    let id = "b231d85e";
+    let insert = |cache: &mut OrdersCache, event: &Event| {
+        let (summary, closed) =
+            parse_and_validate_order_event(event, &real.node, seen_at(event), 60).unwrap();
+        assert!(summary.id.starts_with(id));
+        (
+            cache.try_insert_event(event.clone(), summary.id.clone(), closed, 0),
+            summary.id,
+        )
+    };
+
+    let mut cache = OrdersCache::new();
+    let mut order_id = String::new();
+    for event in &revisions[..3] {
+        let (inserted, full_id) = insert(&mut cache, event);
+        assert!(inserted);
+        order_id = full_id;
+    }
+    // pending → in-progress → pending: the newest revision wins and nothing
+    // was tombstoned, so the order shows as an open offer again.
+    assert_eq!(cache.events[&order_id].id, revisions[2].id);
+    assert!(!cache.closed_orders.contains_key(&order_id));
+    // A relay replaying the older in-progress revision changes nothing.
+    assert!(!insert(&mut cache, &revisions[1]).0);
+    assert_eq!(cache.events[&order_id].id, revisions[2].id);
+
+    assert!(insert(&mut cache, &revisions[3]).0);
+    assert!(cache.closed_orders.contains_key(&order_id));
+    assert!(
+        !insert(&mut cache, &revisions[2]).0,
+        "a closed order stays closed"
+    );
+}
+
+#[test]
+fn reads_the_bond_policy_a_node_announces() {
+    let real = MoreRealEvents::load();
+    let event = real.bonded_info();
+    let info = parse_node_info_event(&event, &real.bonded_node, seen_at(&event), 60).unwrap();
+    assert_eq!(info.mostro_version.as_deref(), Some("0.19.2"));
+    // These are the values the Manager rendered into settings.toml for that
+    // node: 3 % with a 1000 sats floor for both sides, first-contact PoW 8.
+    for (tag, expected) in [
+        ("bond_enabled", "true"),
+        ("bond_amount_pct", "0.03"),
+        ("bond_base_amount_sats", "1000"),
+        ("bond_apply_to", "both"),
+        ("bond_slash_on_waiting_timeout", "false"),
+        ("bond_slash_node_share_pct", "0.5"),
+        ("bond_payout_claim_window_days", "15"),
+        ("pow", "0"),
+        ("pow_first_contact", "8"),
+        ("fee", "0.006"),
+    ] {
+        assert_eq!(
+            info.tags.get(tag).map(String::as_str),
+            Some(expected),
+            "{tag}"
+        );
+    }
+    assert!(parse_node_info_event(&event, &real.node, seen_at(&event), 60).is_err());
+}
+
+#[test]
+fn a_dispute_refunded_to_the_seller_is_closed() {
+    let real = MoreRealEvents::load();
+    let parsed: Vec<_> = real
+        .dispute("seller_refunded")
+        .iter()
+        .map(|event| parse_dispute_event(event, &real.node, seen_at(event), 60).unwrap())
+        .collect();
+    assert_eq!(
+        parsed.iter().map(|d| d.status.as_str()).collect::<Vec<_>>(),
+        ["initiated", "in-progress", "seller-refunded"]
+    );
+    assert!(
+        parsed
+            .iter()
+            .all(|d| d.initiator.as_deref() == Some("seller"))
+    );
+    assert!(is_open_dispute_status(&parsed[1].status));
+    assert!(!is_open_dispute_status(&parsed[2].status));
+
+    let bonded: Vec<_> = real
+        .dispute("settled_on_bonded_node")
+        .iter()
+        .map(|event| parse_dispute_event(event, &real.bonded_node, seen_at(event), 60).unwrap())
+        .collect();
+    assert_eq!(bonded.last().unwrap().status, "settled");
 }

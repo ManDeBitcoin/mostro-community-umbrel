@@ -280,5 +280,76 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
   - Guía completa de despliegue y manual de operaciones redactado en `docs/DEPLOYMENT.md`.
 - Reporte detallado generado en `/tmp/mostro-gemini-module5-report.md`.
 
+## Mostro v0.19.2 e interoperabilidad con apps (2026-10-03 y 2026-10-04)
 
+Validación previa a la versión 1.0.12. El nodo en producción no se tocó: todo se ejecutó en un entorno regtest aislado en el mismo equipo, con puertos locales y una identidad desechable.
 
+### Binario y configuración
+
+- Binarios oficiales `mostrod` v0.19.2 descargados de la release de GitHub. SHA-256 calculados sobre los artefactos y coincidentes con `manifest.txt`: amd64 `4d9aa45bbbca12a16024d72d2bf4f5fcb243196226750c50b741d035ffc2c071`, arm64 `73c69e18f9d417e2e23347770b68be942eb1e28fd69d7180a54d18e9409d6c31`.
+- Firma GPG de `manifest.txt` válida con la clave `1E41631D137BA2ADE55344F73852B843679AD6F0` (negrunch). La clave no está certificada por una cadena de confianza propia.
+- El binario amd64 responde `mostro p2p 0.19.2`. El de arm64 no se ejecutó.
+- `settings.toml` generado por el Manager y cargado por el binario real: `Settings correctly loaded!` y `Transport: nip44 (protocol v2, event kind 14)`.
+- Entre v0.19.0 y v0.19.2 no cambian las migraciones de base de datos ni `proto/admin.proto`, y la plantilla de configuración solo gana un bloque comentado.
+
+### Ciclo completo en regtest
+
+Bitcoin Core 31.1, tres nodos LND 0.21.3-beta (nodo de Mostro, vendedor y comprador) con canales abiertos, un relay Nostr local y un cliente de prueba de protocolo v2 en modo de privacidad total.
+
+- Trece variantes de `new-order`, con los resultados de la tabla de `docs/INTEGRACION-APPS.md`, sección 6.2. La combinación de sats fijos y prima distinta de cero devuelve `cant-do: invalid_parameters`; con `amount = 0` la orden se acepta.
+- Operación de venta de 50 USD con prima +5 % y comisión 0,6 %: orden de 56 076 sats, factura retenida de 56 244 sats pagada por el vendedor y 55 908 sats recibidos por el comprador (factura `SETTLED`).
+- Disputa abierta por el comprador, tomada con `admin-take-dispute` y resuelta con `admin-settle` usando la clave del nodo. Eventos kind 38386 `initiated`, `in-progress` y `settled`.
+- El Manager, conectado al mismo relay, mostró las órdenes con sus estados (`pending`, `in-progress`, `success`, `canceled`), la disputa enlazada con su orden, los 26 mensajes de protocolo de la orden disputada y la versión 0.19.2 anunciada por el daemon.
+- Los eventos y mensajes capturados se guardan como fixtures en `api/tests/fixtures/mostrod-v0.19.2/` y los usan las pruebas de `api/tests/orders.rs` y `api/tests/chat.rs`.
+- Supervisión real: con `docker/mostro-entrypoint.sh` en modo de espera y el binario v0.19.2, la activación desde la API del Manager arrancó el daemon; al faltar el certificado de LND el daemon salió con código 1, el supervisor registró la caída y reintentó con pausa, y el panel informó «terminó con código 1 a los 1 s de arrancar y se está reiniciando». La desactivación desde la API devolvió el supervisor a la espera.
+
+### Ampliación del 4 de octubre
+
+Mismo entorno, con dos nodos `mostrod` v0.19.2: el anterior y otro con garantía del 3 % para ambas partes, mínimo de 1 000 sats y `pow_first_contact = 8`. Los dos `settings.toml` los generó el Manager. Todos los escenarios terminaron con el resultado esperado.
+
+Nodo sin garantía, cliente en privacidad total:
+
+- Venta tomada con la factura sin importe adjunta en `take-sell`: un solo `pay-invoice` al vendedor, estados públicos `pending` y `success`, y 35 078 sats cobrados sobre 35 184.
+- Orden de rango de 20 a 60 USD: tomarla sin importe devuelve `cant-do: out_of_range_sats_amount`; con `{"amount": 30}` se completa.
+- Orden de compra tomada con `take-buy` hasta `success`.
+- Disputa abierta por el vendedor y resuelta con `admin-cancel`: factura retenida `CANCELED`, disputa `seller-refunded`, orden `canceled`.
+- Cancelación de mutuo acuerdo con la operación activa: el depósito sigue retenido tras el primer `cancel` y se cancela con el segundo.
+- Tomar la propia orden (`invalid_pubkey`), tomar una orden ya tomada (`invalid_order_status`) y actuar sobre una orden inexistente (`not_found`).
+- Quien toma se retira antes de enviar la factura: la orden vuelve a publicarse `pending` y quien publicó recibe de nuevo `new-order`.
+- Sin respuesta: `take-sell` sin `id`, `new-order` sin payload y un evento con `created_at` 60 s atrás. Con 8 s de antigüedad se aceptó.
+
+Nodo con garantía y prueba de trabajo de primer contacto:
+
+- El evento de información anuncia los tags `bond_*`, `pow = 0` y `pow_first_contact = 8`, y el Manager los lee.
+- `new-order`, `take-sell` y `admin-take-dispute` sin prueba de trabajo no reciben respuesta. Con ella se aceptan, y los mensajes siguientes de esa clave ya no la necesitan.
+- Garantía de quien publica: la respuesta a `new-order` es `pay-bond-invoice` (1 056 sats, 900 s de vigencia) y la orden no se publica hasta pagarla. Garantía de quien toma: 300 s de vigencia, y la orden sigue `pending` hasta pagarla.
+- Venta completa con ambas garantías: depósito `SETTLED` y las dos garantías `CANCELED`, es decir, devueltas. Lo mismo tras una disputa resuelta con `admin-settle` sin penalización.
+
+Modo de reputación, con un cliente propio que no usa mostro-core:
+
+- Venta completa con clave de identidad, una clave por operación, `trade_index`, firma interna y prueba de identidad. Confirma la serialización canónica y el texto de la prueba de identidad descritos en la guía, que incluye un vector verificable.
+- `trade_index` repetido: `cant-do: invalid_trade_index`. Firma interna o prueba de identidad alteradas: sin respuesta.
+- Valoraciones: `rate-user` devuelve `rate-received`. No hay respuesta si la otra parte opera en privacidad total ni en una segunda valoración. La siguiente orden de la identidad valorada anuncia el tag `rating` actualizado.
+- Una valoración enviada 135 s después del cierre sin prueba de trabajo no recibe respuesta. Con la prueba se acepta. El panel avisa ahora cuando `pow_first_contact` supera a `pow`.
+
+El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garantía, su disputa enlazada con la orden y los 26 mensajes de la operación en modo de reputación. Las capturas nuevas se añadieron a los fixtures.
+
+### Tarjeta de la comunidad
+
+- La tarjeta emitida por el Manager, en JSON y como enlace `mostro://community/<base64url>`, verifica con una copia del verificador de la app BitMaxis (`k256`, `verify_raw` sobre el digest de la cadena canónica). Antes del cambio no verificaba.
+
+### Comprobaciones del repositorio
+
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (120 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
+- Revisión independiente de los cambios en seis frentes (backend, seguridad, script supervisor y empaquetado, interfaz, guía de integración y pruebas), con verificación de cada hallazgo. Los hallazgos se corrigieron antes de cerrar esta validación.
+- `npm --prefix web run build` y `python3 -m unittest discover -s scripts/tests`.
+- `sh scripts/mostro-entrypoint-smoke.sh`, ampliado con el modo de espera: salida con error ante un arranque rechazado, registro de caídas con pausa entre reintentos, reinicio por petición del panel y parada al retirar la configuración.
+- Interfaz comprobada con Chromium sin errores de consola contra el daemon de regtest.
+- Contexto de compilación de la imagen simulado sin Docker: con solo `Cargo.toml`, `Cargo.lock`, `api/` y `config/`, y Rust 1.94.0, pasan el formato, las pruebas, clippy y la compilación de release. `npm ci` y la compilación del frontend pasan desde los archivos versionados. El binario de release responde `{"mode":"release","version":"1.0.12"}` en `/api/health` cuando se compila con `MANAGER_VERSION=v1.0.12`.
+
+### No verificado
+
+- Construcción de las imágenes Docker y `scripts/container-smoke.sh`: este equipo no da acceso al socket de Docker a la sesión de desarrollo. Las ejecuta el workflow de publicación.
+- Penalización y cobro de garantías, vencimiento de plazos, modo mantenimiento, órdenes de compra con la factura incluida, publicación del kind 38384, Cashu y Serbero. Su descripción procede del código de v0.19.2.
+- La app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
+- La actualización del nodo en producción de v0.19.0 a v0.19.2.

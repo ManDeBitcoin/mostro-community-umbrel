@@ -4,11 +4,11 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
     case "$TARGETARCH" in \
-      amd64) artifact=mostrod-x86_64-unknown-linux-musl; checksum=ba2819443f6922bfe8db86de0fe907156ca730636b3aeeac26f51a92b435fabb ;; \
-      arm64) artifact=mostrod-aarch64-unknown-linux-musl; checksum=df0c752feb44e9337be2b9d409af1386eb3ad254f975f180f652f885193d4081 ;; \
+      amd64) artifact=mostrod-x86_64-unknown-linux-musl; checksum=4d9aa45bbbca12a16024d72d2bf4f5fcb243196226750c50b741d035ffc2c071 ;; \
+      arm64) artifact=mostrod-aarch64-unknown-linux-musl; checksum=73c69e18f9d417e2e23347770b68be942eb1e28fd69d7180a54d18e9409d6c31 ;; \
       *) echo 'Unsupported architecture' >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/MostroP2P/mostro/releases/download/v0.19.0/$artifact" -o /mostrod; \
+    curl -fsSL "https://github.com/MostroP2P/mostro/releases/download/v0.19.2/$artifact" -o /mostrod; \
     echo "$checksum  /mostrod" | sha256sum -c -; \
     chmod 755 /mostrod; \
     TERM=xterm /mostrod --version
@@ -24,6 +24,9 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY api ./api
 COPY config ./config
+# Release tag reported by /api/health; "dev" outside the release workflow.
+ARG MANAGER_VERSION=dev
+ENV MANAGER_VERSION=$MANAGER_VERSION
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo build --locked --release -p mostro-community-api
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/ManDeBitcoin/mostro-community-umbrel"
@@ -31,6 +34,10 @@ LABEL org.opencontainers.image.title="Mostro Community Manager"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ncurses-base procps && rm -rf /var/lib/apt/lists/*
 COPY --from=api /src/target/release/mostro-community-api /usr/local/bin/mostro-community-api
 COPY --from=download /mostrod /usr/local/bin/mostrod
+# mostrod is GPL-3.0-or-later since v0.19.2: ship its license and source pointer.
+COPY config/upstream/LICENSE-GPL-3.0-or-later /usr/share/licenses/mostrod/LICENSE
+COPY config/upstream/LICENSE-MIT /usr/share/licenses/mostrod/LICENSE-MIT
+COPY config/upstream/NOTICE-mostrod.md /usr/share/licenses/mostrod/NOTICE.md
 COPY docker/mostro-entrypoint.sh /usr/local/bin/mostro-entrypoint
 RUN chmod 755 /usr/local/bin/mostro-entrypoint
 COPY --from=web /src/dist /opt/manager/web

@@ -26,12 +26,12 @@ type Dashboard = {
   mostro: ServiceInfo;
   lightning: ServiceInfo;
   bitcoin: ServiceInfo;
-  market_started: false;
+  market_started: boolean;
 };
 type CommunityCard = {
   version: number;
   name: string;
-  pubkey?: string | null;
+  pubkey: string;
   relays: string[];
   currency: string;
   payment_methods: string[];
@@ -39,7 +39,7 @@ type CommunityCard = {
   bond_percent: number;
   website: string;
   contact: string;
-  signature?: string | null;
+  signature: string;
 };
 
 type ConnectionInfo = {
@@ -52,6 +52,8 @@ type ConnectionInfo = {
   qr_svg?: string | null;
   qr_json_svg?: string | null;
   json_uri?: string | null;
+  card_uri?: string | null;
+  qr_card_svg?: string | null;
   card?: CommunityCard | null;
   app_download_url: string;
   instructions: string;
@@ -69,8 +71,31 @@ type DaemonReport = {
   can_activate: boolean;
   warnings: string[];
   mostro_version?: string;
+  version_source?: 'announced' | 'binary' | 'pinned' | string;
+  packaged_version?: string;
   protocol_version?: number;
+  announced?: NodeInfo | null;
+  announced_age_secs?: number | null;
+  announced_fresh?: boolean;
+  last_exit?: { at_unix: number; code: number; uptime_secs: number } | null;
 };
+type NodeInfo = {
+  event_id: string;
+  created_at: number;
+  name?: string | null;
+  mostro_version?: string | null;
+  protocol_version?: string | null;
+  tags: Record<string, string>;
+};
+type DisputeSummary = {
+  id: string;
+  event_id: string;
+  status: string;
+  initiator?: string | null;
+  published_at?: number | null;
+  updated_at: number;
+};
+type DisputeView = DisputeSummary & { order_id?: string | null; is_open: boolean };
 type SimulationScenarioInfo = {
   id: string;
   label: string;
@@ -112,6 +137,8 @@ type SimulationReport = {
     fee_per_side_sats: number;
     dev_fee_sats: number;
     fee_sats?: number;
+    seller_hold_invoice_sats?: number;
+    buyer_receives_sats?: number;
     seller_total_locked_sats: number;
     buyer_total_locked_sats: number;
   };
@@ -167,6 +194,7 @@ type OrderSummary = {
   premium: number;
   created_at: number;
   expires_at: number | null;
+  published_at?: number | null;
 };
 
 type RelayStatus = {
@@ -182,6 +210,9 @@ type OrdersSnapshot = {
   source_npub: string | null;
   relays?: RelayStatus[];
   orders: OrderSummary[];
+  disputes?: DisputeSummary[];
+  node_info?: NodeInfo | null;
+  node_info_age_secs?: number | null;
 };
 
 type ChatMessage = {
@@ -194,12 +225,17 @@ type ChatMessage = {
   action?: string | null;
   content: string;
   is_from_me: boolean;
+  role?: 'daemon' | 'user' | 'admin' | string;
+  variant?: string;
+  dispute_id?: string | null;
+  acknowledged?: boolean;
 };
 
 type ChatHistory = {
   order_id: string;
   messages: ChatMessage[];
   count: number;
+  dispute_id?: string | null;
 };
 
 type CommissionBondPreset = {
@@ -223,8 +259,8 @@ const COMMISSION_BOND_PRESETS: CommissionBondPreset[] = [
     id: 'standard',
     nameEs: 'Equilibrado / Recomendado (0.5% com. · 3% fianza)',
     nameEn: 'Balanced / Recommended (0.5% fee · 3% bond)',
-    descEs: 'Comisión de mercado 0.5%, fianza del 3% (base 5,000 sats). Ideal para comunidades activas.',
-    descEn: '0.5% market fee, 3% bond (5,000 sats base). Ideal for active communities.',
+    descEs: 'Comisión de mercado 0.5%, fianza del 3% (mínimo 5,000 sats). Ideal para comunidades activas.',
+    descEn: '0.5% market fee, 3% bond (5,000 sats minimum). Ideal for active communities.',
     feeBps: 50,
     devFeeBps: 1000,
     maxRoutingFeeBps: 10,
@@ -238,8 +274,8 @@ const COMMISSION_BOND_PRESETS: CommissionBondPreset[] = [
     id: 'safe',
     nameEs: 'Bajo Riesgo / Fianza Alta (0.8% com. · 5% fianza)',
     nameEn: 'Low Risk / High Bond (0.8% fee · 5% bond)',
-    descEs: 'Fianza reforzada del 5% (base 10,000 sats) y comisión 0.8%. Recomendado para nuevos mercados.',
-    descEn: 'Reinforced 5% bond (10,000 sats base) and 0.8% fee. Recommended for new markets.',
+    descEs: 'Fianza reforzada del 5% (mínimo 10,000 sats) y comisión 0.8%. Recomendado para nuevos mercados.',
+    descEn: 'Reinforced 5% bond (10,000 sats minimum) and 0.8% fee. Recommended for new markets.',
     feeBps: 80,
     devFeeBps: 1000,
     maxRoutingFeeBps: 10,
@@ -253,8 +289,8 @@ const COMMISSION_BOND_PRESETS: CommissionBondPreset[] = [
     id: 'zero',
     nameEs: 'Cero Comisión / Fianza Comunitaria (0.0% com. · 2% fianza)',
     nameEn: 'Zero Fee / Community Bond (0.0% fee · 2% bond)',
-    descEs: 'Sin comisión de mercado para fomentar adopción; fianza del 2% (base 2,000 sats) contra spam.',
-    descEn: 'No market fee to foster adoption; 2% bond (2,000 sats base) to deter spam.',
+    descEs: 'Sin comisión de mercado para fomentar adopción; fianza del 2% (mínimo 2,000 sats) contra spam.',
+    descEn: 'No market fee to foster adoption; 2% bond (2,000 sats minimum) to deter spam.',
     feeBps: 0,
     devFeeBps: 1000,
     maxRoutingFeeBps: 10,
@@ -270,7 +306,7 @@ const POPULAR_CURRENCIES = ['USD', 'EUR', 'ARS', 'VES', 'COP', 'BRL', 'MXN', 'CL
 
 const blankConfig = (): Configuration => ({
   community: { name: '', about: '', website: '', contact: '', language: 'es' },
-  market: { fiat_currencies: [], min_trade_sats: 1000, max_trade_sats: 1000000, fee_bps: 0, dev_fee_bps: 0, max_routing_fee_bps: 0 },
+  market: { fiat_currencies: [], min_trade_sats: 1000, max_trade_sats: 1000000, fee_bps: 0, dev_fee_bps: 3000, max_routing_fee_bps: 20 },
   safety: { bond_enabled: false, bond_bps: 0, base_bond_sats: 0, bond_apply_to: 'both', automatic_timeout_slash: false, pow: 0, pow_first_contact: 0 },
   nostr: { relays: [] },
   payment_methods: [],
@@ -350,6 +386,28 @@ function ActorBadge({ actor }: { actor: string }) {
     default: return <span className="sim-actor-badge">{actor}</span>;
   }
 }
+// Statuses mostrod publishes in kind 38383. The tag is coarse: a taken order
+// is usually `in-progress` until it closes, but a sell order taken with the
+// invoice attached stays `pending`. Disputes are announced in kind 38386.
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  pending: 'Pendiente',
+  'in-progress': 'En curso',
+  success: 'Completada',
+  canceled: 'Cancelada',
+  'completed-by-admin': 'Resuelta por mediador',
+};
+const CLOSED_ORDER_STATUSES = ['success', 'canceled', 'completed-by-admin', 'canceled-by-admin', 'cooperatively-canceled', 'settled-by-admin', 'completed', 'failed', 'expired'];
+const DISPUTE_STATUS_LABELS: Record<string, string> = {
+  initiated: 'Abierta, sin mediador',
+  'in-progress': 'En mediación',
+  settled: 'Resuelta: pago al comprador',
+  'seller-refunded': 'Resuelta: devolución al vendedor',
+  released: 'Cerrada: el vendedor liberó',
+  'cooperatively-canceled': 'Cerrada: cancelación de mutuo acuerdo',
+};
+const isOpenDispute = (status: string) => status === 'initiated' || status === 'in-progress';
+const formatAge = (secs: number) => secs < 90 ? `${secs} s` : secs < 5400 ? `${Math.round(secs / 60)} min` : `${Math.round(secs / 3600)} h`;
+
 function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) => void }) {
   const [snapshot, setSnapshot] = useState<OrdersSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -468,6 +526,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
   }
 
   const { state, is_stale, last_update, source_npub, relays, orders } = snapshot;
+  const openDisputes = (snapshot.disputes || []).filter((d) => isOpenDispute(d.status));
 
   const stateLabels: Record<string, string> = {
     unconfigured: "Sin configurar (falta identidad pública o relays)",
@@ -481,8 +540,8 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
   const filteredOrders = orders.filter((o) => {
     if (filterKind !== 'all' && o.kind !== filterKind) return false;
     if (filterStatus === 'pending' && o.status !== 'pending') return false;
-    if (filterStatus === 'closed' && !['canceled', 'success', 'completed', 'failed', 'expired'].includes(o.status)) return false;
-    if (filterStatus === 'dispute' && o.status !== 'dispute') return false;
+    if (filterStatus === 'in-progress' && o.status !== 'in-progress') return false;
+    if (filterStatus === 'closed' && !CLOSED_ORDER_STATUSES.includes(o.status)) return false;
     return true;
   });
 
@@ -490,7 +549,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
     <section className="content orders-page">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">MONITOR DE SOLO LECTURA · MÓDULO 3A</div>
+          <div className="eyebrow">MONITOR DE SOLO LECTURA</div>
           <h1>Órdenes públicas</h1>
           <p>Órdenes anunciadas en Nostr por la identidad {source_npub ? <code style={{wordBreak: "break-all"}}>{source_npub.slice(0, 15)}...</code> : "no configurada"}</p>
         </div>
@@ -568,7 +627,7 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
           <div className="new-orders-info">
             <span className="new-orders-icon">⚡</span>
             <span>
-              <strong>{newOrdersCount} nueva{newOrdersCount === 1 ? '' : 's'} orden{newOrdersCount === 1 ? '' : 'es'} detectada{newOrdersCount === 1 ? '' : 's'}</strong> en el monitor.
+              <strong>{newOrdersCount === 1 ? '1 orden nueva detectada' : `${newOrdersCount} órdenes nuevas detectadas`}</strong> en el monitor.
             </span>
           </div>
           <button
@@ -584,18 +643,18 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
         <div className="banner-icon"><Icon name="alert" size={18}/></div>
         <div>
           <b>Aviso de Solo Lectura</b>
-          <span>Los eventos históricos presentados en este monitor no garantizan liquidez, confirmación de fondos ni que el daemon de Mostro esté en ejecución. Este panel no permite realizar pagos, tomar órdenes ni ejecutar arbitrajes.</span>
+          <span>Este monitor muestra el estado público que el daemon anuncia, que es menos detallado que el real: una orden «Pendiente» puede estar ya tomada y una «En curso» puede estar en disputa. No garantiza liquidez ni que el daemon esté en ejecución, y no permite pagar, tomar órdenes ni arbitrar.</span>
         </div>
       </div>
 
-      {orders.some((o) => o.status === 'dispute') && (
-        <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.1)', border: '1px solid rgba(235, 115, 29, 0.3)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {openDisputes.length > 0 && (
+        <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.1)', border: '1px solid rgba(235, 115, 29, 0.3)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div>
             <strong style={{ color: '#eb731d', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Icon name="shield" size={15} /> Disputas activas detectadas
+              <Icon name="shield" size={15} /> {openDisputes.length} disputa{openDisputes.length === 1 ? '' : 's'} abierta{openDisputes.length === 1 ? '' : 's'} en el nodo
             </strong>
             <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#9ba3af' }}>
-              Hay órdenes en estado de disputa que disponen de un canal de chat cifrado para arbitraje.
+              El nodo las anuncia en eventos propios (kind 38386). El estado público de una orden no cambia al entrar en disputa.
             </p>
           </div>
           {onSelectDispute && (
@@ -603,17 +662,14 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
               type="button"
               className="button button-primary"
               style={{ fontSize: '13px', height: '32px' }}
-              onClick={() => {
-                const firstDispute = orders.find((o) => o.status === 'dispute');
-                if (firstDispute) onSelectDispute(firstDispute.id);
-              }}
+              onClick={() => onSelectDispute('')}
             >
-              Ir a Consola de Mediación →
+              Ver disputas →
             </button>
           )}
         </div>
       )}
-      
+
       <div className="section-title-row">
         <div><h2>Estado de Conexión</h2><p>{stateLabels[state]}</p></div>
         <span className="updated-label">
@@ -647,13 +703,13 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
           <label>Estado</label>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="all">Todos los estados</option>
-            <option value="pending">Solo pendientes</option>
-            <option value="closed">Cerradas / Finalizadas</option>
-            <option value="dispute">En disputa</option>
+            <option value="pending">Pendientes</option>
+            <option value="in-progress">En curso</option>
+            <option value="closed">Cerradas</option>
           </select>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '15px', color: '#88988e' }}>
-          <span>{filteredOrders.length} orden{filteredOrders.length === 1 ? '' : 'es'} mostrada{filteredOrders.length === 1 ? '' : 's'}</span>
+          <span>{filteredOrders.length} {filteredOrders.length === 1 ? 'orden mostrada' : 'órdenes mostradas'}</span>
         </div>
       </div>
 
@@ -665,16 +721,16 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
         ) : filteredOrders.length === 0 ? (
           <p className="empty-hint">No hay órdenes que coincidan con los filtros seleccionados.</p>
         ) : (
-          <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%' }}>
+          <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%', gridColumn: '1 / -1' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Tabla de órdenes públicas">
               <thead>
                 <tr>
-                  <th>UUID / Fecha</th>
+                  <th>UUID / Creada</th>
                   <th>Tipo</th>
-                  <th>Cantidad (Sats)</th>
-                  <th>Precio (Fiat)</th>
+                  <th>Sats</th>
+                  <th>Importe fiat y precio</th>
                   <th>Estado</th>
-                  <th>Acción</th>
+                  <th>Mensajes</th>
                 </tr>
               </thead>
               <tbody>
@@ -688,26 +744,33 @@ function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) =
                     >
                     <td style={{ padding: '8px 0' }}>
                       <div style={{ fontSize: '15px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
-                      <div style={{ fontSize: '13px', color: '#88988e' }}>{new Date(o.created_at * 1000).toLocaleString()}</div>
+                      <div style={{ fontSize: '13px', color: '#88988e' }}>{new Date((o.published_at || o.created_at) * 1000).toLocaleString()}</div>
                     </td>
                     <td>{o.kind === 'sell' ? 'Venta' : 'Compra'}</td>
-                    <td>{o.amount_sats === 0 ? "Por rango" : `${o.amount_sats_str || o.amount_sats.toLocaleString()} sats`}</td>
+                    <td>{o.amount_sats > 0 ? `${o.amount_sats_str || o.amount_sats.toLocaleString()} sats` : o.status === 'pending' ? 'Se fijan al tomarla' : '—'}</td>
                     <td>
-                      {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} - ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0.00'} {o.fiat_code.toUpperCase()}
+                      {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} – ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}
+                      {o.fiat_amount_range.length === 2 && <span style={{ fontSize: '13px', color: '#88988e' }}> (rango)</span>}
                       <br/>
-                      <span style={{ fontSize: '13px', color: '#88988e' }}>{o.premium !== 0 ? `Premium: ${o.premium}%` : 'Precio de mercado'}</span>
+                      <span style={{ fontSize: '13px', color: '#88988e' }}>
+                        {o.premium !== 0
+                          ? `Precio de mercado, prima ${o.premium > 0 ? '+' : ''}${o.premium} %`
+                          : o.status === 'pending' && o.amount_sats > 0
+                            ? 'Precio fijo en sats'
+                            : o.status === 'pending' ? 'Precio de mercado, sin prima' : 'Sin prima'}
+                      </span>
                     </td>
-                    <td><span className="sim-actor-badge">{o.status}</span></td>
+                    <td><span className="sim-actor-badge" title={o.status}>{ORDER_STATUS_LABELS[o.status] || o.status}</span></td>
                     <td>
-                      {o.status === 'dispute' && onSelectDispute ? (
+                      {onSelectDispute ? (
                         <button
                           type="button"
                           className="button button-secondary"
                           style={{ padding: '3px 8px', fontSize: '13px' }}
                           onClick={() => onSelectDispute(o.id)}
-                          title="Abrir historial de mediación para esta disputa"
+                          title="Ver los mensajes de protocolo de esta orden"
                         >
-                          <Icon name="shield" size={13} /> Mediar
+                          <Icon name="message" size={13} /> Ver
                         </button>
                       ) : (
                         <span style={{ fontSize: '13px', color: '#68776e' }}>—</span>
@@ -734,11 +797,15 @@ function MediationConsole({
 }) {
   const [selectedOrderId, setSelectedOrderId] = useState<string>(initialOrderId);
   const [inputOrderId, setInputOrderId] = useState<string>(initialOrderId);
+  const [selectedDisputeId, setSelectedDisputeId] = useState<string>('');
   const [history, setHistory] = useState<ChatHistory | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
-  const [actionNotice, setActionNotice] = useState<string>('');
+  const [disputes, setDisputes] = useState<DisputeView[] | null>(null);
+  const [disputesError, setDisputesError] = useState<string>('');
   const [ordersSnapshot, setOrdersSnapshot] = useState<OrdersSnapshot | null>(null);
+  const [copied, setCopied] = useState<string>('');
+  const selectedOrderRef = useRef<string>(initialOrderId);
 
   useEffect(() => {
     if (initialOrderId && initialOrderId !== selectedOrderId) {
@@ -747,21 +814,27 @@ function MediationConsole({
     }
   }, [initialOrderId]);
 
-  useEffect(() => {
-    api<OrdersSnapshot>('/api/orders')
-      .then((data) => {
-        setOrdersSnapshot(data);
-        if (!selectedOrderId && data.orders.length > 0) {
-          const firstDispute = data.orders.find((o) => o.status === 'dispute');
-          if (firstDispute) {
-            setSelectedOrderId(firstDispute.id);
-            setInputOrderId(firstDispute.id);
-            if (onSelectOrder) onSelectOrder(firstDispute.id);
-          }
-        }
-      })
-      .catch(() => {});
+  const fetchDisputes = useCallback(async () => {
+    // The two requests fail independently: a failed one must never read as
+    // "there are no disputes".
+    const [list, snapshot] = await Promise.allSettled([
+      api<DisputeView[]>('/api/disputes'),
+      api<OrdersSnapshot>('/api/orders'),
+    ]);
+    if (list.status === 'fulfilled') {
+      setDisputes(list.value);
+      setDisputesError('');
+    } else {
+      setDisputesError(list.reason instanceof Error ? list.reason.message : 'Error de conexión');
+    }
+    if (snapshot.status === 'fulfilled') setOrdersSnapshot(snapshot.value);
   }, []);
+
+  useEffect(() => {
+    void fetchDisputes();
+    const interval = setInterval(() => void fetchDisputes(), 8000);
+    return () => clearInterval(interval);
+  }, [fetchDisputes]);
 
   const fetchChat = useCallback(async (orderId: string) => {
     if (!orderId.trim()) return;
@@ -769,16 +842,23 @@ function MediationConsole({
     setError('');
     try {
       const data = await api<ChatHistory>(`/api/chat/${orderId.trim()}`);
-      setHistory(data);
+      // A slower answer for the order shown before must not replace this one.
+      if (data.order_id === selectedOrderRef.current) setHistory(data);
     } catch (err) {
-      setHistory(null);
-      setError(err instanceof Error ? err.message : 'Error al obtener mensajes cifrados');
+      if (orderId.trim() === selectedOrderRef.current) {
+        setHistory(null);
+        setError(err instanceof Error ? err.message : 'No se pudieron obtener los mensajes de la orden');
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    selectedOrderRef.current = selectedOrderId;
+    // Never show the previous order's messages under the new order's id.
+    setHistory(null);
+    setError('');
     if (selectedOrderId) {
       void fetchChat(selectedOrderId);
       const interval = setInterval(() => {
@@ -788,65 +868,166 @@ function MediationConsole({
     }
   }, [selectedOrderId, fetchChat]);
 
+  const selectOrder = (orderId: string) => {
+    setSelectedOrderId(orderId);
+    setInputOrderId(orderId);
+    if (onSelectOrder) onSelectOrder(orderId);
+  };
+
+  const selectDispute = (d: DisputeView) => {
+    setSelectedDisputeId(d.id);
+    if (d.order_id) selectOrder(d.order_id);
+    else {
+      setSelectedOrderId('');
+      setInputOrderId('');
+    }
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const id = inputOrderId.trim();
     if (id) {
-      setSelectedOrderId(id);
-      if (onSelectOrder) onSelectOrder(id);
-      void fetchChat(id);
+      setSelectedDisputeId('');
+      // Selecting another order loads it through the effect; asking again
+      // for the same one refreshes it.
+      if (id === selectedOrderId) void fetchChat(id);
+      else selectOrder(id);
     }
   };
 
-  const handleAction = (type: 'adm-settle' | 'adm-refund') => {
-    if (!selectedOrderId) return;
-    const isSettle = type === 'adm-settle';
-    const confirmMessage = isSettle
-      ? `¿Confirmas que deseas resolver la disputa a favor del COMPRADOR?\n\nOrden: ${selectedOrderId}\n\nAcción: Liberar los satoshis en custodia al comprador tras verificar que el pago fiat fue recibido.`
-      : `¿Confirmas que deseas resolver la disputa a favor del VENDEDOR?\n\nOrden: ${selectedOrderId}\n\nAcción: Cancelar la orden y reembolsar los satoshis en custodia al vendedor tras verificar que el comprador no pagó.`;
-    if (!window.confirm(confirmMessage)) return;
+  const copy = (text: string, key: string) =>
+    copyToClipboard(text, () => {
+      setCopied(key);
+      setTimeout(() => setCopied(''), 1800);
+    });
 
-    const actionLabel = isSettle ? 'Liberación de satoshis al comprador' : 'Reembolso de satoshis al vendedor';
-    setActionNotice(
-      `Resolución registrada: [${actionLabel}] para la orden ${selectedOrderId}. La instrucción administrativa ha sido procesada hacia el daemon Mostro.`
-    );
-  };
-
-  const disputeOrders = ordersSnapshot?.orders.filter((o) => o.status === 'dispute') || [];
+  const sortedDisputes = [...(disputes || [])].sort((a, b) => Number(b.is_open) - Number(a.is_open) || b.updated_at - a.updated_at);
+  const openCount = sortedDisputes.filter((d) => d.is_open).length;
+  const selectedDispute =
+    sortedDisputes.find((d) => d.id === selectedDisputeId) ||
+    sortedDisputes.find((d) => selectedOrderId && d.order_id === selectedOrderId) ||
+    (history?.dispute_id && history.order_id === selectedOrderId ? sortedDisputes.find((d) => d.id === history.dispute_id) : undefined);
+  const monitorState = ordersSnapshot?.state;
+  const monitorIsLive = monitorState === 'live' && !ordersSnapshot?.is_stale;
   const selectedOrder = ordersSnapshot?.orders.find((o) => o.id === selectedOrderId);
+  // Messages from keys the daemon never addressed about this order are kept
+  // out of the timeline: anyone can send them.
+  const timelineMessages = (history?.messages || []).filter((m) => m.is_from_me || m.acknowledged !== false);
+  const unrecognizedMessages = (history?.messages || []).filter((m) => !m.is_from_me && m.acknowledged === false);
+  const roleLabel = (msg: ChatMessage) =>
+    msg.role === 'admin' ? 'Administrador (clave del nodo)' : msg.is_from_me ? 'Daemon Mostro' : `Usuario ${msg.sender.slice(0, 12)}…${msg.sender.slice(-4)}`;
 
   return (
     <section className="content mediation-page">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">CONSOLA DE MEDIACIÓN Y ARBITRAJE · MÓDULO 3B</div>
+          <div className="eyebrow">DISPUTAS Y MENSAJES DE PROTOCOLO · SOLO LECTURA</div>
           <h1>Consola de Mediación</h1>
-          <p>Supervisión de canales cifrados de disputa y resolución asistida de conflictos.</p>
+          <p>Disputas que anuncia tu nodo e historial de mensajes entre los usuarios y el daemon para cada orden.</p>
         </div>
         <button
           className="button button-secondary"
-          onClick={() => selectedOrderId && void fetchChat(selectedOrderId)}
-          disabled={loading || !selectedOrderId}
+          onClick={() => {
+            void fetchDisputes();
+            if (selectedOrderId) void fetchChat(selectedOrderId);
+          }}
+          disabled={loading}
         >
-          <span className={loading ? 'spin' : ''}>↻</span> Actualizar chat
+          <span className={loading ? 'spin' : ''}>↻</span> Actualizar
         </button>
       </div>
 
       <div className="dev-banner">
         <div className="banner-icon"><Icon name="shield" size={18} /></div>
         <div>
-          <b>Cifrado Punto a Punto Hermético (NIP-04 y NIP-44 / GiftWrap NIP-59)</b>
+          <b>Qué muestra esta consola y qué no</b>
           <span>
-            Los mensajes de mediación dirigidos a la identidad de la comunidad se descifran exclusivamente en memoria con la clave privada local aislada. Las acciones administrativas de resolución están preparadas en modo asistido.
+            Muestra las disputas publicadas por el nodo (kind 38386) y los mensajes de protocolo v2 (kind 14, cifrado NIP-44) entre cada usuario y el daemon, descifrados en memoria con la identidad del nodo. No puede leer el chat entre comprador y vendedor ni el del mediador con las partes: se cifran con claves que el nodo no tiene. Tampoco resuelve disputas. Lo que envía un usuario es una petición: solo una respuesta del daemon confirma que la procesó.
           </span>
         </div>
-        <div className="banner-status"><i /> PROTOCOLO SEGURO</div>
+        <div className="banner-status"><i /> SOLO LECTURA</div>
       </div>
+
+      <div className="section-title-row">
+        <div>
+          <h2>Disputas del nodo</h2>
+          <p>
+            {disputesError && disputes === null
+              ? 'No se pudieron consultar las disputas.'
+              : disputes === null
+                ? 'Cargando…'
+                : sortedDisputes.length === 0
+                  ? monitorIsLive
+                    ? 'El nodo no ha anunciado ninguna disputa en los relays configurados.'
+                    : 'Sin disputas conocidas todavía.'
+                  : `${openCount} abierta${openCount === 1 ? '' : 's'} de ${sortedDisputes.length} anunciada${sortedDisputes.length === 1 ? '' : 's'}.`}
+          </p>
+        </div>
+      </div>
+
+      {(disputesError || (ordersSnapshot && !monitorIsLive)) && (
+        <div className="form-message error">
+          {disputesError
+            ? `No se pudieron consultar las disputas (${disputesError}). La lista puede estar incompleta.`
+            : `El monitor de relays no está al día (estado: ${monitorState}${ordersSnapshot?.is_stale ? ', datos retenidos' : ''}). Puede haber disputas abiertas que aún no aparecen aquí.`}
+        </div>
+      )}
+
+      {sortedDisputes.length > 0 && (
+        <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%', marginBottom: '20px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Disputas anunciadas por el nodo">
+            <thead>
+              <tr>
+                <th>Disputa</th>
+                <th>Estado</th>
+                <th>La abrió</th>
+                <th>Abierta el</th>
+                <th>Orden</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedDisputes.map((d) => (
+                <tr
+                  key={d.id}
+                  className={selectedDispute?.id === d.id ? 'order-row-highlight' : ''}
+                  style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', cursor: 'pointer' }}
+                  onClick={() => selectDispute(d)}
+                >
+                  <td style={{ padding: '8px 0' }}>
+                    <button
+                      type="button"
+                      className="copy-button"
+                      aria-pressed={selectedDispute?.id === d.id}
+                      title={`Ver la disputa ${d.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selectDispute(d);
+                      }}
+                    >
+                      <code>{d.id.slice(0, 8)}…</code>
+                    </button>
+                  </td>
+                  <td>
+                    <span className={d.is_open ? 'dispute-badge' : 'sim-actor-badge'} title={d.status}>
+                      {DISPUTE_STATUS_LABELS[d.status] || d.status}
+                    </span>
+                  </td>
+                  <td>{d.initiator === 'buyer' ? 'Comprador' : d.initiator === 'seller' ? 'Vendedor' : '—'}</td>
+                  <td>{new Date((d.published_at || d.updated_at) * 1000).toLocaleString()}</td>
+                  <td>
+                    {d.order_id ? <code>{d.order_id.slice(0, 8)}…</code> : <span style={{ fontSize: '13px', color: '#88988e' }}>Sin identificar</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: '1 1 320px', alignItems: 'center' }}>
           <div className="sim-control-group" style={{ flex: 1, minWidth: '220px' }}>
-            <label>ID de la orden (UUID)</label>
+            <label>Ver los mensajes de una orden (UUID)</label>
             <input
               type="text"
               placeholder="Ej. edbd72f6-0bb0-4740-8b1c-7f51b6ad72ba"
@@ -855,49 +1036,10 @@ function MediationConsole({
             />
           </div>
           <button type="submit" className="button button-primary" style={{ marginTop: 'auto', height: '32px' }}>
-            Cargar Chat
+            Cargar mensajes
           </button>
         </form>
-
-        {disputeOrders.length > 0 && (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '13px', color: '#88988e' }}>Disputas activas:</span>
-            {disputeOrders.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                className={`chip ${o.id === selectedOrderId ? 'complete' : ''}`}
-                style={{ cursor: 'pointer', padding: '4px 10px' }}
-                onClick={() => {
-                  setSelectedOrderId(o.id);
-                  setInputOrderId(o.id);
-                  if (onSelectOrder) onSelectOrder(o.id);
-                }}
-              >
-                <span className="dispute-badge">⚠ {o.id.slice(0, 8)}...</span>
-                <span>{o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-
-      {actionNotice && (
-        <div className="action-feedback-banner" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong>✓ Notificación Administrativa</strong>
-            <p style={{ margin: '4px 0 0', fontSize: '13px' }}>{actionNotice}</p>
-          </div>
-          <button
-            type="button"
-            className="button button-secondary"
-            style={{ height: '28px', fontSize: '12px' }}
-            onClick={() => setActionNotice('')}
-          >
-            Cerrar
-          </button>
-        </div>
-      )}
 
       {error && <div className="form-message error">{error}</div>}
 
@@ -908,15 +1050,15 @@ function MediationConsole({
               <Icon name="message" size={16} />
               <h3>
                 {selectedOrderId ? (
-                  <>Historial de Chat · <code>{selectedOrderId.slice(0, 8)}...</code></>
+                  <>Mensajes de protocolo · <code>{selectedOrderId.slice(0, 8)}…</code></>
                 ) : (
-                  'Historial de Mensajes Cifrados'
+                  'Mensajes de protocolo'
                 )}
               </h3>
             </div>
             {history && (
               <span className="updated-label">
-                {history.count} mensaje{history.count === 1 ? '' : 's'} descifrado{history.count === 1 ? '' : 's'}
+                {timelineMessages.length} mensaje{timelineMessages.length === 1 ? '' : 's'}
               </span>
             )}
           </div>
@@ -925,27 +1067,32 @@ function MediationConsole({
             {!selectedOrderId ? (
               <div className="chat-empty">
                 <Icon name="shield" size={32} />
-                <b>No hay orden seleccionada</b>
-                <p>Ingresa un ID de orden o selecciona una disputa activa para consultar los mensajes cifrados.</p>
+                <b>{selectedDispute ? 'Orden de la disputa sin identificar' : 'Ninguna orden seleccionada'}</b>
+                <p>
+                  {selectedDispute
+                    ? 'El evento público de una disputa no nombra la orden. Este panel la conoce cuando ve los mensajes en los que el daemon avisa a las partes; si la disputa es anterior a los últimos 30 días o los relays ya no conservan esos mensajes, búscala por el UUID de la orden.'
+                    : 'Elige una disputa de la tabla o escribe el UUID de una orden.'}
+                </p>
               </div>
             ) : loading && !history ? (
               <div className="chat-empty">
                 <span className="spin" style={{ fontSize: '24px' }}>↻</span>
-                <p>Descifrando mensajes cifrados en memoria...</p>
+                <p>Descifrando mensajes en memoria…</p>
               </div>
-            ) : !history || history.messages.length === 0 ? (
+            ) : !history || timelineMessages.length === 0 ? (
               <div className="chat-empty">
                 <Icon name="message" size={32} />
-                <b>Sin mensajes para la orden {selectedOrderId.slice(0, 8)}...</b>
+                <b>Sin mensajes para la orden {selectedOrderId.slice(0, 8)}…</b>
                 <p>
-                  No se han registrado mensajes NIP-04 o NIP-44/59 para esta orden todavía. Cuando las partes o el bot envíen eventos a los relays, se sincronizarán y aparecerán aquí.
+                  Los relays conservan los mensajes del daemon unos 30 días. Una orden que nadie ha tomado solo tiene el mensaje de creación.
                 </p>
               </div>
             ) : (
-              history.messages.map((msg) => {
-                const isFromCommunity = msg.is_from_me;
-                const bubbleClass = isFromCommunity ? 'chat-bubble from-me' : 'chat-bubble from-other';
-                const formattedTime = new Date(msg.created_at * 1000).toLocaleTimeString([], {
+              timelineMessages.map((msg) => {
+                const bubbleClass = msg.is_from_me ? 'chat-bubble from-me' : 'chat-bubble from-other';
+                const formattedTime = new Date(msg.created_at * 1000).toLocaleString([], {
+                  day: '2-digit',
+                  month: '2-digit',
                   hour: '2-digit',
                   minute: '2-digit',
                   second: '2-digit',
@@ -953,96 +1100,117 @@ function MediationConsole({
                 return (
                   <div key={msg.id} className={bubbleClass}>
                     <div className="chat-meta">
-                      <span className="chat-sender">
-                        {isFromCommunity ? 'Comunidad (Tú)' : (
-                          <ActorBadge actor={msg.sender} />
-                        )}
-                      </span>
+                      <span className="chat-sender" title={msg.sender}>{roleLabel(msg)}</span>
                       <span className="chat-time">{formattedTime}</span>
-                      <span className={`chat-tag ${msg.kind === 1059 ? 'dispute' : ''}`}>
-                        {msg.kind === 1059 ? 'NIP-59 / NIP-44' : msg.kind === 4 ? 'NIP-04' : `Kind ${msg.kind}`}
-                      </span>
                       {msg.action && <span className="chat-tag dispute">{msg.action}</span>}
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px' }}>
-                      {msg.content}
-                    </div>
+                    {msg.content && (
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '14px' }}>
+                        {msg.content}
+                      </div>
+                    )}
                   </div>
                 );
               })
+            )}
+            {unrecognizedMessages.length > 0 && (
+              <details style={{ marginTop: '12px', fontSize: '13px', color: '#9ba3af' }}>
+                <summary>
+                  {unrecognizedMessages.length} mensaje{unrecognizedMessages.length === 1 ? '' : 's'} de claves que el daemon no reconoció en esta orden
+                </summary>
+                <p style={{ margin: '8px 0' }}>
+                  Cualquiera puede enviar al nodo un mensaje que nombre esta orden. El daemon nunca respondió a estas claves como parte de la operación, así que no son prueba de nada.
+                </p>
+                {unrecognizedMessages.map((msg) => (
+                  <div key={msg.id} style={{ borderTop: '1px solid #1f2b24', padding: '6px 0', wordBreak: 'break-word' }}>
+                    <code>{msg.sender.slice(0, 12)}…{msg.sender.slice(-4)}</code> · {new Date(msg.created_at * 1000).toLocaleString()} · {msg.action || 'sin acción'}
+                    {msg.content ? ` · ${msg.content}` : ''}
+                  </div>
+                ))}
+              </details>
             )}
           </div>
         </div>
 
         <div className="dispute-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h3>Arbitraje Asistido</h3>
-            {selectedOrder ? (
-              <span className="dispute-badge">{selectedOrder.status}</span>
+            <h3>Cómo se resuelve una disputa</h3>
+            {selectedDispute ? (
+              <span className={selectedDispute.is_open ? 'dispute-badge' : 'chat-tag'}>
+                {DISPUTE_STATUS_LABELS[selectedDispute.status] || selectedDispute.status}
+              </span>
             ) : (
-              <span className="chat-tag">Consola</span>
+              <span className="chat-tag">Guía</span>
             )}
           </div>
 
           <p style={{ margin: 0, fontSize: '13px', color: '#9ba3af', lineHeight: 1.4 }}>
-            Herramientas para resolver disputas entre comprador y vendedor conforme a las pruebas aportadas en el chat y las confirmaciones bancarias/fiat.
+            La resuelve un mediador (solver) registrado en el nodo, desde un cliente de mediación como Mostrix o mostro-cli. Este panel no ejecuta esas acciones: mueven fondos de los usuarios y se firman con la clave del mediador.
           </p>
 
-          {selectedOrder && (
-            <div style={{ background: '#0e1412', border: '1px solid #1f2b24', borderRadius: '7px', padding: '10px 12px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: '#829288' }}>Monto:</span>
-                <strong>{selectedOrder.amount_sats.toLocaleString()} sats ({selectedOrder.fiat_amount_range[0] || '0'} {selectedOrder.fiat_code.toUpperCase()})</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: '#829288' }}>Tipo:</span>
-                <span>{selectedOrder.kind === 'sell' ? 'Venta' : 'Compra'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#829288' }}>Publicada:</span>
-                <span>{new Date(selectedOrder.created_at * 1000).toLocaleString()}</span>
-              </div>
+          {(selectedDispute || selectedOrder) && (
+            <div style={{ background: '#0e1412', border: '1px solid #1f2b24', borderRadius: '7px', padding: '10px 12px', fontSize: '13px', display: 'grid', gap: '4px' }}>
+              {selectedDispute && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ color: '#829288' }}>Disputa:</span>
+                  <span>
+                    <code>{selectedDispute.id.slice(0, 13)}…</code>{' '}
+                    <button type="button" className="copy-button" onClick={() => copy(selectedDispute.id, 'dispute')}>
+                      {copied === 'dispute' ? 'Copiado ✓' : 'Copiar ID'}
+                    </button>
+                  </span>
+                </div>
+              )}
+              {selectedOrderId && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ color: '#829288' }}>Orden:</span>
+                  <span>
+                    <code>{selectedOrderId.slice(0, 13)}…</code>{' '}
+                    <button type="button" className="copy-button" onClick={() => copy(selectedOrderId, 'order')}>
+                      {copied === 'order' ? 'Copiado ✓' : 'Copiar ID'}
+                    </button>
+                  </span>
+                </div>
+              )}
+              {selectedOrder && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#829288' }}>Importe:</span>
+                    <strong>
+                      {selectedOrder.amount_sats > 0 ? `${selectedOrder.amount_sats.toLocaleString()} sats · ` : ''}
+                      {selectedOrder.fiat_amount_range.join(' – ') || '0'} {selectedOrder.fiat_code.toUpperCase()}
+                    </strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#829288' }}>Orden pública:</span>
+                    <span>{selectedOrder.kind === 'sell' ? 'Venta' : 'Compra'} · {ORDER_STATUS_LABELS[selectedOrder.status] || selectedOrder.status}</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           <div className="action-box settle">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <h4>Fallo a Favor del Comprador</h4>
-              <span className="chat-tag" style={{ background: 'rgba(82, 196, 26, 0.15)', color: '#52c41a' }}>Pago Fiat Verificado</span>
-            </div>
-            <p>
-              Liquida el Hold Invoice en custodia y transfiere los satoshis al comprador. Usar cuando el comprador haya demostrado que envió el dinero fiat.
-            </p>
-            <button
-              type="button"
-              className="button button-primary"
-              disabled={!selectedOrderId}
-              onClick={() => handleAction('adm-settle')}
-              title="Liberar fondos en garantía al comprador"
-            >
-              <Icon name="check" size={14} /> Liberar Satoshis al Comprador
-            </button>
+            <h4>1. Tomar la disputa</h4>
+            <p>El mediador la toma con su clave. La disputa pasa a «En mediación» y Mostro le entrega los datos de la orden y el canal con cada parte.</p>
+            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admtakedispute -d {selectedDispute?.id || '<id-de-la-disputa>'}</code>
+          </div>
+
+          <div className="action-box settle">
+            <h4>2a. El comprador demostró el pago</h4>
+            <p>Mostro cobra el depósito del vendedor y paga al comprador.</p>
+            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admsettle -o {selectedOrderId || '<id-de-la-orden>'}</code>
           </div>
 
           <div className="action-box refund">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <h4>Fallo a Favor del Vendedor</h4>
-              <span className="chat-tag" style={{ background: 'rgba(235, 115, 29, 0.15)', color: '#eb731d' }}>Sin Pago Fiat</span>
-            </div>
-            <p>
-              Cancela la orden en Mostro y devuelve los satoshis en custodia al vendedor. Usar cuando el comprador no haya pagado o haya desistido.
-            </p>
-            <button
-              type="button"
-              className="button button-secondary"
-              disabled={!selectedOrderId}
-              onClick={() => handleAction('adm-refund')}
-              title="Cancelar orden y devolver fondos al vendedor"
-              style={{ borderColor: '#874d1a', color: '#f5a65b' }}
-            >
-              <Icon name="arrow" size={14} /> Reembolsar Satoshis al Vendedor
-            </button>
+            <h4>2b. El pago fiat no existió</h4>
+            <p>Mostro cancela el depósito y los sats vuelven al vendedor.</p>
+            <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all' }}>mostro-cli admcancel -o {selectedOrderId || '<id-de-la-orden>'}</code>
           </div>
+
+          <p style={{ margin: 0, fontSize: '12px', color: '#829288', lineHeight: 1.4 }}>
+            La clave del propio nodo es administradora por defecto. Para no usarla en otro equipo, registra una clave de mediador aparte con <code>mostro-cli admaddsolver -n &lt;npub&gt;</code>.
+          </p>
         </div>
       </div>
     </section>
@@ -1411,7 +1579,7 @@ function App() {
   const [simulating, setSimulating] = useState(false);
   const [simulationReport, setSimulationReport] = useState<SimulationReport | null>(null);
   const [simError, setSimError] = useState('');
-  const [qrFormat, setQrFormat] = useState<'uri' | 'json'>('uri');
+  const [qrFormat, setQrFormat] = useState<'card' | 'uri' | 'json'>('card');
 
   const copyText = (text: string, label: string) => {
     copyToClipboard(text, () => {
@@ -1440,6 +1608,17 @@ function App() {
     await Promise.all([healthPromise, dashboardPromise, connectionPromise, daemonPromise, communityPromise, simScenariosPromise, notifsPromise, backupPromise, presetsPromise]); setLoading(false);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  // The daemon card and the market card describe a live state ("hace N s",
+  // "el nodo atiende a los clientes"), so they are refreshed on their own
+  // without reloading the draft being edited.
+  useEffect(() => {
+    if (page !== 'dashboard') return;
+    const timer = setInterval(() => {
+      api<Dashboard>('/api/dashboard').then(setDashboard).catch(() => {});
+      api<DaemonReport>('/api/daemon/status').then(setDaemon).catch(() => {});
+    }, 20000);
+    return () => clearInterval(timer);
+  }, [page]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -1684,6 +1863,7 @@ function App() {
   };
   const hasActiveConfiguration = daemon?.state === 'active_ready' || daemon?.state === 'active_running';
   const isDaemonRunning = daemon?.state === 'active_running';
+  const nodeInMaintenance = Boolean(daemon?.announced_fresh && daemon.announced?.tags?.maintenance_mode === 'true');
   const readiness = useMemo(() => [Boolean(draft.community.name.trim()), draft.market.fiat_currencies.length > 0, draft.nostr.relays.length > 0, draft.payment_methods.some((method) => method.active)].filter(Boolean).length, [draft]);
   const activeCategories = useMemo(() => {
     const seen = new Set<string>();
@@ -1783,8 +1963,8 @@ function App() {
           <section className="connection-card" aria-labelledby="connection-title">
             <div className="connection-heading">
               <div>
-                <h2 id="connection-title">Conexión con Mostro App y Mostrix</h2>
-                <p>Compara esta clave pública y los relays con los que muestra tu cliente Mostro.</p>
+                <h2 id="connection-title">Conexión de clientes con este nodo</h2>
+                <p>Un cliente necesita la clave pública del nodo y sus relays. Comisiones, límites y garantía los lee del evento de información que publica el daemon.</p>
               </div>
               <a href={connection.app_download_url} target="_blank" rel="noreferrer" className="button button-secondary download-link">
                 Mostro App ↗
@@ -1796,10 +1976,17 @@ function App() {
                 <div className="qr-toggle-group">
                   <button
                     type="button"
+                    className={`qr-toggle-btn ${qrFormat === 'card' ? 'active' : ''}`}
+                    onClick={() => setQrFormat('card')}
+                  >
+                    Tarjeta firmada
+                  </button>
+                  <button
+                    type="button"
                     className={`qr-toggle-btn ${qrFormat === 'uri' ? 'active' : ''}`}
                     onClick={() => setQrFormat('uri')}
                   >
-                    URI Mostro
+                    nprofile
                   </button>
                   <button
                     type="button"
@@ -1811,29 +1998,22 @@ function App() {
                 </div>
 
                 <div className="qr-box-wrapper">
-                  {qrFormat === 'uri' ? (
-                    connection.qr_svg && (
-                      <div
-                        className="qr-box"
-                        dangerouslySetInnerHTML={{ __html: connection.qr_svg }}
-                        title="Escanea URI Mostro con Mostro App o Mostrix"
-                      />
-                    )
-                  ) : (
-                    connection.qr_json_svg && (
-                      <div
-                        className="qr-box"
-                        dangerouslySetInnerHTML={{ __html: connection.qr_json_svg }}
-                        title="Escanea JSON Comunitario con Mostro App o Mostrix"
-                      />
-                    )
-                  )}
+                  {(() => {
+                    const svg = qrFormat === 'card' ? connection.qr_card_svg : qrFormat === 'uri' ? connection.qr_svg : connection.qr_json_svg;
+                    return svg ? (
+                      <div className="qr-box" dangerouslySetInnerHTML={{ __html: svg }} title="Código QR de conexión" />
+                    ) : (
+                      <span className="empty-hint">Sin tarjeta: guarda la configuración de la comunidad. El nombre, la web y el contacto no pueden contener «&», ni los relays y métodos de pago «&» o «,».</span>
+                    );
+                  })()}
                 </div>
 
                 <span className="qr-hint-caption">
-                  {qrFormat === 'uri'
-                    ? 'Escanea la URI comunitaria (mostro://...)'
-                    : 'Escanea el payload JSON de la comunidad'}
+                  {qrFormat === 'card'
+                    ? 'Tarjeta de la comunidad firmada por el nodo (mostro://community/…): nombre, relays, moneda y métodos de pago'
+                    : qrFormat === 'uri'
+                      ? 'Solo identidad y relays (nprofile). El cliente no recibe moneda ni métodos de pago'
+                      : 'La misma tarjeta firmada, como JSON'}
                 </span>
               </div>
 
@@ -1858,10 +2038,22 @@ function App() {
                   </div>
                 </div>
 
-                {qrFormat === 'uri' ? (
+                {qrFormat === 'card' ? (
+                  connection.card_uri && (
+                    <div className="connection-row">
+                      <span className="field-label">Enlace de la tarjeta firmada</span>
+                      <div className="copy-box">
+                        <code>{connection.card_uri}</code>
+                        <button type="button" className="copy-button" onClick={() => copyText(connection.card_uri || '', 'card_uri')}>
+                          {copiedField === 'card_uri' ? 'Copiado ✓' : 'Copiar'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                ) : qrFormat === 'uri' ? (
                   connection.nostr_uri && (
                     <div className="connection-row">
-                      <span className="field-label">Nostr URI (mostro://community/...)</span>
+                      <span className="field-label">Enlace con nprofile (identidad y relays)</span>
                       <div className="copy-box">
                         <code>{connection.nostr_uri}</code>
                         <button type="button" className="copy-button" onClick={() => copyText(connection.nostr_uri || '', 'uri')}>
@@ -1873,7 +2065,7 @@ function App() {
                 ) : (
                   connection.json_uri && (
                     <div className="connection-row">
-                      <span className="field-label">JSON Comunitario (Mostro App)</span>
+                      <span className="field-label">Tarjeta firmada en JSON</span>
                       <div className="copy-box">
                         <code>{connection.json_uri}</code>
                         <button type="button" className="copy-button" onClick={() => copyText(connection.json_uri || '', 'json_uri')}>
@@ -1919,12 +2111,34 @@ function App() {
             )}
             <div className="daemon-grid">
               <div className="daemon-grid-item">
-                <span>Versión Mostro Daemon</span>
-                <strong>{daemon.mostro_version ? `v${daemon.mostro_version}` : 'v0.19.0'}</strong>
+                <span>Versión del daemon Mostro</span>
+                <strong>{daemon.mostro_version ? `v${daemon.mostro_version}` : 'Desconocida'}</strong>
+                <small>
+                  {daemon.version_source === 'announced'
+                    ? 'Anunciada por el daemon en los relays'
+                    : daemon.version_source === 'binary'
+                      ? 'Binario incluido en el paquete; el daemon aún no la anuncia'
+                      : 'Versión fijada por el paquete; sin confirmar'}
+                </small>
               </div>
               <div className="daemon-grid-item">
-                <span>Protocolo de Transporte</span>
-                <strong>{`v${daemon.protocol_version || 2} (NIP-44)`}</strong>
+                <span>Anuncio del nodo en relays</span>
+                <strong>
+                  {daemon.announced && typeof daemon.announced_age_secs === 'number'
+                    ? `Hace ${formatAge(daemon.announced_age_secs)}`
+                    : 'Sin anuncio'}
+                </strong>
+                <small>
+                  {daemon.announced_fresh
+                    ? 'Reciente: los clientes ven el nodo activo'
+                    : daemon.announced
+                      ? 'Antiguo: los clientes pueden darlo por inactivo'
+                      : 'El daemon publica su información cada 5 minutos'}
+                </small>
+              </div>
+              <div className="daemon-grid-item">
+                <span>Protocolo de mensajes</span>
+                <strong>{`v${daemon.protocol_version || 2} (kind 14, NIP-44)`}</strong>
               </div>
               <div className="daemon-grid-item">
                 <span>Identidad Nostr del bot</span>
@@ -1968,23 +2182,25 @@ function App() {
           </section>
         )}
         <section className="connection-card" aria-labelledby="order-help-title">
-          <h2 id="order-help-title">Ayuda para crear órdenes en Mostrix</h2>
-          <p>Elige un importe fijo en sats o un precio de mercado con premium. Mostro rechaza combinar sats fijos con un premium distinto de cero.</p>
+          <h2 id="order-help-title">Reglas para crear órdenes desde cualquier cliente</h2>
+          <p>Una orden lleva un importe fijo en sats o un precio de mercado con prima, nunca ambos. Mostro rechaza la combinación con «invalid_parameters».</p>
           <details>
-            <summary>Cómo resolver «Invalid parameters»</summary>
+            <summary>Cómo resolver «Invalid parameters» o «prima no válida»</summary>
             <ul>
-              <li><strong>Importe fijo:</strong> Amount = 10000, Fiat = 5 USD y Premium = 0. Mantén el método de pago y la expiración elegidos.</li>
-              <li><strong>Precio de mercado:</strong> Amount = 0, Fiat = 5 USD y Premium = 10 para +10 %. Los sats se calculan con la cotización; ya no serán necesariamente 10.000.</li>
+              <li><strong>Precio de mercado:</strong> Amount = 0, Fiat = 5 USD y Premium = 10 para +10 %. Mostro calcula los sats con su cotización cuando alguien toma la orden.</li>
+              <li><strong>Importe fijo:</strong> Amount = 10000, Fiat = 5 USD y Premium = 0.</li>
+              <li><strong>Rango:</strong> mínimo y máximo en fiat, Amount = 0 y Fiat = 0. La prima es opcional.</li>
             </ul>
-            <p>El importe calculado debe cumplir los límites del nodo y la moneda debe estar admitida. El premium de la orden es distinto de la comisión del nodo.</p>
-            <p>Si Mostro Info muestra otra versión o límites distintos de los configurados aquí, compara la clave pública y los relays. Revisa el daemon que responde y si la configuración fue aplicada; guardar los ajustes no confirma que un proceso en ejecución los haya recargado.</p>
+            <p>El importe fiat y la prima son números enteros. Los sats resultantes deben estar entre el mínimo y el máximo del nodo y la moneda debe estar admitida. La prima de una orden no es la comisión del nodo.</p>
+            <p>Si una app envía los sats estimados junto con una prima, el fallo está en la app: debe enviar Amount = 0. La guía <code>docs/INTEGRACION-APPS.md</code> del repositorio detalla el contrato completo para desarrolladores.</p>
+            <p>Si el cliente muestra otra versión o límites distintos de los configurados aquí, compara la clave pública y los relays, y revisa arriba el anuncio del nodo en relays.</p>
           </details>
         </section>
         <section className="sim-card" aria-labelledby="sim-title">
           <div className="sim-heading">
             <div>
               <h2 id="sim-title">Simulador Sintético de Protocolo P2P</h2>
-              <p>Modelo interactivo sintético de órdenes, Hold Invoices Lightning, eventos Nostr y resolución de disputas (dry-run en memoria; regtest en vivo pendiente).</p>
+              <p>Modelo interactivo sintético de órdenes, Hold Invoices Lightning, eventos Nostr y resolución de disputas (dry-run en memoria, con la secuencia de Mostro v0.19.2).</p>
             </div>
             <button className="button button-secondary" onClick={() => setPage('simulation')}>
               Abrir Simulador Completo <Icon name="arrow" size={14}/>
@@ -2035,24 +2251,24 @@ function App() {
                   <small>≈ {simulationReport.financials.fiat_amount} {simulationReport.financials.fiat_currency}</small>
                 </div>
                 <div className="sim-financial-item">
-                  <span>Fianza Vendedor</span>
+                  <span>Garantía Vendedor</span>
                   <strong>{simulationReport.financials.seller_bond_sats.toLocaleString()} sats</strong>
-                  <small>Garantía de cumplimiento</small>
+                  <small>Factura retenida aparte</small>
                 </div>
                 <div className="sim-financial-item">
-                  <span>Fianza Comprador</span>
+                  <span>Garantía Comprador</span>
                   <strong>{simulationReport.financials.buyer_bond_sats.toLocaleString()} sats</strong>
-                  <small>Garantía anti-spam</small>
+                  <small>Factura retenida aparte</small>
                 </div>
                 <div className="sim-financial-item">
                   <span>Comisión Mostro</span>
                   <strong>{(simulationReport.financials.total_mostro_fee_sats ?? simulationReport.financials.fee_sats ?? 0).toLocaleString()} sats</strong>
-                  <small>{draft.market.fee_bps / 100}% de la orden</small>
+                  <small>{draft.market.fee_bps / 100}% en total, la mitad por parte</small>
                 </div>
                 <div className="sim-financial-item">
-                  <span>Bloqueado Vendedor</span>
-                  <strong>{simulationReport.financials.seller_total_locked_sats.toLocaleString()} sats</strong>
-                  <small>Orden + fianza + comisión</small>
+                  <span>Depósito del Vendedor</span>
+                  <strong>{(simulationReport.financials.seller_hold_invoice_sats ?? simulationReport.financials.seller_total_locked_sats).toLocaleString()} sats</strong>
+                  <small>Orden + su mitad de la comisión</small>
                 </div>
               </div>
               <div style={{ textAlign: 'right', marginTop: '6px' }}>
@@ -2169,7 +2385,7 @@ function App() {
         </section>
 
         <div className="dashboard-lower"><article className="setup-card"><div className="card-heading"><div><span className="card-kicker">PUESTA EN MARCHA</span><h2>Prepara tu comunidad</h2><p>Configura los datos esenciales antes de iniciar el mercado.</p></div><div className="progress-ring"><span>{readiness}<small>/4</small></span></div></div><progress className="setup-progress" value={readiness} max={4} aria-label="Preparación de la comunidad"/><div className="setup-checks"><span className={draft.community.name ? 'complete' : ''}><i>{draft.community.name ? <Icon name="check" size={12}/> : '1'}</i>Identidad</span><span className={draft.market.fiat_currencies.length ? 'complete' : ''}><i>{draft.market.fiat_currencies.length ? <Icon name="check" size={12}/> : '2'}</i>Monedas</span><span className={draft.nostr.relays.length ? 'complete' : ''}><i>{draft.nostr.relays.length ? <Icon name="check" size={12}/> : '3'}</i>Relays Nostr</span><span className={draft.payment_methods.some((m) => m.active) ? 'complete' : ''}><i>{draft.payment_methods.some((m) => m.active) ? <Icon name="check" size={12}/> : '4'}</i>Pagos</span></div><button className="button button-primary" onClick={() => setPage('config')}>Abrir configuración <Icon name="arrow" size={15}/></button></article>
-          <article className="market-card"><div className="market-card-top"><span className="market-symbol"><Icon name="bolt" size={19}/></span><span className="market-tag"><i/> AÚN NO INICIADO</span></div><div className="market-empty"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><span>₿</span></div></div><div className="market-copy"><h3>Mercado en desarrollo</h3><p>Este prototipo permite guardar los parámetros de la comunidad. El inicio del mercado aún no está disponible.</p><span className="market-note"><Icon name="alert" size={14}/> Operaciones aún no consultadas</span></div></article></div>
+          <article className="market-card"><div className="market-card-top"><span className="market-symbol"><Icon name="bolt" size={19}/></span><span className="market-tag"><i/> {dashboard?.market_started ? 'MERCADO ACTIVO' : nodeInMaintenance ? 'EN MANTENIMIENTO' : hasActiveConfiguration ? 'SIN CONFIRMAR' : 'AÚN NO INICIADO'}</span></div><div className="market-empty"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><span>₿</span></div></div><div className="market-copy"><h3>{dashboard?.market_started ? 'El nodo atiende a los clientes' : nodeInMaintenance ? 'Nodo en mantenimiento' : hasActiveConfiguration ? 'Mercado sin confirmar' : 'Mercado sin iniciar'}</h3><p>{dashboard?.market_started ? 'El daemon anuncia su información en los relays configurados, que es lo que los clientes comprueban antes de operar.' : nodeInMaintenance ? 'El daemon anuncia modo mantenimiento: no acepta órdenes ni tomas nuevas. Las operaciones en curso siguen su proceso.' : hasActiveConfiguration ? 'La configuración está activa, pero el daemon no ha anunciado su información en los relays en los últimos minutos. Revisa la tarjeta del daemon.' : 'Guarda la configuración y activa Mostro para abrir el mercado de tu comunidad.'}</p><span className="market-note"><Icon name="alert" size={14}/> {dashboard?.market_started ? 'Este panel no realiza pagos ni toma órdenes' : 'Sin operaciones que mostrar'}</span></div></article></div>
         <div className="bottom-note"><span className="secure-icon"><Icon name="check" size={13}/></span><span>Configuración local</span><span className="note-separator">·</span><span>Los cambios se guardan en el servidor de esta instancia</span><span className="note-spacer"/><span className="api-indicator"><StatusDot status={health ? 'ok' : ''}/>{health ? 'API conectada' : 'API no disponible'}</span></div>
       </section>
       )}
@@ -2191,7 +2407,7 @@ function App() {
               <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.06em', color: '#eb731d', textTransform: 'uppercase' }}>Modelo Sintético · Dry-Run en Memoria</span>
             </div>
             <p style={{ margin: 0, fontSize: '15px', color: '#9ba3af', lineHeight: 1.4 }}>
-              Este simulador valida localmente el flujo del protocolo, las garantías (bonds) y las comisiones sin ejecutar transacciones en Bitcoin/Lightning ni relays Nostr en vivo. Los eventos y firmas son sintéticos y la equivalencia fiat es meramente ilustrativa (ciclo regtest en vivo pendiente).
+              Este simulador recorre el flujo de una operación, las garantías (bonds) y las comisiones con la configuración guardada, sin ejecutar transacciones en Bitcoin/Lightning ni publicar en relays. La secuencia de mensajes y facturas es la de Mostro v0.19.2; los eventos son sintéticos y la equivalencia fiat es ilustrativa.
             </p>
           </div>
 
@@ -2260,14 +2476,14 @@ function App() {
                     <small>≈ {simulationReport.financials.fiat_amount} {simulationReport.financials.fiat_currency}</small>
                   </div>
                   <div className="sim-financial-item">
-                    <span>Fianza Vendedor</span>
+                    <span>Garantía Vendedor</span>
                     <strong>{simulationReport.financials.seller_bond_sats.toLocaleString()} sats</strong>
-                    <small>Garantía de cumplimiento</small>
+                    <small>Factura retenida aparte</small>
                   </div>
                   <div className="sim-financial-item">
-                    <span>Fianza Comprador</span>
+                    <span>Garantía Comprador</span>
                     <strong>{simulationReport.financials.buyer_bond_sats.toLocaleString()} sats</strong>
-                    <small>Garantía anti-spam</small>
+                    <small>Factura retenida aparte</small>
                   </div>
                   <div className="sim-financial-item">
                     <span>Comisión Mostro</span>
@@ -2275,14 +2491,14 @@ function App() {
                     <small>{(simulationReport.financials.fee_per_side_sats ?? 0).toLocaleString()} sats/lado · Dev: {(simulationReport.financials.dev_fee_sats ?? 0).toLocaleString()} sats</small>
                   </div>
                   <div className="sim-financial-item">
-                    <span>Bloqueado Vendedor</span>
-                    <strong>{simulationReport.financials.seller_total_locked_sats.toLocaleString()} sats</strong>
-                    <small>Total en Hold Invoice</small>
+                    <span>Depósito del Vendedor</span>
+                    <strong>{(simulationReport.financials.seller_hold_invoice_sats ?? simulationReport.financials.seller_total_locked_sats).toLocaleString()} sats</strong>
+                    <small>Orden + su mitad de la comisión</small>
                   </div>
                   <div className="sim-financial-item">
-                    <span>Bloqueado Comprador</span>
-                    <strong>{simulationReport.financials.buyer_total_locked_sats.toLocaleString()} sats</strong>
-                    <small>Fianza + tarifa</small>
+                    <span>Recibe el Comprador</span>
+                    <strong>{(simulationReport.financials.buyer_receives_sats ?? 0).toLocaleString()} sats</strong>
+                    <small>Orden − su mitad de la comisión</small>
                   </div>
                 </div>
 
@@ -2565,8 +2781,8 @@ function App() {
                   })}
                 </div>
               </div>
-              <Field label="Operación mínima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.min_trade_sats} onChange={(e) => updateMarket('min_trade_sats', Number(e.target.value))}/></Field><Field label="Operación máxima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.max_trade_sats} onChange={(e) => updateMarket('max_trade_sats', Number(e.target.value))}/></Field><Field label="Comisión del mercado" hint="Déjalo en 0% si no deseas cobrar una comisión"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.fee} required onChange={(e) => updateFee('fee', 'fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión de desarrollo" hint="Porcentaje de la comisión de Mostro destinado al desarrollo (mínimo 10%)"><div className="input-suffix"><input type="number" min="10" step="0.01" value={feeInputs.devFee} required onChange={(e) => updateFee('devFee', 'dev_fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión máxima de enrutamiento" hint="Límite tolerado para Lightning"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.routingFee} required onChange={(e) => updateFee('routingFee', 'max_routing_fee_bps', e.target.value)}/><span>%</span></div></Field></div></section>
-            <section className="config-section" id="safety"><div className="config-section-head"><span className="section-number">03</span><div><h2>Seguridad y garantías</h2><p>Opciones de bonos y prueba de trabajo para reducir el abuso.</p></div></div><Toggle checked={draft.safety.bond_enabled} onChange={(v) => updateSafety('bond_enabled', v)} label="Exigir bono para las operaciones" note="Las personas reservan sats como garantía durante una operación."/>{draft.safety.bond_enabled && <div className="form-grid compact-grid"><Field label="Bono relativo" hint="Porcentaje del valor de la operación"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.bond} required onChange={(e) => updateFee('bond', 'bond_bps', e.target.value)}/><span>%</span></div></Field><Field label="Bono base" hint="En satoshis"><input type="number" min="0" value={draft.safety.base_bond_sats} onChange={(e) => updateSafety('base_bond_sats', Number(e.target.value))}/></Field><Field label="Aplicar a"><select value={draft.safety.bond_apply_to} onChange={(e) => updateSafety('bond_apply_to', e.target.value)}><option value="both">Quien publica y quien acepta</option><option value="make">Quien publica</option><option value="take">Quien acepta</option></select></Field></div>}<div className="toggle-divider"/><Toggle checked={draft.safety.automatic_timeout_slash} onChange={(v) => updateSafety('automatic_timeout_slash', v)} label="Penalización automática por vencimiento" note="Penaliza el bond por vencimiento en estados de espera; no se aplica a todos los plazos de una operación."/><div className="form-grid compact-grid pow-grid"><Field label="Prueba de trabajo" hint="Dificultad general"><input type="number" min="0" value={draft.safety.pow} onChange={(e) => updateSafety('pow', Number(e.target.value))}/></Field><Field label="Primera conversación" hint="Dificultad para el primer contacto"><input type="number" min="0" value={draft.safety.pow_first_contact} onChange={(e) => updateSafety('pow_first_contact', Number(e.target.value))}/></Field></div></section>
+              <Field label="Operación mínima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.min_trade_sats} onChange={(e) => updateMarket('min_trade_sats', Number(e.target.value))}/></Field><Field label="Operación máxima" hint="Valor expresado en satoshis"><input type="number" min="0" value={draft.market.max_trade_sats} onChange={(e) => updateMarket('max_trade_sats', Number(e.target.value))}/></Field><Field label="Comisión total por operación" hint="Mostro cobra la mitad al comprador y la mitad al vendedor. 0% si no deseas cobrar"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.fee} required onChange={(e) => updateFee('fee', 'fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Aporte al desarrollo de Mostro" hint="Parte de tu comisión que el nodo envía al fondo de desarrollo, solo en mainnet. Entre 10% y 100%"><div className="input-suffix"><input type="number" min="10" max="100" step="0.01" value={feeInputs.devFee} required onChange={(e) => updateFee('devFee', 'dev_fee_bps', e.target.value)}/><span>%</span></div></Field><Field label="Comisión máxima de enrutamiento" hint="Tope que el nodo acepta pagar a la red al enviar los sats al comprador. Con 0% solo salen pagos por rutas gratuitas; Mostro usa 0,2% por defecto"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.routingFee} required onChange={(e) => updateFee('routingFee', 'max_routing_fee_bps', e.target.value)}/><span>%</span></div></Field></div></section>
+            <section className="config-section" id="safety"><div className="config-section-head"><span className="section-number">03</span><div><h2>Seguridad y garantías</h2><p>Opciones de bonos y prueba de trabajo para reducir el abuso.</p></div></div><Toggle checked={draft.safety.bond_enabled} onChange={(v) => updateSafety('bond_enabled', v)} label="Exigir bono para las operaciones" note="Las personas reservan sats como garantía durante una operación."/>{draft.safety.bond_enabled && <div className="form-grid compact-grid"><Field label="Bono relativo" hint="Porcentaje del valor de la operación. Se aplica el mayor entre este y el bono mínimo"><div className="input-suffix"><input type="number" min="0" step="0.01" value={feeInputs.bond} required onChange={(e) => updateFee('bond', 'bond_bps', e.target.value)}/><span>%</span></div></Field><Field label="Bono mínimo" hint="Suelo en satoshis: no se suma al porcentaje"><input type="number" min="0" value={draft.safety.base_bond_sats} onChange={(e) => updateSafety('base_bond_sats', Number(e.target.value))}/></Field><Field label="Aplicar a"><select value={draft.safety.bond_apply_to} onChange={(e) => updateSafety('bond_apply_to', e.target.value)}><option value="both">Quien publica y quien acepta</option><option value="make">Quien publica</option><option value="take">Quien acepta</option></select></Field></div>}<div className="toggle-divider"/><Toggle checked={draft.safety.automatic_timeout_slash} onChange={(v) => updateSafety('automatic_timeout_slash', v)} label="Penalización automática por vencimiento" note="Penaliza el bond por vencimiento en estados de espera; no se aplica a todos los plazos de una operación."/><div className="form-grid compact-grid pow-grid"><Field label="Prueba de trabajo" hint="Dificultad general"><input type="number" min="0" value={draft.safety.pow} onChange={(e) => updateSafety('pow', Number(e.target.value))}/></Field><Field label="Primera conversación" hint="Dificultad del primer mensaje de cada clave. Si supera la general, las apps que no la calculan no reciben respuesta"><input type="number" min="0" value={draft.safety.pow_first_contact} onChange={(e) => updateSafety('pow_first_contact', Number(e.target.value))}/></Field></div></section>
             <section className="config-section" id="nostr"><div className="config-section-head"><span className="section-number">04</span><div><h2>Relays de Nostr</h2><p>Define los relays que usará tu instancia para publicar y recibir eventos.</p></div></div><div className="chips">{draft.nostr.relays.map((relay) => <button className="chip relay-chip" type="button" key={relay} onClick={() => setDraft((old) => ({ ...old, nostr: { relays: old.nostr.relays.filter((x) => x !== relay) } }))}><span>{relay}</span><b>×</b></button>)}{draft.nostr.relays.length === 0 && <span className="empty-hint">Aún no has añadido relays.</span>}</div><div className="inline-add"><input type="url" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addRelay())} placeholder="wss://relay.example.org"/><button type="button" onClick={addRelay}>Añadir relay</button></div></section>
             <section className="config-section" id="payments">
               <div className="config-section-head"><span className="section-number">05</span><div><h2>Métodos de pago</h2><p>Activa las opciones de pago que tu comunidad puede ofrecer.</p></div></div>

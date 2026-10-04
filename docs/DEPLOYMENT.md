@@ -2,7 +2,7 @@
 
 > **Versión:** 1.0.0 (Producción)  
 > **Compatibilidad:** Umbrel OS v0.5+ / UmbrelOS 1.x  
-> **Protocolo:** Mostro P2P v0.18.8 / Nostr NIP-04, NIP-44, NIP-59 / Lightning Network (LND)
+> **Protocolo:** Mostro v0.19.2, protocolo 2 (mensajes kind 14 con cifrado NIP-44) / Lightning Network (LND)
 
 ---
 
@@ -11,13 +11,13 @@
 **Mostro Community Manager** permite a cualquier operador con un nodo Umbrel desplegar y administrar una comunidad P2P de intercambio soberano de Bitcoin sin necesidad de programar, bifurcar software ni mantener clientes móviles propios.
 
 - **Compradores y Vendedores:** Utilizan la **Mostro App oficial** (disponible para Android, iOS y Web) conectándose directamente a tu nodo mediante la identidad pública (`npub` / `nprofile`) y los relays Nostr que configures.
-- **Motor de Mercado:** Ejecuta el daemon oficial de **Mostro** (v0.18.8) orquestado de forma aislada.
+- **Motor de Mercado:** Ejecuta el daemon oficial de **Mostro** (v0.19.2) orquestado de forma aislada.
 - **Canal Financiero:** Se conecta al nodo **LND** de tu Umbrel mediante permisos mínimos de solo lectura (`readonly.macaroon`) para la interfaz administrativa, y credenciales seguras para el daemon de pagos.
 - **Panel de Control:** Servido mediante una API en Rust de alto rendimiento y una interfaz web en React con soporte para monitor de órdenes, consola de mediación cifrada, gestión de liquidez Lightning, notificaciones SSE y copias de seguridad automáticas offsite.
 
 ```text
 USUARIOS (Mostro App)
-       │ (Nostr NIP-04/44/59)
+       │ (Nostr kind 14, NIP-44)
        ▼
    Relays Nostr
        │
@@ -31,7 +31,7 @@ USUARIOS (Mostro App)
 │  │    ├── Transmisión de alertas en vivo (SSE)         │
 │  │    └── Backups cifrados automáticos (age)           │
 │  │                                                     │
-│  ├── Daemon Mostro (v0.18.8) [Orquestación Atómica]    │
+│  ├── Daemon Mostro (v0.19.2) [Orquestación Atómica]    │
 │  │                                                     │
 │  ├── LND (Lightning Node)                              │
 │  └── Bitcoin Core Node                                 │
@@ -157,16 +157,19 @@ Antes de abrir el mercado a usuarios reales:
 
 ### Monitor de Órdenes Públicas
 - En la pestaña **Órdenes públicas**, consulta en tiempo real todas las ofertas de compra y venta anunciadas por tu comunidad en Nostr (Kind 38383).
-- Filtra por tipo (compra/venta) o por estado (pendientes, en disputa, finalizadas).
-- Si alguna orden entra en estado `dispute`, aparecerá un botón directo **Mediar** para abrir la consola de arbitraje.
+- Filtra por tipo (compra/venta) o por estado (pendientes, en curso, cerradas).
+- El estado público es menos detallado que el real. Una orden tomada suele figurar como «En curso» hasta que se cierra, pero una venta tomada con la factura ya adjunta sigue como «Pendiente». El daemon no publica las disputas en el evento de la orden: las anuncia aparte y el panel las muestra en un aviso y en la pestaña **Mediación**.
+- El botón **Ver** abre los mensajes de protocolo de una orden.
 
 ### Consola de Mediación de Disputas
-- Cuando dos usuarios no se ponen de acuerdo sobre el pago fiat, la orden entra en disputa.
-- La pestaña **Mediación** se conecta a los relays Nostr y descifra en memoria los mensajes de las partes (NIP-04, NIP-44 y GiftWrap NIP-59).
-- El operador revisa los mensajes y los comprobantes aportados por las partes.
-- Acciones asistidas de resolución:
-  - **Liberar Fondos al Comprador (`adm-settle`):** Si el comprador demuestra fehacientemente que realizó el pago fiat y el vendedor no liberó los sats.
-  - **Reembolsar al Vendedor (`adm-refund`):** Si el comprador no pagó y expiró el tiempo de espera.
+- Cuando dos usuarios no se ponen de acuerdo sobre el pago fiat, una de las partes abre una disputa y el nodo la anuncia en un evento propio (kind 38386).
+- La pestaña **Mediación** lista esas disputas y, para cada orden, los mensajes de protocolo entre los usuarios y el daemon (kind 14, NIP-44), descifrados en memoria con la identidad del nodo.
+- El panel **no** puede leer el chat entre comprador y vendedor ni el del mediador con las partes, y **no** resuelve disputas: es de solo lectura.
+- La disputa la resuelve un mediador registrado en el nodo desde un cliente de mediación (Mostrix o `mostro-cli`). La clave del propio nodo es administradora por defecto:
+  - `mostro-cli admtakedispute -d <id-de-la-disputa>` para tomarla.
+  - `mostro-cli admsettle -o <id-de-la-orden>` si el comprador demostró el pago: el nodo le paga.
+  - `mostro-cli admcancel -o <id-de-la-orden>` si el pago no existió: los sats vuelven al vendedor.
+  - `mostro-cli admaddsolver -n <npub>` para registrar una clave de mediador distinta de la del nodo.
 
 ### Alertas y Notificaciones (SSE)
 - La aplicación mantiene una conexión permanente vía Server-Sent Events (`/api/notifications/sse`).
@@ -178,12 +181,14 @@ Antes de abrir el mercado a usuarios reales:
 
 ### Copias de Seguridad Automáticas Offsite
 1. En la tarjeta de respaldos del **Panel General**, ingresa una frase de cifrado segura (mínimo 16 caracteres).
-2. El sistema cifra automáticamente el estado del nodo con **age** y conserva copias en `/data/backup`.
+2. El sistema cifra con **age** la identidad Nostr del nodo y la configuración de la comunidad, y conserva copias en `/data/backup`.
 3. Política de retención: Se mantienen los **7 respaldos más recientes**, eliminando automáticamente los más antiguos.
 4. **Copia remota (Offsite):** Se recomienda programar un comando `scp` o rsync hacia un almacenamiento externo o NAS:
    ```bash
    scp -P 22 umbrel@umbrel.local:/data/backup/*.age /tu/almacenamiento/seguro/
    ```
+
+> **Qué no incluye el respaldo.** La base de datos del daemon (`/data/config/active/mostro.db`) guarda las operaciones abiertas, las disputas y las garantías, y **no** forma parte de estos respaldos. Restaurar un respaldo en otro equipo recupera la identidad y la configuración, no las operaciones en curso. Antes de migrar o reinstalar, espera a que no queden operaciones activas o copia esa base de datos con el daemon detenido. El saldo y los canales dependen del respaldo de LND, que gestiona la app Lightning de Umbrel.
 
 ### Restauración ante Desastres (Disaster Recovery)
 Si necesitas reinstalar tu servidor o migrar a un nuevo hardware:

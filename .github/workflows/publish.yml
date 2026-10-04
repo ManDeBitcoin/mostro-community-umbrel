@@ -42,6 +42,8 @@ jobs:
           context: .
           file: docker/Dockerfile.umbrel
           platforms: linux/${{ matrix.arch }}
+          build-args: |
+            MANAGER_VERSION=${{ github.ref_name }}
           load: true
           tags: ghcr.io/mandebitcoin/mostro-community-umbrel:sha-${{ github.sha }}-${{ matrix.arch }}
           cache-from: type=gha,scope=manager-${{ matrix.arch }}

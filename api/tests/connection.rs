@@ -1,13 +1,14 @@
 use mostro_community_api::{
     config::Configuration,
     connection::{
-        CommunityCard, ConnectionInfo, get_community_card, get_connection_info,
-        verify_community_card,
+        CommunityCard, ConnectionInfo, card_canonical_string, card_deep_link, get_community_card,
+        get_connection_info, verify_community_card,
     },
     identity,
     store::Store,
 };
 use nostr::{Keys, SecretKey, ToBech32};
+use sha2::{Digest, Sha256};
 
 #[test]
 fn reports_missing_identity_safely() {
@@ -22,6 +23,8 @@ fn reports_missing_identity_safely() {
     assert_eq!(info.qr_svg, None);
     assert_eq!(info.qr_json_svg, None);
     assert_eq!(info.json_uri, None);
+    assert_eq!(info.card_uri, None);
+    assert_eq!(info.qr_card_svg, None);
     assert_eq!(info.card, None);
     assert!(info.relays.is_empty());
 }
@@ -73,10 +76,30 @@ fn generates_nprofile_and_uri_with_relays_without_exposing_secret() {
         .expect("json_uri should be present");
     let parsed_card: CommunityCard = serde_json::from_str(json_uri).expect("valid card json");
     assert_eq!(parsed_card.version, 1);
-    assert_eq!(parsed_card.pubkey.as_deref(), Some(public_hex.as_str()));
+    assert_eq!(parsed_card.pubkey, public_hex);
     assert_eq!(parsed_card.fee_bps, 60);
     assert_eq!(parsed_card.bond_percent, 3);
     assert!(verify_community_card(&parsed_card));
+
+    // The deep link carries the same signed card as unpadded base64url JSON.
+    let card_uri = info
+        .card_uri
+        .as_deref()
+        .expect("card_uri should be present");
+    let payload = card_uri
+        .strip_prefix("mostro://community/")
+        .expect("deep link scheme");
+    assert!(
+        payload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    );
+    assert_eq!(decode_base64url(payload), json_uri.as_bytes());
+    assert!(
+        info.qr_card_svg
+            .as_deref()
+            .is_some_and(|svg| svg.contains("<svg"))
+    );
 
     let qr_json_svg = info
         .qr_json_svg
@@ -93,93 +116,96 @@ fn generates_nprofile_and_uri_with_relays_without_exposing_secret() {
 
 // ── CommunityCard tests ───────────────────────────────────────────────────────
 
-#[test]
-fn community_card_without_identity_returns_unsigned() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(dir.path().into()).unwrap();
-    let config: Configuration =
+fn decode_base64url(input: &str) -> Vec<u8> {
+    let value = |c: u8| -> u32 {
+        match c {
+            b'A'..=b'Z' => u32::from(c - b'A'),
+            b'a'..=b'z' => u32::from(c - b'a') + 26,
+            b'0'..=b'9' => u32::from(c - b'0') + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => panic!("not base64url"),
+        }
+    };
+    let mut out = Vec::new();
+    for chunk in input.as_bytes().chunks(4) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, c)| acc | (value(*c) << (18 - 6 * i)));
+        for i in 0..chunk.len() - 1 {
+            out.push((n >> (16 - 8 * i)) as u8);
+        }
+    }
+    out
+}
+
+fn store_with_fixture(dir: &std::path::Path, relays: &[&str]) -> Store {
+    let mut store = Store::open(dir.into()).unwrap();
+    let mut config: Configuration =
         serde_json::from_str(include_str!("fixtures/community.json")).unwrap();
+    config.nostr.relays = relays.iter().map(|r| r.to_string()).collect();
     store.save(config).unwrap();
+    store
+}
 
-    let card: CommunityCard = get_community_card(dir.path(), &store);
+fn import_identity(dir: &std::path::Path, seed: u8) -> Keys {
+    let keys = Keys::new(SecretKey::from_slice(&[seed; 32]).unwrap());
+    let secret = keys.secret_key().to_bech32().unwrap();
+    let public = keys.public_key().to_bech32().unwrap();
+    identity::import(dir, &secret, &public).unwrap();
+    keys
+}
 
-    // No identity → no pubkey, no signature
-    assert_eq!(card.version, 1);
-    assert!(
-        card.pubkey.is_none(),
-        "pubkey must be None without identity"
-    );
-    assert!(
-        card.signature.is_none(),
-        "signature must be None without identity"
-    );
+#[test]
+fn community_card_is_not_served_without_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_with_fixture(dir.path(), &["wss://relay.example.com"]);
+    // The app's deserializer requires string pubkey and signature, so a card
+    // that cannot be signed is not produced at all.
+    assert_eq!(get_community_card(dir.path(), &store), None);
+    assert_eq!(get_connection_info(dir.path(), &store).card, None);
+}
 
-    // Data fields populated from store
-    assert_eq!(card.name, "Comunidad de prueba");
-    assert_eq!(card.currency, "EUR");
-    assert_eq!(card.fee_bps, 60);
-    assert_eq!(card.bond_percent, 3); // 300 bps → 3 %
-    assert!(!card.payment_methods.is_empty());
-    assert!(!verify_community_card(&card));
-
-    // Secret must never leak
-    let json = serde_json::to_string(&card).unwrap();
-    assert!(!json.contains("nsec"));
+#[test]
+fn community_card_is_not_served_without_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().into()).unwrap();
+    import_identity(dir.path(), 9);
+    assert_eq!(get_community_card(dir.path(), &store), None);
+    let info = get_connection_info(dir.path(), &store);
+    assert_eq!(info.status, "ready");
+    assert_eq!(info.card, None);
+    assert_eq!(info.card_uri, None);
 }
 
 #[test]
 fn community_card_with_identity_is_signed_and_verifiable() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(dir.path().into()).unwrap();
-    let mut config: Configuration =
-        serde_json::from_str(include_str!("fixtures/community.json")).unwrap();
-    config.nostr.relays = vec![
-        "wss://relay.mostro.network".to_string(),
-        "wss://nostr.mom".to_string(),
-    ];
-    store.save(config).unwrap();
-
-    let keys = Keys::new(SecretKey::from_slice(&[42; 32]).unwrap());
+    let store = store_with_fixture(
+        dir.path(),
+        &["wss://relay.mostro.network", "wss://nostr.mom"],
+    );
+    let keys = import_identity(dir.path(), 42);
     let secret = keys.secret_key().to_bech32().unwrap();
-    let public = keys.public_key().to_bech32().unwrap();
-    identity::import(dir.path(), &secret, &public).unwrap();
 
-    let card: CommunityCard = get_community_card(dir.path(), &store);
+    let card: CommunityCard = get_community_card(dir.path(), &store).expect("signed card");
 
-    // Pubkey present and matches imported key (64 hex lowercase)
-    let card_pubkey = card.pubkey.as_deref().expect("pubkey must be present");
-    assert_eq!(card_pubkey, keys.public_key().to_hex());
-    assert_eq!(card_pubkey.len(), 64);
-
-    // Relays present
-    assert_eq!(card.relays.len(), 2);
-    assert_eq!(card.relays[0], "wss://relay.mostro.network");
-    assert_eq!(card.relays[1], "wss://nostr.mom");
-
-    // Currency and fee
+    assert_eq!(card.pubkey, keys.public_key().to_hex());
+    assert_eq!(card.pubkey.len(), 64);
+    assert_eq!(
+        card.relays,
+        ["wss://relay.mostro.network", "wss://nostr.mom"]
+    );
     assert_eq!(card.currency, "EUR");
     assert_eq!(card.fee_bps, 60);
-    assert_eq!(card.bond_percent, 3);
+    assert_eq!(card.bond_percent, 3); // 300 bps → 3 %
+    assert_eq!(card.signature.len(), 128);
+    assert!(card.signature.chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(verify_community_card(&card));
 
-    // Signature present and 128 hex chars (64-byte Schnorr sig)
-    let sig_hex = card
-        .signature
-        .as_deref()
-        .expect("signature must be present");
-    assert_eq!(
-        sig_hex.len(),
-        128,
-        "Schnorr signature must be 64 bytes = 128 hex chars"
-    );
-    assert!(sig_hex.chars().all(|c| c.is_ascii_hexdigit()));
-
-    // Verify the signature cryptographically with verify_community_card
-    assert!(
-        verify_community_card(&card),
-        "Schnorr signature must verify against the card's public key"
-    );
-
-    // Serialized format matches the standard schema
+    // Every field the app deserializes is present with the type it expects:
+    // strings for pubkey/signature, never null.
     let val: serde_json::Value = serde_json::to_value(&card).unwrap();
     assert_eq!(val["version"], 1);
     assert!(val["name"].is_string());
@@ -193,7 +219,130 @@ fn community_card_with_identity_is_signed_and_verifiable() {
     assert!(val["contact"].is_string());
     assert_eq!(val["signature"].as_str().unwrap().len(), 128);
 
-    // Secret must never appear in the serialised card
     let json = serde_json::to_string(&card).unwrap();
     assert!(!json.contains(&secret));
+    assert!(!json.contains("nsec"));
+}
+
+/// Contract with the client app: the signature covers exactly this string
+/// (`canonical_digest` in the app's `rust/src/api/community.rs`). If this test
+/// has to change, every deployed app stops verifying cards from this node.
+#[test]
+fn community_card_canonical_string_matches_the_app_verifier() {
+    let card = CommunityCard {
+        version: 1,
+        name: "  Bitcoin Medellín ".into(),
+        pubkey: "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90".into(),
+        relays: vec![
+            "wss://relay.mostro.network/".into(),
+            " wss://nos.lol".into(),
+        ],
+        currency: "cop".into(),
+        payment_methods: vec!["Nequi".into(), "Bancolombia".into()],
+        fee_bps: 60,
+        bond_percent: 3,
+        website: " https://example.com ".into(),
+        contact: String::new(),
+        signature: String::new(),
+    };
+    let canonical = card_canonical_string(&card);
+    assert_eq!(
+        canonical,
+        "v=1&name=Bitcoin Medellín\
+         &pubkey=a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90\
+         &relays=wss://nos.lol,wss://relay.mostro.network\
+         &currency=COP&payment_methods=Nequi,Bancolombia\
+         &fee_bps=60&bond_percent=3&website=https://example.com&contact="
+    );
+    // Digest pinned with an independent SHA-256 of the same bytes.
+    let digest = Sha256::digest(canonical.as_bytes());
+    assert_eq!(
+        digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+        "01496e8a7567a56c49d1ed26c06152311862282282a5ec8c9865a6b6a94a4534"
+    );
+}
+
+#[test]
+fn community_card_relays_are_normalised_before_signing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_with_fixture(
+        dir.path(),
+        &["wss://relay.mostro.network/", "wss://nos.lol"],
+    );
+    import_identity(dir.path(), 5);
+    let card = get_community_card(dir.path(), &store).expect("signed card");
+    // The app strips the trailing slash before verifying; the card must
+    // already carry the relay in that form or the signature would not match.
+    assert_eq!(card.relays, ["wss://relay.mostro.network", "wss://nos.lol"]);
+    assert!(verify_community_card(&card));
+
+    // Relay order is not part of the signature; any other change is.
+    let mut reordered = card.clone();
+    reordered.relays.reverse();
+    assert!(verify_community_card(&reordered));
+    let mut tampered = card.clone();
+    tampered.relays.push("wss://evil.example".into());
+    assert!(!verify_community_card(&tampered));
+    let mut tampered = card.clone();
+    tampered.fee_bps += 1;
+    assert!(!verify_community_card(&tampered));
+    let mut unsigned = card.clone();
+    unsigned.signature.clear();
+    assert!(!verify_community_card(&unsigned));
+}
+
+#[test]
+fn community_card_deep_link_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_with_fixture(dir.path(), &["wss://relay.mostro.network"]);
+    import_identity(dir.path(), 6);
+    let card = get_community_card(dir.path(), &store).expect("signed card");
+    let link = card_deep_link(&card).expect("deep link");
+    let payload = link.strip_prefix("mostro://community/").unwrap();
+    assert!(!payload.contains('='), "base64url must be unpadded");
+    let decoded: CommunityCard = serde_json::from_slice(&decode_base64url(payload)).unwrap();
+    assert_eq!(decoded, card);
+    assert!(verify_community_card(&decoded));
+}
+
+/// The v1 canonical string is not escaped, so separators inside a value would
+/// let one signature validate a card the operator never configured.
+#[test]
+fn community_card_is_withheld_when_the_signed_string_would_be_ambiguous() {
+    let base: Configuration =
+        serde_json::from_str(include_str!("fixtures/community.json")).unwrap();
+    assert!(!base.card_is_ambiguous());
+    assert!(base.validate_for_save().is_ok());
+
+    let mutations: [fn(&mut Configuration); 5] = [
+        |c| c.community.name = "Bitcoin & Lightning".into(),
+        |c| c.community.website = "https://site.example/?a=1&contact=https://evil.example".into(),
+        |c| c.community.contact = "https://t.me/x?a=1&b=2".into(),
+        |c| c.payment_methods[0].label = "Nequi, Daviplata".into(),
+        |c| c.nostr.relays = vec!["wss://relay.example.com/?a=1&b=2".into()],
+    ];
+    for mutate in mutations {
+        let mut config = base.clone();
+        mutate(&mut config);
+        assert!(config.card_is_ambiguous());
+        // Still a loadable draft, but it cannot be saved again as it is...
+        assert!(config.validate().is_ok());
+        assert!(config.validate_for_save().is_err());
+        // ...and no card is signed for it.
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path().into()).unwrap();
+        store.save(config).unwrap();
+        import_identity(dir.path(), 8);
+        assert_eq!(get_community_card(dir.path(), &store), None);
+        assert_eq!(get_connection_info(dir.path(), &store).card_uri, None);
+    }
+
+    // An inactive payment method is not part of the card.
+    let mut config = base.clone();
+    config.payment_methods[0].label = "Nequi, Daviplata".into();
+    config.payment_methods[0].active = false;
+    assert!(!config.card_is_ambiguous());
 }

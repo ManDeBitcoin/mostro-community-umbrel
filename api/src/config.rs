@@ -154,6 +154,64 @@ impl Configuration {
     }
 }
 
+impl Configuration {
+    /// Checks applied when the operator saves a draft, on top of [`validate`].
+    /// They are not part of [`validate`] because a stored draft from an older
+    /// version must still open; the renderer keeps such drafts loadable by
+    /// mostrod, but new saves have to say what the daemon will really do.
+    ///
+    /// [`validate`]: Configuration::validate
+    pub fn validate_for_save(&self) -> Result<(), &'static str> {
+        self.validate()?;
+        // mostrod refuses to start with dev_fee_percentage outside 0.10..=1.0.
+        if self.market.dev_fee_bps < MIN_DEV_FEE_BPS {
+            return Err(
+                "La comisión de desarrollo de Mostro debe estar entre el 10 % y el 100 % de la comisión del nodo",
+            );
+        }
+        if self.card_is_ambiguous() {
+            return Err(
+                "El nombre, la web y el contacto no pueden contener «&», ni los relays y métodos de pago activos «&» o «,»: la tarjeta firmada de la comunidad dejaría de ser inequívoca",
+            );
+        }
+        Ok(())
+    }
+
+    /// The v1 community card is signed over `key=value&...` with lists joined
+    /// by commas and nothing escaped (the app's verifier defines it). A `&` or
+    /// a `,` inside a value would let one signature cover two different cards.
+    pub fn card_is_ambiguous(&self) -> bool {
+        let c = &self.community;
+        [&c.name, &c.website, &c.contact]
+            .iter()
+            .any(|value| value.contains('&'))
+            || self
+                .nostr
+                .relays
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    self.payment_methods
+                        .iter()
+                        .filter(|method| method.active)
+                        .map(|method| method.label.as_str()),
+                )
+                .any(|value| value.contains('&') || value.contains(','))
+    }
+}
+
+/// Lowest `dev_fee_percentage` mostrod accepts (0.10), in basis points.
+pub const MIN_DEV_FEE_BPS: u16 = 1_000;
+
+/// Upstream `settings.tpl.toml` the renderer starts from.
+///
+/// The embedded file is the v0.19.0 template. For mostrod v0.19.2 it yields
+/// the same settings: upstream only added a commented-out `serbero_pubkey`
+/// block, and `api/tests/configuration.rs` fails if the two ever differ once
+/// parsed. The v0.19.2 copy in `config/upstream` is GPL-3.0-or-later like the
+/// rest of that release, so it is kept as a reference and not compiled in.
+const SETTINGS_TEMPLATE: &str = include_str!("../../config/upstream/settings.v0.19.0.toml");
+
 /// Render an inert candidate from the pinned upstream template. The imported nsec
 /// stays in its own file; Mostro will receive it via MOSTRO_NSEC_PRIVKEY only when
 /// a separate, tested daemon launcher exists. RPC remains disabled here.
@@ -185,27 +243,37 @@ pub fn render_settings(
         return Err("Las rutas de credenciales LND deben ser absolutas".into());
     }
     let mut doc: toml::Value =
-        toml::from_str(include_str!("../../config/upstream/settings.v0.19.0.toml"))
-            .map_err(|_| "Plantilla inválida")?;
+        toml::from_str(SETTINGS_TEMPLATE).map_err(|_| "Plantilla inválida")?;
     doc["lightning"]["lnd_grpc_host"] = lnd_host.into();
     doc["lightning"]["lnd_cert_file"] = cert.into();
     doc["lightning"]["lnd_macaroon_file"] = macaroon.into();
     doc["nostr"]["nsec_privkey"] = "".into();
     doc["nostr"]["relays"] =
         toml::Value::try_from(&config.nostr.relays).map_err(|_| "Relays inválidos")?;
+    // Kind 0 metadata. An empty value is left out: mostrod logs
+    // "Invalid website URL" on every start for an empty website.
     for (key, value) in [
         ("name", &config.community.name),
         ("about", &config.community.about),
         ("website", &config.community.website),
     ] {
-        doc["mostro"]
-            .as_table_mut()
-            .unwrap()
-            .insert(key.into(), value.as_str().into());
+        let value = value.trim();
+        if !value.is_empty() {
+            doc["mostro"]
+                .as_table_mut()
+                .unwrap()
+                .insert(key.into(), value.into());
+        }
     }
     for (key, value) in [
+        // Total fee of a trade; mostrod charges half to each party.
         ("fee", config.market.fee_bps),
-        ("dev_fee_percentage", config.market.dev_fee_bps.max(1_000)),
+        // Share of that fee sent to Mostro development. Older drafts may hold
+        // less than the minimum mostrod accepts; they are raised to it.
+        (
+            "dev_fee_percentage",
+            config.market.dev_fee_bps.max(MIN_DEV_FEE_BPS),
+        ),
         ("max_routing_fee", config.market.max_routing_fee_bps),
     ] {
         doc["mostro"][key] = (f64::from(value) / 10_000.0).into();
@@ -478,6 +546,8 @@ mod tests {
     fn all_regional_presets_are_valid() {
         for preset in get_regional_presets() {
             assert!(preset.config.validate().is_ok());
+            // A preset must be savable as it is.
+            assert!(preset.config.validate_for_save().is_ok());
         }
     }
 }

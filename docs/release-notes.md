@@ -1,3 +1,18 @@
+# Mostro Community Manager v1.0.12
+
+- Incluye el daemon oficial Mostro v0.19.2, comprobado por SHA-256 para amd64 y arm64. La actualización no requiere migración de base de datos ni cambios de configuración.
+- Mostro v0.19.2 envía el aporte al desarrollo a la nueva dirección del proyecto, porque la anterior fue suspendida, y solo cuando LND opera en mainnet.
+- El monitor de órdenes reconoce el estado «En curso» que el daemon publica al tomarse una orden. Antes descartaba esa revisión y la orden seguía figurando como oferta abierta.
+- Las disputas se leen de los eventos propios del nodo (kind 38386) y generan una alerta al abrirse.
+- La consola de mediación muestra las disputas y los mensajes de protocolo de cada orden, y explica cómo resolverlas con un cliente de mediación. Se retiraron los botones de resolución, que no ejecutaban ninguna acción.
+- La tarjeta del daemon muestra la versión que el nodo anuncia en los relays y hace cuánto. Si el daemon se reinicia en bucle, el panel lo indica.
+- Guardar un cambio que no altera la configuración del daemon ya no lo reinicia.
+- La tarjeta de la comunidad se firma con el formato que verifican las apps y se ofrece como enlace `mostro://community/…` con todos los datos.
+- El panel ya no publica por su cuenta el evento de información del nodo: lo publica solo el daemon.
+- El simulador sigue la secuencia y los importes reales de una operación en Mostro v0.19.2.
+- El panel avisa cuando la prueba de trabajo de la primera conversación supera a la general: las apps que no la calculan dejan de recibir respuesta del daemon.
+- Nueva guía técnica para desarrolladores de apps: `docs/INTEGRACION-APPS.md`.
+
 # Mostro Community Manager v1.0.11
 
 - Actualización integral al Protocolo Mostro v0.19.0 (Protocolo de Transporte v2 sobre Nostr Kind 14 con cifrado NIP-44 v2).

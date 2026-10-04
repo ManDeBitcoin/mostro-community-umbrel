@@ -418,7 +418,7 @@ pub fn list_backups(target_dir: &Path) -> Vec<BackupEntryInfo> {
             }
         }
     }
-    list.sort_by(|a, b| b.modified_timestamp.cmp(&a.modified_timestamp));
+    list.sort_by_key(|entry| std::cmp::Reverse(entry.modified_timestamp));
     list
 }
 
@@ -450,7 +450,7 @@ pub fn apply_retention_policy(
     }
 
     // Sort descending by modified time (newest first)
-    backups.sort_by(|a, b| b.1.cmp(&a.1));
+    backups.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     let mut removed = Vec::new();
     if backups.len() > keep {
