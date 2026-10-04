@@ -349,11 +349,11 @@ El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garan
 - `npm --prefix web run build` y `python3 -m unittest discover -s scripts/tests`.
 - `sh scripts/mostro-entrypoint-smoke.sh`, ampliado con el modo de espera: salida con error ante un arranque rechazado, registro de caídas con pausa entre reintentos, reinicio por petición del panel y parada al retirar la configuración.
 - Interfaz comprobada con Chromium sin errores de consola contra el daemon de regtest.
+- Imagen Docker: este equipo no da acceso al socket de Docker a la sesión de desarrollo, así que se construyó en GitHub Actions con el workflow `image-check.yml` del PR de esta versión. Pasó en amd64 y arm64: construcción con las comprobaciones de Rust dentro de la imagen, `scripts/container-smoke.sh`, `scripts/lnd-smoke.py` y `scripts/verify-mostro-image.sh`.
 - Contexto de compilación de la imagen simulado sin Docker: con solo `Cargo.toml`, `Cargo.lock`, `api/` y `config/`, y Rust 1.94.0, pasan el formato, las pruebas, clippy y la compilación de release. `npm ci` y la compilación del frontend pasan desde los archivos versionados. El binario de release responde `{"mode":"release","version":"1.0.12"}` en `/api/health` cuando se compila con `MANAGER_VERSION=v1.0.12`.
 
 ### No verificado
 
-- Construcción de las imágenes Docker y `scripts/container-smoke.sh`: este equipo no da acceso al socket de Docker a la sesión de desarrollo. Las ejecuta el workflow de publicación.
 - Penalización automática por vencimiento, vencimiento cuando falla quien publicó, modo mantenimiento, restauración de sesión, Cashu y Serbero. Su descripción procede del código de v0.19.2.
 - La app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 - La actualización del nodo en producción de v0.19.0 a v0.19.2.
