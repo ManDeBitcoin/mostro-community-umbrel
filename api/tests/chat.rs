@@ -37,6 +37,11 @@ const BOND_ORDER: &str = "6e07c373-b827-465b-8c77-af4b59fe8cfa";
 const REPUTATION_MESSAGES: &str =
     include_str!("fixtures/mostrod-v0.19.2/protocol-messages-reputation.jsonl");
 const REPUTATION_ORDER: &str = "14fd6884-a025-4165-9571-1fa5c773f22c";
+/// A disputed trade that a solver cancels while slashing the buyer's bond,
+/// and the seller's claim of the counterparty share. Same bonded node.
+const SLASH_MESSAGES: &str = include_str!("fixtures/mostrod-v0.19.2/protocol-messages-slash.jsonl");
+const SLASH_ORDER: &str = "3d85146b-12d3-461f-a7e5-3e6acacd5634";
+const SLASH_DISPUTE: &str = "0c436ff2-ac00-4544-a195-14fb9940ed11";
 const REAL_ORDER: &str = "c359c135-f15b-45c8-8c8d-209f0763bd59";
 const REAL_DISPUTE: &str = "3d62ac23-24b6-4846-8047-4eea1bd22235";
 
@@ -469,6 +474,57 @@ fn decodes_a_real_trade_in_reputation_mode() {
         assert!(REPUTATION_MESSAGES.contains(identity));
         assert!(!dump.contains(identity), "an identity key leaked");
     }
+}
+
+#[test]
+fn decodes_a_real_dispute_with_a_slashed_bond() {
+    let node = fixture_keys(1);
+    let mut cache = ChatCache::new();
+    let (_, stored) = replay_capture(SLASH_MESSAGES, &node, &mut cache, false, replay_base());
+    // 32 captured messages; only the maker's first request names no order.
+    assert_eq!(SLASH_MESSAGES.lines().count(), 32);
+    assert_eq!(stored, 31);
+    let history = cache.to_history(SLASH_ORDER);
+    assert_eq!(history.count, 31);
+    assert_eq!(history.dispute_id.as_deref(), Some(SLASH_DISPUTE));
+
+    let content_of = |role: &str, action: &str| -> Vec<&str> {
+        history
+            .messages
+            .iter()
+            .filter(|m| m.role == role && m.action.as_deref() == Some(action))
+            .map(|m| m.content.as_str())
+            .collect()
+    };
+    // The solver's decision travels with the cancel.
+    assert_eq!(
+        content_of("admin", "admin-cancel"),
+        ["ejecuta la garantía del comprador"]
+    );
+    // What follows carries an order whose `amount` is the slashed bond or the
+    // counterparty share, never the 35 000 sats of the trade.
+    assert_eq!(
+        content_of("daemon", "bond-slashed"),
+        ["garantía ejecutada: 1054 sats"]
+    );
+    assert_eq!(
+        content_of("daemon", "add-bond-invoice"),
+        ["garantía ejecutada: 527 sats a reclamar con una factura"]
+    );
+    assert_eq!(
+        content_of("user", "add-bond-invoice"),
+        ["factura Lightning lnbcrt5270n1p4…"]
+    );
+    assert_eq!(
+        content_of("daemon", "bond-invoice-accepted"),
+        ["factura de cobro de la garantía aceptada: 527 sats"]
+    );
+    assert_eq!(
+        content_of("daemon", "bond-payout-completed"),
+        ["parte de la garantía pagada: 527 sats"]
+    );
+    let dump = serde_json::to_string(&history).unwrap();
+    assert!(!dump.contains("lnbcrt5270n1p4v9z9j"), "an invoice leaked");
 }
 
 /// Relays return stored events newest first and the two subscriptions

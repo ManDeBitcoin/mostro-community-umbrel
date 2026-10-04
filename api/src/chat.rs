@@ -746,6 +746,25 @@ pub fn summarize_message(action: &str, payload: &Value) -> String {
         }
         return out.join(" · ");
     }
+    // The messages that follow a slashed bond carry an order too, and again
+    // its `amount` is not the trade: it is the slashed bond or the share owed
+    // to the counterparty.
+    let carried_sats = payload
+        .get("order")
+        .and_then(|order| order.get("amount"))
+        .and_then(Value::as_i64);
+    let label = match action {
+        "bond-slashed" => Some("garantía ejecutada"),
+        "bond-invoice-accepted" => Some("factura de cobro de la garantía aceptada"),
+        "bond-payout-completed" => Some("parte de la garantía pagada"),
+        _ => None,
+    };
+    if let Some(label) = label {
+        return match carried_sats {
+            Some(sats) => format!("{label}: {sats} sats"),
+            None => label.to_string(),
+        };
+    }
     summarize_payload(payload)
 }
 

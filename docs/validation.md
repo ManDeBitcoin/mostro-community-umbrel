@@ -324,12 +324,16 @@ Nodo con garantía y prueba de trabajo de primer contacto:
 - `new-order`, `take-sell` y `admin-take-dispute` sin prueba de trabajo no reciben respuesta. Con ella se aceptan, y los mensajes siguientes de esa clave ya no la necesitan.
 - Garantía de quien publica: la respuesta a `new-order` es `pay-bond-invoice` (1 056 sats, 900 s de vigencia) y la orden no se publica hasta pagarla. Garantía de quien toma: 300 s de vigencia, y la orden sigue `pending` hasta pagarla.
 - Venta completa con ambas garantías: depósito `SETTLED` y las dos garantías `CANCELED`, es decir, devueltas. Lo mismo tras una disputa resuelta con `admin-settle` sin penalización.
+- Dos tomas simultáneas de una misma orden: ambas reciben `pay-bond-invoice`, gana la primera garantía pagada y la otra parte recibe `canceled` con su factura de garantía `CANCELED`. Una tercera toma devuelve `invalid_order_status`.
+- Penalización: disputa resuelta con `admin-cancel` y `bond_resolution` contra el comprador. Garantía del comprador `SETTLED` (1 054 sats) y `bond-slashed`; el vendedor recibe `add-bond-invoice` por 527 sats, envía su factura y recibe `bond-invoice-accepted` y `bond-payout-completed` con la factura `SETTLED`. Su propia garantía queda `CANCELED`.
+- Orden de compra creada con la factura del comprador incluida: no hay petición `add-invoice` y el comprador cobra al liberarse la operación.
+- Vencimiento: quien toma no envía su factura. A los 915 s, con `expiration_seconds = 900`, recibe `canceled`, quien publicó recibe de nuevo `new-order`, la orden vuelve a `pending` y la garantía de quien tomó queda `CANCELED`.
 
 Modo de reputación, con un cliente propio que no usa mostro-core:
 
 - Venta completa con clave de identidad, una clave por operación, `trade_index`, firma interna y prueba de identidad. Confirma la serialización canónica y el texto de la prueba de identidad descritos en la guía, que incluye un vector verificable.
 - `trade_index` repetido: `cant-do: invalid_trade_index`. Firma interna o prueba de identidad alteradas: sin respuesta.
-- Valoraciones: `rate-user` devuelve `rate-received`. No hay respuesta si la otra parte opera en privacidad total ni en una segunda valoración. La siguiente orden de la identidad valorada anuncia el tag `rating` actualizado.
+- Valoraciones: `rate-user` devuelve `rate-received`. No hay respuesta si la otra parte opera en privacidad total ni en una segunda valoración. La siguiente orden de la identidad valorada anuncia el tag `rating` actualizado. Los eventos kind 38384 salieron en el lote horario del daemon, con `d` igual a la clave de operación de quien valoró.
 - Una valoración enviada 135 s después del cierre sin prueba de trabajo no recibe respuesta. Con la prueba se acepta. El panel avisa ahora cuando `pow_first_contact` supera a `pow`.
 
 El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garantía, su disputa enlazada con la orden y los 26 mensajes de la operación en modo de reputación. Las capturas nuevas se añadieron a los fixtures.
@@ -340,7 +344,7 @@ El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garan
 
 ### Comprobaciones del repositorio
 
-- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (120 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (121 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
 - Revisión independiente de los cambios en seis frentes (backend, seguridad, script supervisor y empaquetado, interfaz, guía de integración y pruebas), con verificación de cada hallazgo. Los hallazgos se corrigieron antes de cerrar esta validación.
 - `npm --prefix web run build` y `python3 -m unittest discover -s scripts/tests`.
 - `sh scripts/mostro-entrypoint-smoke.sh`, ampliado con el modo de espera: salida con error ante un arranque rechazado, registro de caídas con pausa entre reintentos, reinicio por petición del panel y parada al retirar la configuración.
@@ -350,6 +354,6 @@ El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garan
 ### No verificado
 
 - Construcción de las imágenes Docker y `scripts/container-smoke.sh`: este equipo no da acceso al socket de Docker a la sesión de desarrollo. Las ejecuta el workflow de publicación.
-- Penalización y cobro de garantías, vencimiento de plazos, modo mantenimiento, órdenes de compra con la factura incluida, publicación del kind 38384, Cashu y Serbero. Su descripción procede del código de v0.19.2.
+- Penalización automática por vencimiento, vencimiento cuando falla quien publicó, modo mantenimiento, restauración de sesión, Cashu y Serbero. Su descripción procede del código de v0.19.2.
 - La app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 - La actualización del nodo en producción de v0.19.0 a v0.19.2.

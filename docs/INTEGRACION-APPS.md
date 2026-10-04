@@ -139,7 +139,7 @@ Con la garantía activada y prueba de trabajo de primer contacto, otro nodo v0.1
 | 0 | Nombre, descripción y web de la instancia |
 | 10002 | Lista de relays del nodo (un tag `r` por relay conectado). No es fiable como lista completa: solo incluye los relays conectados al publicar |
 | 30078, `d = "mostro-rates"` | Cotizaciones BTC/fiat que usa el nodo, `{"BTC":{"USD":84706.4,…}}`, con expiración de 10 minutos |
-| 38384 | Valoración acumulada tras una operación. El nodo las publica en lotes, cada hora por defecto, y con `d` igual a una clave de operación, no a la identidad. Para mostrar reputación usa el tag `rating` de la orden y el payload `peer` |
+| 38384 | Valoración acumulada de un usuario tras recibir una valoración: tags `total_reviews`, `total_rating`, `last_rating`, `min_rate`, `max_rate`, `since` y `days`. El nodo las publica en lotes, cada hora por defecto, y con `d` igual a la clave de operación de quien valoró, no a la identidad valorada. Para mostrar reputación usa el tag `rating` de la orden y el payload `peer` |
 | 8383 | Auditoría del aporte al desarrollo de Mostro, solo en mainnet |
 
 Para estimar sats en pantalla usa la cotización del propio nodo (kind 30078) y no un proveedor distinto: es el precio con el que el daemon fijará la operación.
@@ -423,7 +423,7 @@ Detalles que una app debe contemplar:
 | 13 | ← `released`, ← `purchase-completed`, ← `rate` | ← `hold-invoice-payment-settled`, ← `rate` | `success` |
 
 - Aquí es **`add-invoice`** el que llega dos veces al comprador (pasos 6 y 7): uno pide la factura y el otro solo informa de la reputación del vendedor.
-- Si el comprador incluye `buyer_invoice` al crear la orden, el nodo no necesita los pasos 6 a 8. Este camino no se ejecutó.
+- Si el comprador incluye `buyer_invoice` al crear la orden, los pasos 6 a 8 desaparecen: al pagarse la factura retenida la operación pasa directamente a activa. En una orden a precio de mercado esa factura debe ser sin importe.
 
 ### 7.3 Con garantía (bond)
 
@@ -441,10 +441,25 @@ Cuando el evento de información anuncia `bond_enabled = true`, la parte que ind
 - La factura de garantía lleva el memo `mostro bond order_id=<id>`.
 - Plazo: la de quien publica expiró a los 900 s y la de quien toma a los 300 s (`hold_invoice_expiration_window`). El plazo de quien publica no se anuncia en el evento de información: léelo de la propia factura.
 - Importe: `max(redondeo(bond_amount_pct × sats), bond_base_amount_sats)`.
-- Si quien toma recibe `canceled` en lugar de avanzar, otro usuario pagó antes su garantía.
+- Si dos usuarios toman la orden a la vez, ambos reciben `pay-bond-invoice`. Gana quien paga primero. El otro recibe `canceled` y su factura de garantía se cancela sin cobrarse.
+- Quien toma y se retira con `cancel` antes de enviar su factura recupera su garantía.
 - Tras una disputa resuelta con `admin-settle` sin penalización, ambas garantías se devolvieron igual.
 
-La penalización de garantías (`bond-slashed`, `add-bond-invoice`, `bond-payout-completed`) no se ejecutó en estas pruebas.
+**Penalización.** Un mediador puede ejecutar la garantía de una parte al resolver una disputa (sección 8). Secuencia real con una garantía de 1 054 sats y `bond_slash_node_share_pct = 0.5`:
+
+| Paso | Mensaje | Contenido |
+| --- | --- | --- |
+| 1 | Parte penalizada ← `bond-slashed` | `payload.order.amount` = sats de la garantía perdida, 1 054 |
+| 2 | Otra parte ← `add-bond-invoice` | `payload.bond_payout_request: {"order": {…, "amount": 527}, "slashed_at": <unix>}` |
+| 3 | Otra parte → `add-bond-invoice` | `payload.payment_request: [null, "<bolt11 de 527 sats>", null]` |
+| 4 | Otra parte ← `bond-invoice-accepted` | orden con `amount` = 527 |
+| 5 | Otra parte ← `bond-payout-completed` | orden con `amount` = 527. La factura quedó pagada |
+
+- El nodo se queda con su parte, `bond_slash_node_share_pct`, y ofrece el resto a la otra parte.
+- El paso 2 llega hasta un minuto después de la resolución. La factura del paso 3 debe ser por el importe exacto de `amount`.
+- El plazo para reclamar termina en `slashed_at + bond_payout_claim_window_days × 86 400`.
+- En estos mensajes la orden lleva `status: null`, y `amount` no es el importe de la operación.
+- La garantía de la parte no penalizada se devuelve.
 
 ### 7.4 Cancelaciones
 
@@ -452,9 +467,12 @@ La penalización de garantías (`bond-slashed`, `add-bond-invoice`, `bond-payout
 | --- | --- | --- |
 | Quien publica cancela una orden sin tomar | → `cancel`; ← `canceled` | `s` público `canceled` |
 | Quien tomó se retira antes de enviar su factura | → `cancel`; ← `canceled`. Quien publicó recibe otra vez ← `new-order` con la misma `id` | La orden vuelve a `pending` y se puede tomar de nuevo |
+| Quien tomó deja vencer `expiration_seconds` sin enviar su factura | El nodo actúa solo: quien tomó ← `canceled` y quien publicó ← `new-order` con la misma `id`. Con un plazo de 900 s llegaron a los 915 s | La orden vuelve a `pending`. Con `bond_slash_on_waiting_timeout = false` la garantía de quien tomó se devuelve |
 | Cancelación de mutuo acuerdo con la operación activa | A → `cancel`: A ← `cooperative-cancel-initiated-by-you`, B ← `cooperative-cancel-initiated-by-peer`. B → `cancel`: ambos ← `cooperative-cancel-accepted` | Tras el primer `cancel` el depósito sigue retenido. Tras el segundo, el nodo lo cancela y los sats vuelven al vendedor. `s` público `canceled` |
 
 La app de quien publica debe aceptar un segundo `new-order` para una orden que ya conoce: significa que vuelve a estar libre.
+
+Según el código, cuando quien deja vencer el plazo es quien publicó, la orden no vuelve a ofrecerse: se cancela. Ese caso no se ejecutó.
 
 ### 7.5 Valoraciones
 
@@ -498,7 +516,7 @@ Qué debe hacer la app:
 
 En un nodo con `pow_first_contact` mayor que cero, el `admin-take-dispute` también es un primer contacto: sin la prueba de trabajo el nodo no responde. Una vez tomada la disputa, el `admin-settle` se aceptó sin ella.
 
-Con garantías activas, el mediador puede añadir a `admin-settle` o `admin-cancel` el payload `{"bond_resolution": {"slash_seller": <bool>, "slash_buyer": <bool>}}` para penalizar a una parte. Sin ese payload no se penaliza a nadie. La penalización no se ejecutó en estas pruebas.
+Con garantías activas, el mediador puede añadir a `admin-settle` o `admin-cancel` el payload `{"bond_resolution": {"slash_seller": <bool>, "slash_buyer": <bool>}}` para penalizar a una parte. Sin ese payload no se penaliza a nadie. La secuencia que sigue está en la sección 7.3.
 
 ## 9. Errores
 
@@ -578,12 +596,15 @@ En un segundo nodo con garantía del 3 % para ambas partes y `pow_first_contact 
 - El evento de información con todos los tags `bond_*` y de prueba de trabajo.
 - `new-order`, `take-sell` y `admin-take-dispute` sin prueba de trabajo: sin respuesta. Con ella: aceptados. Los mensajes siguientes se aceptaron sin ella.
 - Una venta completa con las dos garantías, devueltas al terminar.
-- Una disputa resuelta con `admin-settle` sin penalización, con las garantías devueltas.
-- En **modo de reputación**, con clave de identidad, una clave por operación, firma interna y prueba de identidad: una venta completa con garantías, las valoraciones de la sección 7.5, el rechazo de un `trade_index` repetido, el tag `rating` de la siguiente orden y el descarte de mensajes con una firma alterada.
+- Una compra con la factura del comprador incluida al crear la orden.
+- Dos tomas simultáneas de la misma orden.
+- El vencimiento del plazo de quien tomó, con la orden de nuevo en `pending`.
+- Una disputa resuelta con `admin-settle` sin penalización y otra con `admin-cancel` y penalización, hasta `bond-payout-completed`.
+- En **modo de reputación**, con clave de identidad, una clave por operación, firma interna y prueba de identidad: una venta completa con garantías, las valoraciones de la sección 7.5, el rechazo de un `trade_index` repetido, el tag `rating` de la siguiente orden, la publicación del kind 38384 y el descarte de mensajes con una firma alterada.
 
 En ambos nodos, el monitor de órdenes, el de disputas y la consola de mensajes del Manager leyeron esos mismos eventos, y la tarjeta del Manager se verificó con una copia del verificador de la app (`k256`).
 
-Leído en el código y no ejecutado: penalización y cobro de garantías, vencimiento de plazos, modo mantenimiento, órdenes de compra con factura incluida, la publicación del kind 38384, Cashu y Serbero.
+Leído en el código y no ejecutado: la penalización automática por vencimiento (`bond_slash_on_waiting_timeout = true`), el vencimiento cuando falla quien publicó, el modo mantenimiento, la restauración de sesión, Cashu y Serbero.
 
 No verificado: el comportamiento de relays `ws://` desde una PWA servida por HTTPS, y la app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 
