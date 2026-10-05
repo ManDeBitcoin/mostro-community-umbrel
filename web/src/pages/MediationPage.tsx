@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DisputeView, OrdersSnapshot, ChatMessage, ChatHistory } from '../types';
 import { copyToClipboard, api } from '../lib/api';
 import { ORDER_STATUS_LABELS, DISPUTE_STATUS_LABELS } from '../lib/constants';
-import { formatDateTime, formatNumber, formatStamp, formatWhen, shortId } from '../lib/format';
+import { formatDateTime, formatFiatAmount, formatNumber, formatStamp, formatWhen, shortId } from '../lib/format';
 import { Icon } from '../components/ui';
 import { Badge, Callout, PageHeader, Panel } from '../components/layout';
 
@@ -192,7 +192,16 @@ export function MediationConsole({
                     : 'Sin disputas conocidas todavía.'
                   : `${openCount} abierta${openCount === 1 ? '' : 's'} de ${sortedDisputes.length} anunciada${sortedDisputes.length === 1 ? '' : 's'}.`
         }
-        aside={disputes !== null ? <Badge tone={openCount > 0 ? 'bad' : 'good'}>{openCount > 0 ? `${openCount} abierta${openCount === 1 ? '' : 's'}` : 'Ninguna abierta'}</Badge> : undefined}
+        aside={
+          disputes === null ? undefined : openCount > 0 ? (
+            <Badge tone="bad">{`${openCount} abierta${openCount === 1 ? '' : 's'}`}</Badge>
+          ) : monitorIsLive ? (
+            <Badge tone="good">Ninguna abierta</Badge>
+          ) : (
+            // The list comes from the relay monitor: while it is behind, "none" has not been checked.
+            <Badge tone="neutral">Sin comprobar</Badge>
+          )
+        }
       >
         {(disputesError || (ordersSnapshot && !monitorIsLive)) && (
         <div className="form-message error">
@@ -405,7 +414,7 @@ export function MediationConsole({
                     <span style={{ color: '#829288' }}>Importe:</span>
                     <strong>
                       {selectedOrder.amount_sats > 0 ? `${formatNumber(selectedOrder.amount_sats)} sats · ` : ''}
-                      {selectedOrder.fiat_amount_range.join(' – ') || '0'} {selectedOrder.fiat_code.toUpperCase()}
+                      {formatFiatAmount(selectedOrder.fiat_amount_range, selectedOrder.fiat_code)}
                     </strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>

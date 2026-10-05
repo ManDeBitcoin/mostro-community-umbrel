@@ -4,6 +4,7 @@ import { copyToClipboard, api } from '../lib/api';
 import { formatNumber } from '../lib/format';
 import { Icon } from '../components/ui';
 import type { Navigate } from '../lib/navigation';
+import { type RulesRead, rulesNotReadNote } from '../lib/overview';
 import { Badge, Callout, EmptyState, Fact, FactGrid, LinkButton, PageHeader, Panel, Stat } from '../components/layout';
 
 const SYNC = (value: boolean | null | undefined) => (value === true ? 'Sincronizado' : value === false ? 'Pendiente' : 'Desconocido');
@@ -12,7 +13,19 @@ const SERVICE_STATUS: Record<string, string> = { online: 'Conectado', offline: '
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-export function LiquidityOperationsPage({ lightning, maxTradeSats, navigate }: { lightning?: ServiceInfo; /** The largest trade the saved rules allow. */ maxTradeSats?: number; navigate: Navigate }) {
+export function LiquidityOperationsPage({
+  lightning,
+  maxTradeSats,
+  rulesRead,
+  navigate,
+}: {
+  lightning?: ServiceInfo;
+  /** The largest trade the saved rules allow. */
+  maxTradeSats?: number;
+  /** Until the saved rules have been read, a missing maximum is not "no rules". */
+  rulesRead: RulesRead;
+  navigate: Navigate;
+}) {
   const [report, setReport] = useState<LndChannelsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -156,7 +169,7 @@ export function LiquidityOperationsPage({ lightning, maxTradeSats, navigate }: {
             <Stat
               label="Para recibir depósitos"
               value={totalCap === 0 ? '—' : report.inbound_sufficient ? 'Hay entrante' : 'Falta entrante'}
-              hint="Sin reglas guardadas no se puede comparar con tu operación máxima"
+              hint={rulesRead === 'loaded' ? 'Sin reglas guardadas no se puede comparar con tu operación máxima' : rulesNotReadNote(rulesRead)}
               tone={totalCap === 0 ? 'neutral' : report.inbound_sufficient ? 'good' : 'bad'}
             />
           )}

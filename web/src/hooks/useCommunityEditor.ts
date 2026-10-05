@@ -26,6 +26,8 @@ export function useCommunityEditor(onSaved: () => void | Promise<void>) {
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  /** The saved rules have never been read and the last attempt failed. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   // Shown next to the templates, where it was caused; `notice` goes next to the save button.
@@ -51,6 +53,7 @@ export function useCommunityEditor(onSaved: () => void | Promise<void>) {
       const first = !loadedRef.current;
       loadedRef.current = true;
       setLoaded(true);
+      setLoadFailed(false);
       if (dirtyRef.current && !options?.force && !first) return;
       dirtyRef.current = false;
       setRevision(data.revision); setSaved(Boolean(data.config)); setDirty(false);
@@ -60,7 +63,7 @@ export function useCommunityEditor(onSaved: () => void | Promise<void>) {
       setError('');
     } catch (err) {
       // A failed refresh does not unload what is already on screen.
-      if (!loadedRef.current) setError(err instanceof Error ? err.message : 'No se pudo leer la configuración.');
+      if (!loadedRef.current) { setLoadFailed(true); setError(err instanceof Error ? err.message : 'No se pudo leer la configuración.'); }
     }
   }, []);
 
@@ -175,7 +178,7 @@ export function useCommunityEditor(onSaved: () => void | Promise<void>) {
   }, [draft.payment_methods]);
 
   return {
-    revision, draft, setDraft, serverConfig, saved, dirty, loaded, saving,
+    revision, draft, setDraft, serverConfig, saved, dirty, loaded, loadFailed, saving,
     notice, setNotice, presetNotice, error, setError, feeInputs, activeCategories,
     markDirty, load, reloadSafely, updateCommunity, updateMarket, updateSafety,
     toggleCurrency, addRelay, removeRelay, updateFee, applyCommissionBondPreset, saveConfig,

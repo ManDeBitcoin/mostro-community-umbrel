@@ -46,6 +46,15 @@ export const isMaintenance = (daemon: DaemonReport | null) => Boolean(daemon?.an
 /** While a daemon is this young, not having announced itself yet is normal. The server warns past the same mark. */
 const STARTUP_WINDOW_SECS = 660;
 
+// What the same report says about Lightning that an open market cannot do
+// without, most serious first. A panel that was never given read access to LND
+// (`lnd_unconfigured`) is a choice of the install, not something that broke.
+const OPEN_WITH_LIGHTNING_NOTICE: [code: string, title: string, detail: string][] = [
+  ['lnd_unreadable', 'Tu mercado está abierto, pero el panel no puede leer Lightning', 'El nodo se anuncia y atiende a las apps. El panel no pudo leer LND, así que no puede comprobar sus canales ni su sincronización.'],
+  ['lnd_no_channels', 'Tu mercado está abierto, pero Lightning no tiene canales activos', 'El nodo se anuncia y atiende a las apps, pero LND no tiene canales activos: no puede retener depósitos ni pagar a los compradores.'],
+  ['lnd_not_synced', 'Tu mercado está abierto, pero LND no está sincronizado', 'El nodo se anuncia y atiende a las apps, pero LND no está sincronizado con la cadena de bloques: los depósitos y los pagos pueden fallar.'],
+];
+
 /**
  * One sentence about the market, from the daemon report alone so that the
  * headline cannot contradict itself.
@@ -82,11 +91,23 @@ export function marketStatus(daemon: DaemonReport | null, settled = true): Marke
       return { state: 'maintenance', tone: 'warn', label: 'En mantenimiento', title: 'El nodo está en mantenimiento', detail: 'El nodo anuncia que no acepta órdenes ni tomas nuevas.' };
     }
     if (announcing) {
+      // Still open: the apps see the node and it answers them. But not all is well.
+      const codes = new Set(daemonNotices(daemon).map((notice) => notice.code));
+      const lightning = OPEN_WITH_LIGHTNING_NOTICE.find(([code]) => codes.has(code));
+      if (lightning) return { state: 'open', tone: 'warn', label: 'Abierto con avisos', title: lightning[1], detail: lightning[2] };
       return { state: 'open', tone: 'good', label: 'Mercado abierto', title: 'Tu mercado está abierto', detail: 'El nodo anuncia su información en los relays y atiende a las apps. Este panel solo observa: no toma órdenes ni mueve fondos.' };
     }
     const running = daemon.running_for_secs;
     if (typeof running === 'number' && running <= STARTUP_WINDOW_SECS) {
-      return { state: 'starting', tone: 'info', label: 'Arrancando', title: 'El nodo está arrancando', detail: 'El daemon está en ejecución y el panel aún no ha visto su información en los relays. Suele tardar menos de cinco minutos.' };
+      return {
+        state: 'starting',
+        tone: 'info',
+        label: 'Arrancando',
+        title: 'El nodo está arrancando',
+        detail: daemon.announced_before_start
+          ? 'El daemon acaba de arrancar. El anuncio que hay en los relays es anterior a este arranque: el panel espera el nuevo, que suele tardar menos de cinco minutos.'
+          : 'El daemon está en ejecución y el panel aún no ha visto su información en los relays. Suele tardar menos de cinco minutos.',
+      };
     }
     return {
       state: 'unconfirmed',
@@ -128,6 +149,7 @@ const NOTICE_ROUTES: Record<string, NoticeRoute> = {
   lnd_channels_unknown: { title: 'Lightning necesita atención', page: 'lightning', action: 'Ver Lightning', setup: true },
   lnd_not_synced: { title: 'Lightning necesita atención', page: 'lightning', action: 'Ver Lightning', setup: true },
   daemon_crash_loop: { title: 'El daemon se reinicia en bucle', page: 'node', action: 'Ver el nodo' },
+  daemon_unexpected_exit: { title: 'El daemon terminó de forma inesperada', page: 'node', action: 'Ver el nodo' },
   daemon_not_verified: { title: 'El panel no ve el daemon en ejecución', page: 'node', action: 'Ver el nodo' },
   announcement_stale: { title: 'El nodo no se anuncia en los relays', page: 'node', action: 'Ver el nodo' },
   announcement_without_daemon: { title: 'El nodo se anuncia sin que el panel vea el daemon', page: 'node', action: 'Ver el nodo' },
@@ -363,7 +385,8 @@ export function serviceTiles(dashboard: Dashboard | null, daemon: DaemonReport |
       id: 'mostro',
       title: 'Mostro',
       icon: 'server',
-      tone: status.state === 'standby' || status.state === 'unconfigured' ? 'neutral' : status.tone,
+      // The headline of an open market can carry a notice about Lightning, which has its own tile.
+      tone: status.state === 'open' ? 'good' : status.state === 'standby' || status.state === 'unconfigured' ? 'neutral' : status.tone,
       ...MOSTRO_TILE[status.state],
       meta: daemon?.mostro_version ? `mostrod ${daemon.mostro_version}` : undefined,
       page: 'node',
@@ -388,8 +411,24 @@ export function serviceTiles(dashboard: Dashboard | null, daemon: DaemonReport |
   ];
 }
 
+/**
+ * What the lists of the relay monitor are worth. Until it has read the relays
+ * an empty list is not "no orders" and not "no disputes": nothing was read.
+ */
+export type OrdersReadiness = 'unread' | 'unconfigured' | 'reading' | 'unreachable' | 'read';
+
+export function ordersReadiness(orders: OrdersSnapshot | null): OrdersReadiness {
+  if (!orders) return 'unread';
+  if (orders.state === 'unconfigured') return 'unconfigured';
+  if (orders.state === 'connecting' || orders.state === 'syncing') return 'reading';
+  // No relay answers and nothing is in memory: none has answered yet.
+  const empty = orders.orders.length === 0 && (orders.disputes ?? []).length === 0 && !orders.node_info;
+  return orders.state === 'disconnected' && empty ? 'unreachable' : 'read';
+}
+
 export type OrderStats = {
-  /** The monitor has data to count. */
+  readiness: OrdersReadiness;
+  /** The monitor has read the relays: its lists can be counted. */
   known: boolean;
   pending: number;
   inProgress: number;
@@ -403,8 +442,10 @@ export function orderStats(orders: OrdersSnapshot | null): OrderStats {
   const list = orders?.orders ?? [];
   const count = (status: string) => list.filter((order) => order.status === status).length;
   const completed = list.filter((order) => order.status === 'success' || order.status === 'completed-by-admin');
+  const readiness = ordersReadiness(orders);
   return {
-    known: Boolean(orders && orders.state !== 'unconfigured'),
+    readiness,
+    known: readiness === 'read',
     pending: count('pending'),
     inProgress: count('in-progress'),
     completed: completed.length,
@@ -415,6 +456,13 @@ export function orderStats(orders: OrdersSnapshot | null): OrderStats {
 }
 
 export type RuleLine = { label: string; value: string; hint?: string };
+
+/** Whether the saved rules have been read. Until they are, having none in hand does not mean there are none. */
+export type RulesRead = 'loaded' | 'reading' | 'failed';
+
+/** What a page says where the saved rules would go, while it does not have them. */
+export const rulesNotReadNote = (read: RulesRead) =>
+  read === 'failed' ? 'El panel no ha podido leer las reglas guardadas. Lo vuelve a intentar solo.' : 'Leyendo las reglas guardadas…';
 
 const BOND_APPLIES: Record<string, string> = { make: 'quien publica', take: 'quien toma', both: 'quien publica y quien toma' };
 

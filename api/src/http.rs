@@ -278,14 +278,9 @@ async fn community_card_handler(
         )
     })?;
     let root = store.root().to_path_buf();
-    connection::get_community_card(&root, &store)
+    connection::community_card(&root, &store)
         .map(Json)
-        .ok_or_else(|| {
-            error(
-                StatusCode::CONFLICT,
-                "La tarjeta requiere identidad Nostr y configuración guardada",
-            )
-        })
+        .map_err(|why| error(StatusCode::CONFLICT, &why.message()))
 }
 
 async fn community_presets_handler() -> Json<Vec<crate::config::RegionalPreset>> {
@@ -609,20 +604,20 @@ async fn health() -> Json<Value> {
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {
     let (mut mostro, lightning) =
         tokio::join!(state.integrations.mostro(), state.integrations.lightning());
-    let (is_active, active_rev) = {
-        let store = state.store.lock();
-        if let Ok(store) = store {
-            let active_dir = store.root().join("active");
+    let root = state.store.lock().ok().map(|s| s.root().to_path_buf());
+    let (is_active, active_rev) = match &root {
+        Some(root) => {
+            let active_dir = root.join("active");
             let has_settings = active_dir.join("settings.toml").is_file();
             let rev = std::fs::read(active_dir.join("status.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<daemon::ActiveStatus>(&b).ok())
                 .map(|s| s.revision);
             (has_settings, rev)
-        } else {
-            (false, None)
         }
+        None => (false, None),
     };
+    let running_for = root.as_deref().and_then(daemon::running_for_secs);
     // The daemon's own info event on the relays is the evidence that a node
     // with this identity is serving clients. Without a recent one the panel
     // reports what it knows and no more.
@@ -631,7 +626,10 @@ async fn dashboard(State(state): State<AppState>) -> Json<Value> {
         let now = nostr::Timestamp::now().as_secs();
         (orders.node_info.clone(), orders.node_info_age_secs(now))
     };
-    let announced_fresh = announced_age.is_some_and(|age| age <= orders::NODE_INFO_FRESH_SECS);
+    // The same judgement as `/api/daemon/status`: what the previous process
+    // announced does not open the market of the one that replaced it.
+    let announcement = daemon::AnnouncementAge::judge(announced_age, running_for);
+    let announced_fresh = announcement.fresh();
     let in_maintenance = announced
         .as_ref()
         .is_some_and(|info| info.tags.get("maintenance_mode").map(String::as_str) == Some("true"));
@@ -654,7 +652,11 @@ async fn dashboard(State(state): State<AppState>) -> Json<Value> {
         } else if is_active {
             mostro = json!({
                 "status": "unknown",
-                "detail": "Configuración guardada; el daemon no ha anunciado su información en los relays recientemente",
+                "detail": if announcement.before_start {
+                    "El daemon acaba de arrancar y aún no se ha anunciado: el anuncio que conservan los relays es anterior a este arranque"
+                } else {
+                    "Configuración guardada; el daemon no ha anunciado su información en los relays recientemente"
+                },
                 "configured_revision": active_rev
             });
         }

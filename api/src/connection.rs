@@ -88,20 +88,64 @@ fn card_digest(card: &CommunityCard) -> [u8; 32] {
     Sha256::digest(card_canonical_string(card).as_bytes()).into()
 }
 
+/// Why this node has no community card to serve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardUnavailable {
+    /// The node has no identity, or it could not be read.
+    NoIdentity,
+    /// No rules have been saved yet.
+    NoConfiguration,
+    /// The saved rules hold a separator the signed string cannot carry. The
+    /// value is the rule they break, as the operator reads it.
+    Ambiguous(&'static str),
+}
+
+impl CardUnavailable {
+    /// The reason in the operator's words, for the panel and the API.
+    pub fn message(&self) -> String {
+        match self {
+            Self::NoIdentity => {
+                "La tarjeta se firma con la clave privada del nodo y el panel no la tiene: crea o importa la identidad"
+                    .into()
+            }
+            Self::NoConfiguration => {
+                "La tarjeta necesita reglas guardadas: guarda la configuración de la comunidad"
+                    .into()
+            }
+            Self::Ambiguous(rule) => format!(
+                "La tarjeta no se genera con la configuración guardada. {rule}. Corrige ese valor en Configuración y guarda de nuevo"
+            ),
+        }
+    }
+}
+
+/// Build the signed [`CommunityCard`] of this node, or `None` when there is
+/// none to serve. [`community_card`] also says why.
+pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
+    community_card(root, store).ok()
+}
+
 /// Build the signed [`CommunityCard`] of this node.
 ///
-/// Returns `None` until the node has an identity and a saved configuration:
+/// There is none until the node has an identity and a saved configuration:
 /// a card without pubkey or signature cannot be parsed by the app, so it is
 /// not served at all. It is also withheld while the configuration contains
 /// separators that would make the signed string ambiguous.
-pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
-    let config = store.document.config.as_ref()?;
+pub fn community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardUnavailable> {
+    let keys = identity::load_identity_keys(root)
+        .ok()
+        .flatten()
+        .ok_or(CardUnavailable::NoIdentity)?;
+    let config = store
+        .document
+        .config
+        .as_ref()
+        .ok_or(CardUnavailable::NoConfiguration)?;
     // A draft saved before this check existed may hold values that make the
     // unescaped canonical string ambiguous. Such a card is not signed.
-    if config.card_is_ambiguous() {
-        return None;
+    if let Some(rule) = config.card_ambiguity() {
+        return Err(CardUnavailable::Ambiguous(rule));
     }
-    let keys = identity::load_identity_keys(root).ok()??;
 
     // bond_percent: bond_bps (basis points) → integer percent, rounded.
     let bond_percent = if config.safety.bond_enabled {
@@ -121,7 +165,12 @@ pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
             .map(|r| normalize_relay(r))
             .collect(),
         // Primary fiat currency: first in the validated list.
-        currency: config.market.fiat_currencies.first()?.clone(),
+        currency: config
+            .market
+            .fiat_currencies
+            .first()
+            .ok_or(CardUnavailable::NoConfiguration)?
+            .clone(),
         // Only active payment methods.
         payment_methods: config
             .payment_methods
@@ -136,7 +185,7 @@ pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
         signature: String::new(),
     };
     card.signature = sign_community_card(&keys, &card);
-    Some(card)
+    Ok(card)
 }
 
 /// BIP-340 Schnorr signature over the SHA-256 of the canonical string.
@@ -200,6 +249,9 @@ pub struct ConnectionInfo {
     pub qr_card_svg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card: Option<CommunityCard>,
+    /// Why there is no card, when the node has an identity and still has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_unavailable: Option<String>,
     pub app_download_url: &'static str,
     pub instructions: &'static str,
 }
@@ -228,6 +280,7 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             card_uri: None,
             qr_card_svg: None,
             card: None,
+            card_unavailable: None,
             app_download_url: "https://mostro.network",
             instructions: "Importa primero la clave de identidad Nostr de la comunidad.",
         };
@@ -261,7 +314,9 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             .map(|code| code.render::<svg::Color>().build())
     });
 
-    let card = get_community_card(root, store);
+    let card_result = community_card(root, store);
+    let card_unavailable = card_result.as_ref().err().map(CardUnavailable::message);
+    let card = card_result.ok();
     let json_uri = card.as_ref().and_then(|c| serde_json::to_string(c).ok());
     let card_uri = card.as_ref().and_then(card_deep_link);
 
@@ -286,6 +341,7 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
         card_uri,
         qr_card_svg,
         card,
+        card_unavailable,
         app_download_url: "https://mostro.network",
         instructions: "Escanea la tarjeta firmada de la comunidad o usa la clave pública (npub o hex) con los relays indicados. Comisiones, límites y garantía se leen del evento de información del nodo.",
     }

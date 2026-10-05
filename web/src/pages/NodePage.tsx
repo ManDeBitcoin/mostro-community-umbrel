@@ -5,7 +5,7 @@ import type { Identity } from '../hooks/useIdentity';
 import type { Navigate } from '../lib/navigation';
 import { copyToClipboard } from '../lib/api';
 import { formatAge, formatAgo, formatDateTime, shortKey } from '../lib/format';
-import { type MarketStatus, announcedRules, daemonNotices, isActive, routeNotice, savedRules } from '../lib/overview';
+import { type MarketStatus, type RulesRead, announcedRules, daemonNotices, isActive, routeNotice, rulesNotReadNote, savedRules } from '../lib/overview';
 import { Icon } from '../components/ui';
 import { Badge, Callout, Fact, FactGrid, LinkButton, PageHeader, Panel } from '../components/layout';
 
@@ -19,6 +19,7 @@ export function NodePage({
   data,
   status,
   savedConfig,
+  rulesRead,
   identity,
   activating,
   onActivate,
@@ -28,6 +29,8 @@ export function NodePage({
   data: PanelData;
   status: MarketStatus;
   savedConfig: Configuration | null;
+  /** Until the saved rules have been read, `savedConfig` says nothing. */
+  rulesRead: RulesRead;
   identity: Identity;
   activating: boolean;
   onActivate: () => void;
@@ -40,11 +43,17 @@ export function NodePage({
   const running = daemon?.state === 'active_running';
   const announced = daemon?.announced ?? null;
   const rules = announced ? announcedRules(announced.tags) : savedConfig ? savedRules(savedConfig) : [];
-  const notices = daemonNotices(daemon);
   // The record of the last unexpected exit stays on disk until Mostro is
-  // deactivated. It is only news while it is recent or the daemon is down.
-  const lastExit = daemon?.last_exit ?? null;
+  // deactivated, and a version before 1.0.13 could leave one behind after it.
+  // It only says something while Mostro is activated, and it is only news
+  // while it is recent or the daemon is down.
+  const lastExit = active ? (daemon?.last_exit ?? null) : null;
   const exitIsNews = Boolean(lastExit) && (!running || Date.now() / 1000 - (lastExit?.at_unix ?? 0) < 3600);
+  const exitCode = lastExit ? (lastExit.code > 128 && lastExit.code <= 192 ? `código ${lastExit.code} (señal ${lastExit.code - 128})` : `código ${lastExit.code}`) : '';
+  // The exit has its own message at the top of this page: the notice the summary shows would tell it twice.
+  const notices = daemonNotices(daemon).filter((notice) => !(exitIsNews && notice.code === 'daemon_unexpected_exit'));
+  // Recent on the relays, but published by the process that ran before this one.
+  const beforeStart = Boolean(daemon?.announced_before_start);
 
   const copyNpub = () => {
     if (!daemon?.npub) return;
@@ -135,8 +144,8 @@ export function NodePage({
       </Callout>
 
       {lastExit && exitIsNews && (
-        <Callout tone="warn" title="El daemon se detuvo por su cuenta">
-          Terminó con código {lastExit.code} a los {formatAge(lastExit.uptime_secs)} de arrancar, {formatAgo(lastExit.at_unix)}. {running ? 'El supervisor lo volvió a arrancar.' : 'El supervisor lo vuelve a intentar con una pausa entre intentos.'}
+        <Callout tone="warn" title="El daemon terminó de forma inesperada">
+          Terminó con {exitCode} tras {formatAge(lastExit.uptime_secs)} en marcha, {formatAgo(lastExit.at_unix)}. {running ? 'El supervisor lo volvió a arrancar.' : 'El supervisor lo vuelve a intentar con una pausa entre intentos.'}
         </Callout>
       )}
 
@@ -167,7 +176,15 @@ export function NodePage({
             <Fact
               label="Último anuncio en los relays"
               value={announced && typeof daemon.announced_age_secs === 'number' ? `Hace ${formatAge(daemon.announced_age_secs)}` : 'Sin anuncio'}
-              hint={daemon.announced_fresh ? 'Reciente: las apps ven el nodo activo' : announced ? 'Antiguo: las apps pueden darlo por inactivo' : 'El panel no ha visto ninguno en sus relays'}
+              hint={
+                daemon.announced_fresh
+                  ? 'Reciente: las apps ven el nodo activo'
+                  : beforeStart
+                    ? 'Anterior a este arranque: el daemon aún no se ha vuelto a anunciar'
+                    : announced
+                      ? 'Antiguo: las apps pueden darlo por inactivo'
+                      : 'El panel no ha visto ninguno en sus relays'
+              }
             />
             <Fact
               label="Proceso del daemon"
@@ -176,7 +193,7 @@ export function NodePage({
                 running && typeof daemon.running_for_secs === 'number'
                   ? `Desde hace ${formatAge(daemon.running_for_secs)}`
                   : lastExit && !exitIsNews
-                    ? `Última parada inesperada ${formatAgo(lastExit.at_unix)}, con código ${lastExit.code}`
+                    ? `Terminó de forma inesperada ${formatAgo(lastExit.at_unix)}, con ${exitCode}`
                     : active
                       ? undefined
                       : 'Mostro no está activado'
@@ -194,15 +211,30 @@ export function NodePage({
         id="node-rules"
         title="Lo que ven las apps"
         description={
-          !announced
+          !daemon
+            ? // Not having read the report is not the same as the node not announcing itself.
+              data.settled
+              ? 'El panel no ha podido leer qué anuncia tu nodo.'
+              : 'Consultando qué anuncia tu nodo…'
+            : !announced
             ? rules.length > 0
               ? 'El panel no ha visto ningún anuncio de tu nodo en sus relays. Estas son las reglas guardadas, que anunciará al activarse.'
-              : 'El panel no ha visto ningún anuncio de tu nodo en sus relays. Anunciará las reglas que guardes en Configuración.'
+              : rulesRead === 'loaded'
+                ? 'El panel no ha visto ningún anuncio de tu nodo en sus relays. Anunciará las reglas que guardes en Configuración.'
+                : 'El panel no ha visto ningún anuncio de tu nodo en sus relays.'
             : daemon?.announced_fresh
               ? 'Las reglas que tu nodo anuncia en los relays. Las apps las leen de ahí, no de este panel.'
-              : 'Lo último que anunció tu nodo. Ahora no se está anunciando, así que las apps pueden darlo por inactivo.'
+              : beforeStart
+                ? 'Lo que anunció tu nodo antes de este arranque. El daemon aún no se ha vuelto a anunciar: cuando lo haga, verás aquí lo que anuncia ahora.'
+                : 'Lo último que anunció tu nodo. Ahora no se está anunciando, así que las apps pueden darlo por inactivo.'
         }
-        aside={announced ? <Badge tone={daemon?.announced_fresh ? 'good' : 'warn'}>{daemon?.announced_fresh ? 'Anuncio reciente' : `Anuncio de ${formatDateTime(announced.created_at)}`}</Badge> : undefined}
+        aside={
+          announced ? (
+            <Badge tone={daemon?.announced_fresh ? 'good' : beforeStart ? 'info' : 'warn'}>
+              {daemon?.announced_fresh ? 'Anuncio reciente' : beforeStart ? 'Anuncio anterior al arranque' : `Anuncio de ${formatDateTime(announced.created_at)}`}
+            </Badge>
+          ) : undefined
+        }
       >
         {rules.length > 0 ? (
           <FactGrid>
@@ -210,8 +242,10 @@ export function NodePage({
               <Fact key={rule.label} label={rule.label} value={rule.value} hint={rule.hint} />
             ))}
           </FactGrid>
-        ) : (
+        ) : rulesRead === 'loaded' ? (
           <p className="panel-note">Aún no hay reglas guardadas. <LinkButton onClick={() => navigate('config')}>Abrir configuración</LinkButton></p>
+        ) : (
+          <p className="panel-note">{rulesNotReadNote(rulesRead)}</p>
         )}
         <p className="panel-note">
           Para que una app opere con tu comunidad necesita la clave pública del nodo y sus relays. <LinkButton onClick={() => navigate('connect')}>Conexión de apps</LinkButton>

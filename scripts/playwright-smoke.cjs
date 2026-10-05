@@ -357,6 +357,17 @@ async function main() {
     assert.equal(await page.locator('.relay-chip').count(), 1);
   });
 
+  await step('configuration: a name the signed card cannot carry is refused, with the field to change', async () => {
+    await page.getByPlaceholder('Ej. Bitcoin Quito').fill('Compra & venta');
+    await page.getByRole('button', { name: 'Guardar configuración' }).click();
+    await page.locator('.form-message.error', { hasText: 'El nombre de la comunidad no puede contener «&»' }).waitFor();
+    await page.locator('.save-state', { hasText: 'Cambios sin guardar' }).waitFor();
+    dialogs.answer = true;
+    await page.getByRole('button', { name: 'Recargar', exact: true }).click();
+    await page.locator('.save-state', { hasText: 'Guardado · revisión 1' }).waitFor();
+    assert.equal(await page.getByPlaceholder('Ej. Bitcoin Quito').inputValue(), 'Comunidad de prueba');
+  });
+
   await step('node: activating and deactivating both ask first and report the result', async () => {
     await navLink(page, 'Nodo Mostro').click();
     const activate = page.getByRole('button', { name: 'Activar Mostro', exact: true });
@@ -552,6 +563,29 @@ async function main() {
     page.off('request', record);
   });
 
+  await step('connection: rules the signed card cannot carry are named, not reported as missing', async () => {
+    // Rules as an earlier version accepted them, and an identity created through the API.
+    const earlierDir = tempDir('mostro-smoke-earlier-');
+    const earlierConfig = { ...seededConfig, community: { ...seededConfig.community, name: 'Compra & venta' } };
+    fs.writeFileSync(path.join(earlierDir, 'community.json'), JSON.stringify({ revision: 3, config: earlierConfig }, null, 2), { mode: 0o600 });
+    const earlierUrl = await startPanel(earlierDir);
+    const created = await page.request.post(`${earlierUrl}/api/identity/generate`, { headers: API_HEADERS, data: {} });
+    assert.ok(created.ok(), 'the identity of the test node was not created');
+    const card = await page.request.get(`${earlierUrl}/api/community/card`, { headers: API_HEADERS });
+    assert.equal(card.status(), 409);
+    const reason = (await card.json()).error;
+    assert.match(reason, /El nombre de la comunidad no puede contener «&»/);
+    assert.doesNotMatch(reason, /identidad|necesita reglas/);
+    await page.goto(`${earlierUrl}/#/conexion`, { waitUntil: 'networkidle' });
+    await heading(page).filter({ hasText: 'Conexión de apps' }).waitFor();
+    await page.locator('.qr-box-wrapper').getByText('El nombre de la comunidad no puede contener «&»').waitFor();
+    assert.equal(await page.getByText('guarda la configuración de la comunidad').count(), 0);
+    // The identity alone can still be shared.
+    await page.getByRole('button', { name: 'Identidad', exact: true }).click();
+    await page.locator('.qr-box-wrapper svg').waitFor();
+    await shot(page, 'earlier-01-connection');
+  });
+
   // ------------------------------------------------------------------
   // C. States the mock relay cannot produce, with stubbed API answers.
   // ------------------------------------------------------------------
@@ -583,6 +617,71 @@ async function main() {
     await stubDaemon(null);
   });
 
+  await step('after a restart, what the previous process announced does not open the market', async () => {
+    // The report while the relays still hold the announcement of the daemon that ran before this one.
+    await stubDaemon({
+      state: 'active_running',
+      running_for_secs: 12,
+      announced: { ...announcement, created_at: Math.floor(Date.now() / 1000) - 200, mostro_version: '0.19.0' },
+      announced_age_secs: 200,
+      announced_fresh: false,
+      announced_before_start: true,
+      mostro_version: '0.19.2',
+      version_source: 'binary',
+    });
+    await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    await marketTitle(page).filter({ hasText: 'El nodo está arrancando' }).waitFor();
+    await page.locator('.market-pill', { hasText: 'Arrancando' }).waitFor();
+    await page.locator('.status-hero', { hasText: 'es anterior a este arranque' }).waitFor();
+    assert.equal(await page.locator('.market-pill', { hasText: 'Mercado abierto' }).count(), 0);
+    assert.equal(await page.getByText('El daemon anuncia otra versión').count(), 0);
+    await shot(page, 'stub-01-restart-summary');
+    // The node page tells that announcement apart from one that has simply expired.
+    await navLink(page, 'Nodo Mostro').click();
+    await page.locator('#node-state .fact', { hasText: 'Último anuncio en los relays' }).getByText('Anterior a este arranque').waitFor();
+    await page.locator('#node-rules').getByText('Anuncio anterior al arranque').waitFor();
+    await page.locator('#node-state .fact', { hasText: 'Versión de Mostro' }).getByText('v0.19.2').waitFor();
+    assert.equal(await page.getByText('las apps pueden darlo por inactivo').count(), 0);
+    await shot(page, 'stub-02-restart-node');
+    await stubDaemon(null);
+  });
+
+  await step('an open market with a Lightning notice is not shown as all well', async () => {
+    const open = { state: 'active_running', announced_fresh: true, announced: announcement, announced_age_secs: 20, running_for_secs: 900 };
+    const show = async (code, text) => {
+      await stubDaemon({ ...open, notices: [{ code, text }], warnings: [text] });
+      await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'networkidle' });
+    };
+    const mostroTile = page.locator('.service-tile', { has: page.locator('strong', { hasText: /^Mostro$/ }) });
+    const cases = [
+      ['lnd_no_channels', 'LND reporta 0 canales activos.', 'Tu mercado está abierto, pero Lightning no tiene canales activos'],
+      ['lnd_not_synced', 'LND no está sincronizado con la cadena de bloques.', 'Tu mercado está abierto, pero LND no está sincronizado'],
+      ['lnd_unreadable', 'El panel no pudo leer LND.', 'Tu mercado está abierto, pero el panel no puede leer Lightning'],
+    ];
+    for (const [code, text, title] of cases) {
+      await show(code, text);
+      await marketTitle(page).filter({ hasText: title }).waitFor();
+      await page.locator('.market-pill.tone-warn', { hasText: 'Abierto con avisos' }).waitFor();
+      await page.locator('.status-hero.tone-warn').waitFor();
+      assert.equal(await page.locator('.market-pill', { hasText: 'Mercado abierto' }).count(), 0, code);
+      // The daemon itself is doing its part: its tile says so, and Lightning has its own.
+      await mostroTile.locator('.badge.tone-good', { hasText: 'En marcha' }).waitFor();
+    }
+    await shot(page, 'stub-03-open-with-notice');
+    // The longer label still fits the top bar of a phone.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('.market-pill', { hasText: 'Abierto con avisos' }).waitFor();
+    assert.equal(await hasOverflow(page), false, 'the summary overflows at 390 px with the longer label');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // A panel that was never given access to LND is how this install is set up, not something that broke.
+    await show('lnd_unconfigured', 'El panel no tiene acceso de lectura a LND.');
+    await marketTitle(page).filter({ hasText: /^Tu mercado está abierto$/ }).waitFor();
+    await page.locator('.market-pill.tone-good', { hasText: 'Mercado abierto' }).waitFor();
+    await stubDaemon(null);
+  });
+
   await step('a notice goes to the page its code names, whatever its sentence says', async () => {
     await stubDaemon({
       state: 'active_ready',
@@ -603,6 +702,36 @@ async function main() {
     await stubDaemon(null);
   });
 
+  await step('an unexpected exit of the daemon reaches the summary, and the node page tells it once', async () => {
+    const text = 'El daemon terminó de forma inesperada hace 10 min, con código 137 (señal 9) y tras 2 h en marcha. El supervisor lo volvió a arrancar. Revisa los registros del contenedor mostro para ver la causa.';
+    await stubDaemon({
+      state: 'active_running',
+      running_for_secs: 590,
+      announced_fresh: true,
+      announced: announcement,
+      announced_age_secs: 20,
+      last_exit: { at_unix: Math.floor(Date.now() / 1000) - 600, code: 137, uptime_secs: 7200 },
+      notices: [{ code: 'daemon_unexpected_exit', text }],
+      warnings: [text],
+    });
+    await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    const item = page.locator('#attention .attention-item', { hasText: 'El daemon terminó de forma inesperada' });
+    await item.getByText('con código 137 (señal 9)').waitFor();
+    await item.getByRole('button', { name: 'Ver el nodo' }).click();
+    await heading(page).filter({ hasText: 'Nodo Mostro' }).waitFor();
+    // A code above 128 is a signal, and the page says which, in the words the summary uses.
+    await page.locator('.callout', { hasText: 'El daemon terminó de forma inesperada' }).getByText('Terminó con código 137 (señal 9) tras 2 h en marcha').waitFor();
+    assert.equal(await page.getByText('Revisa los registros del contenedor mostro').count(), 0, 'the same exit is told twice on the node page');
+    // Once Mostro is deactivated, a record left on disk is nobody's news.
+    await stubDaemon({ state: 'configured_standby', active_revision: null, active_settings_hash: null, active_settings_path: null, last_exit: { at_unix: Math.floor(Date.now() / 1000) - 600, code: 143, uptime_secs: 60 } });
+    await page.reload({ waitUntil: 'networkidle' });
+    await heading(page).filter({ hasText: 'Nodo Mostro' }).waitFor();
+    await page.locator('#node-state .fact', { hasText: 'Proceso del daemon' }).getByText('Mostro no está activado').waitFor();
+    assert.equal(await page.getByText('de forma inesperada').count(), 0);
+    await stubDaemon(null);
+  });
+
   await step('a failed read is shown as unknown, not as nothing there', async () => {
     await page.route('**/api/daemon/status', (route) => route.fulfill({ status: 500, json: { error: 'fallo de prueba' } }));
     await page.route('**/api/connection', (route) => route.fulfill({ status: 500, json: { error: 'fallo de prueba' } }));
@@ -619,6 +748,124 @@ async function main() {
     assert.equal(await page.getByText('Créala o impórtala primero').count(), 0);
     await page.unroute('**/api/daemon/status');
     await page.unroute('**/api/connection');
+  });
+
+  await step('saved rules that have not been read yet are not "no saved rules"', async () => {
+    // The answer is held back first, and then it is an error: reading and not having been able to read are told apart.
+    let answer;
+    const held = new Promise((resolve) => { answer = resolve; });
+    await page.route('**/api/community', async (route) => { await held; await route.fulfill({ status: 500, json: { error: 'fallo de prueba' } }); });
+    await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'load' });
+    await page.getByText('Leyendo las reglas guardadas…').waitFor();
+    assert.equal(await page.getByText('Aún no hay reglas guardadas').count(), 0);
+    answer();
+    const unread = 'El panel no ha podido leer las reglas guardadas';
+    await page.getByText(unread).waitFor();
+    assert.equal(await page.getByText('Aún no hay reglas guardadas').count(), 0);
+    await navLink(page, 'Nodo Mostro').click();
+    await page.locator('#node-rules').getByText(unread).waitFor();
+    assert.equal(await page.getByText('Aún no hay reglas guardadas').count(), 0);
+    await navLink(page, 'Lightning').click();
+    await page.getByRole('button', { name: 'Ejemplo', exact: true }).click();
+    await page.locator('#lnd-liquidity .stat', { hasText: 'Para recibir depósitos' }).getByText(unread).waitFor();
+    assert.equal(await page.getByText('Sin reglas guardadas').count(), 0);
+    // During the setup, the daemon report already says that there are rules: the list does not ask for them again.
+    await stubDaemon({ state: 'configured_standby', identity_present: true, npub: relay.npub, can_activate: true, draft_revision: 1, active_revision: null, active_settings_hash: null, active_settings_path: null });
+    await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('.setup-step.is-done', { hasText: 'Define las reglas de la comunidad' }).waitFor();
+    await page.locator('.status-hero', { hasText: 'Siguiente paso: guarda un respaldo cifrado.' }).waitFor();
+    await stubDaemon(null);
+    await page.unroute('**/api/community');
+  });
+
+  await step('a monitor that is still reading the relays is not an empty order book', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // Everything else in order, so that only the relays stand between the summary and "all is well".
+    const realBackups = await (await page.request.get(`${seededUrl}/api/backup/status`, { headers: API_HEADERS })).json();
+    await page.route('**/api/backup/status', (route) => route.fulfill({ json: { ...realBackups, last_error: null, backups: [{ filename: 'respaldo.age', path: '/respaldos/respaldo.age', size_bytes: 2048, modified_timestamp: now - 60 }] } }));
+    await stubDaemon({ state: 'active_running', announced_fresh: true, announced: announcement, announced_age_secs: 20, running_for_secs: 900 });
+    let served = null;
+    await page.route('**/api/orders', (route) => route.fulfill({ json: served }));
+    const serve = async (state) => {
+      served = { state, is_stale: state !== 'live', last_update: now, source_npub: relay.npub, relays: [{ url: relay.url, state }], orders: [], disputes: [] };
+      await page.goto(`${seededUrl}/#/`, { waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'networkidle' });
+      await marketTitle(page).filter({ hasText: 'Tu mercado está abierto' }).waitFor();
+    };
+    for (const state of ['connecting', 'syncing']) {
+      await serve(state);
+      await page.locator('#activity').getByText('Leyendo las órdenes en los relays…').waitFor();
+      assert.equal(await page.locator('#activity .stat').count(), 0, `${state}: figures shown before the relays were read`);
+      await page.locator('#attention').getByText('Aún no se puede comprobar').waitFor();
+      await page.locator('#attention').getByText('todavía no sabe si hay disputas abiertas').waitFor();
+      assert.equal(await page.getByText('Todo en orden').count(), 0, state);
+    }
+    await shot(page, 'stub-04-relays-reading');
+    // The pages that read the monitor themselves follow the same rule: no counts, and no "none open".
+    await page.goto(`${seededUrl}/#/ordenes`, { waitUntil: 'networkidle' });
+    await page.getByText('Leyendo los relays…').waitFor();
+    await page.locator('.orders-filters .filter-chip', { hasText: 'Publicadas' }).waitFor();
+    assert.equal(await page.locator('.orders-filters .filter-chip span').count(), 0, 'the filters count orders before the relays were read');
+    await page.goto(`${seededUrl}/#/disputas`, { waitUntil: 'networkidle' });
+    await page.locator('#disputes-list .badge', { hasText: 'Sin comprobar' }).waitFor();
+    assert.equal(await page.getByText('Ninguna abierta').count(), 0);
+    // No relay answers and nothing is in memory: that is not zero orders either.
+    await serve('disconnected');
+    await page.locator('#activity').getByText('Ningún relay responde ahora').waitFor();
+    assert.equal(await page.locator('#activity .stat').count(), 0);
+    assert.equal(await page.getByText('Todo en orden').count(), 0);
+    // Once the relays have been read, an empty book is an empty book.
+    await serve('live');
+    await page.locator('#activity .stat', { hasText: 'Ofertas publicadas' }).getByText('0', { exact: true }).waitFor();
+    await page.locator('#attention').getByText('Todo en orden').waitFor();
+    await shot(page, 'stub-05-relays-read');
+    await page.goto(`${seededUrl}/#/ordenes`, { waitUntil: 'networkidle' });
+    await page.locator('.orders-filters .filter-chip', { hasText: 'Publicadas' }).locator('span', { hasText: /^0$/ }).waitFor();
+    await page.goto(`${seededUrl}/#/disputas`, { waitUntil: 'networkidle' });
+    await page.locator('#disputes-list .badge', { hasText: 'Ninguna abierta' }).waitFor();
+    await stubDaemon(null);
+    await page.unroute('**/api/orders');
+    await page.unroute('**/api/backup/status');
+  });
+
+  await step('alerts: when the stream ends, the log is read again and the stream reopened', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const alert = (id, title) => ({ id, level: 'warning', category: 'relay', title, message: 'Mensaje de prueba.', timestamp: now });
+    let log = [alert('relay-prueba-1', 'Primera alerta de prueba')];
+    let streams = 0;
+    // The browser retries a stream that drops, but not one the server answers with an error,
+    // which is what the application does while it restarts.
+    await page.route('**/api/notifications/sse', (route) => { streams += 1; return route.fulfill({ status: 503, body: '' }); });
+    await page.route('**/api/notifications', (route) => route.fulfill({ json: log }));
+    await page.goto(`${seededUrl}/#/alertas`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('Primera alerta de prueba').waitFor();
+    const opened = streams;
+    assert.ok(opened >= 1, 'the alert stream was never opened');
+    log = [alert('relay-prueba-2', 'Segunda alerta de prueba'), ...log];
+    // The panel reads again every 20 s and whenever its tab comes back into view.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.getByText('Segunda alerta de prueba').waitFor();
+    await page.getByText('Primera alerta de prueba').waitFor();
+    for (let waited = 0; waited < 50 && streams === opened; waited += 1) await page.waitForTimeout(100);
+    assert.ok(streams > opened, 'the alert stream was not opened again');
+    await page.unroute('**/api/notifications/sse');
+    await page.unroute('**/api/notifications');
+  });
+
+  await step('orders: an order without a readable amount is not an order of 0', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const order = { id: 'cccccccc-3333-4333-8333-cccccccccccc', event_id: 'c'.repeat(64), kind: 'sell', status: 'pending', fiat_code: 'EUR', fiat_amount_range: [], amount_sats: 0, amount_sats_str: '0', payment_methods: ['SEPA'], premium: 0, created_at: now - 60, expires_at: now + 3600, published_at: now - 60 };
+    const snapshot = { state: 'live', is_stale: false, last_update: now, source_npub: relay.npub, relays: [{ url: relay.url, state: 'live' }], orders: [order], disputes: [] };
+    await page.route('**/api/orders', (route) => route.fulfill({ json: snapshot }));
+    await page.goto(`${seededUrl}/#/ordenes`, { waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'networkidle' });
+    const row = page.locator('.data-table tbody tr', { hasText: 'cccccccc' });
+    await row.getByText('Importe no legible · EUR').waitFor();
+    assert.equal(await row.getByText(/^0 EUR$/).count(), 0);
+    await page.unroute('**/api/orders');
   });
 
   await step('disputes: after Back the guide never pairs a dispute with another order', async () => {

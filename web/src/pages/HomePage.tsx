@@ -2,7 +2,7 @@ import type { Configuration } from '../types';
 import type { PanelData } from '../hooks/usePanelData';
 import type { Navigate } from '../lib/navigation';
 import { formatDateTime, formatNumber, formatTime } from '../lib/format';
-import { type AttentionItem, type MarketStatus, type OrderStats, type RuleLine, type ServiceTile, type SetupStep, isSettingUp } from '../lib/overview';
+import { type AttentionItem, type MarketStatus, type OrderStats, type RuleLine, type RulesRead, type ServiceTile, type SetupStep, isSettingUp, rulesNotReadNote } from '../lib/overview';
 import { Icon } from '../components/ui';
 import { Badge, EmptyState, LinkButton, PageHeader, Panel, Stat } from '../components/layout';
 import { alertTone } from './AlertsPage';
@@ -20,6 +20,7 @@ export function HomePage({
   rules,
   rulesAnnounced,
   savedConfig,
+  rulesRead,
   activating,
   onActivate,
   navigate,
@@ -35,13 +36,17 @@ export function HomePage({
   /** The rules come from the node's announcement, not from the saved draft. */
   rulesAnnounced: boolean;
   savedConfig: Configuration | null;
+  /** Until the saved rules have been read, `savedConfig` says nothing. */
+  rulesRead: RulesRead;
   activating: boolean;
   onActivate: () => void;
   navigate: Navigate;
 }) {
-  const { daemon, orders, notifications, loading, settled, updatedAt, refresh } = data;
-  // "All is well" needs the data that would say otherwise.
-  const canJudge = daemon !== null && orders !== null;
+  const { daemon, notifications, loading, settled, updatedAt, refresh } = data;
+  // "All is well" needs the data that would say otherwise: the daemon report
+  // and what the relays hold, which is where an open dispute would show.
+  const relaysRead = stats.readiness === 'read' || stats.readiness === 'unconfigured';
+  const canJudge = daemon !== null && relaysRead;
   const pendingSteps = steps.filter((step) => !step.done);
   const nextStep = pendingSteps[0];
   const setupDone = steps.length - pendingSteps.length;
@@ -170,9 +175,11 @@ export function HomePage({
           <p className="panel-note">
             {canJudge
               ? 'No hay disputas abiertas ni avisos del nodo, de Lightning o de los respaldos.'
-              : settled
-                ? 'El panel no ha podido leer el estado del nodo o de los relays.'
-                : 'Consultando el estado del nodo y de los relays…'}
+              : daemon !== null && stats.readiness === 'reading'
+                ? 'El panel aún está leyendo los relays: todavía no sabe si hay disputas abiertas.'
+                : settled
+                  ? 'El panel no ha podido leer el estado del nodo o de los relays.'
+                  : 'Consultando el estado del nodo y de los relays…'}
           </p>
         )}
       </Panel>
@@ -192,8 +199,13 @@ export function HomePage({
             <Stat label="Canceladas" value={formatNumber(stats.canceled)} hint="Retiradas, vencidas o devueltas" onClick={() => navigate('orders', 'canceled')} />
             <Stat label="Disputas abiertas" value={formatNumber(stats.openDisputes)} hint={stats.openDisputes > 0 ? 'Esperan a un mediador' : 'Ninguna'} tone={stats.openDisputes > 0 ? 'bad' : 'neutral'} onClick={() => navigate('disputes')} />
           </div>
-        ) : orders === null ? (
+        ) : stats.readiness === 'unread' ? (
           <p className="panel-note">{settled ? 'El panel no ha podido leer las órdenes.' : 'Consultando las órdenes…'}</p>
+        ) : stats.readiness === 'reading' ? (
+          // Counting now would show zeros, or a part of the book, as if they were the totals.
+          <p className="panel-note">Leyendo las órdenes en los relays…</p>
+        ) : stats.readiness === 'unreachable' ? (
+          <p className="panel-note">Ningún relay responde ahora: el panel no sabe qué órdenes hay.</p>
         ) : (
           <EmptyState icon="list" title="Aún no hay órdenes que contar">
             El panel empieza a leer las órdenes cuando el nodo tiene identidad y relays configurados.
@@ -238,7 +250,9 @@ export function HomePage({
       </Panel>
 
       {!savedConfig && !settingUp && (
-        <p className="panel-note">Aún no hay reglas guardadas. <LinkButton onClick={() => navigate('config')}>Abrir configuración</LinkButton></p>
+        rulesRead === 'loaded'
+          ? <p className="panel-note">Aún no hay reglas guardadas. <LinkButton onClick={() => navigate('config')}>Abrir configuración</LinkButton></p>
+          : <p className="panel-note">{rulesNotReadNote(rulesRead)}</p>
       )}
     </section>
   );

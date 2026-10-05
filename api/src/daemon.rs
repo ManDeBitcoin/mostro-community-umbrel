@@ -119,9 +119,15 @@ pub struct DaemonReport {
     pub announced: Option<NodeInfo>,
     #[serde(default)]
     pub announced_age_secs: Option<u64>,
-    /// True while the announcement is recent enough to prove a live daemon.
+    /// True while the announcement is recent enough to prove a live daemon:
+    /// published in the last minutes and, when the age of the running process
+    /// is known, by that process and not by the one before it.
     #[serde(default)]
     pub announced_fresh: bool,
+    /// The announcement is recent, but older than the process that is running
+    /// now: the previous process published it.
+    #[serde(default)]
+    pub announced_before_start: bool,
     #[serde(default)]
     pub last_exit: Option<LastExit>,
 }
@@ -152,6 +158,7 @@ pub const NOTICE_CODES: &[&str] = &[
     "lnd_channels_unknown",
     "lnd_not_synced",
     "daemon_crash_loop",
+    "daemon_unexpected_exit",
     "daemon_not_verified",
     "announcement_stale",
     "announcement_without_daemon",
@@ -160,6 +167,59 @@ pub const NOTICE_CODES: &[&str] = &[
     "routing_fee_zero",
     "pow_first_contact_above_base",
 ];
+
+/// Slack for telling whether an announcement is older than the running
+/// process: both ages are whole seconds, read at slightly different moments.
+const ANNOUNCEMENT_START_MARGIN_SECS: u64 = 5;
+
+/// How long an exit the daemon was not asked for stays among the notices.
+const UNEXPECTED_EXIT_NEWS_SECS: u64 = 3_600;
+
+/// What the age of the node's last announcement says about the daemon this
+/// panel sees. Every answer of the API that calls a market open goes through
+/// here, so that two of them cannot disagree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnnouncementAge {
+    /// Published in the last minutes: what an app sees as an active node.
+    pub recent: bool,
+    /// Recent, but older than the process that is running now.
+    pub before_start: bool,
+}
+
+impl AnnouncementAge {
+    /// `running_for_secs` is `None` when no daemon is seen running or its
+    /// start is not known. What is not known cannot rule an announcement out.
+    pub fn judge(age_secs: Option<u64>, running_for_secs: Option<u64>) -> Self {
+        let recent = age_secs.is_some_and(|age| age <= NODE_INFO_FRESH_SECS);
+        // The process that ran before this one may have announced itself
+        // minutes ago. That event says nothing about the process running now:
+        // neither that it is serving clients nor which version it is.
+        let before_start = recent
+            && age_secs
+                .zip(running_for_secs)
+                .is_some_and(|(age, running)| {
+                    age > running.saturating_add(ANNOUNCEMENT_START_MARGIN_SECS)
+                });
+        Self {
+            recent,
+            before_start,
+        }
+    }
+
+    /// Recent enough to prove a live daemon, and published by it.
+    pub fn fresh(self) -> bool {
+        self.recent && !self.before_start
+    }
+}
+
+/// `código 101`, or `código 137 (señal 9)`: the supervisor's shell reports a
+/// process ended by a signal as 128 plus the number of the signal.
+fn exit_code_text(code: i32) -> String {
+    match code {
+        129..=192 => format!("código {code} (señal {})", code - 128),
+        _ => format!("código {code}"),
+    }
+}
 
 /// `45 s`, `12 min`, `3 h`, `2 d`: an age in the unit a person would say it in.
 fn human_age(secs: u64) -> String {
@@ -188,8 +248,8 @@ pub struct ActivationResult {
     pub settings_path: PathBuf,
     pub settings_sha256: String,
     pub activated_at_unix: u64,
-    /// False when the rendered settings were already active and the file
-    /// was left untouched.
+    /// False when the daemon already reads the active file the way it would
+    /// read the rendered settings.
     #[serde(default)]
     pub settings_changed: bool,
 }
@@ -232,6 +292,33 @@ fn write_private(path: &Path, contents: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Whether mostrod would read both files the same way. A file written by an
+/// earlier version of this panel holds the profile fields as they were typed,
+/// also when empty; they are now trimmed, and left out when empty.
+fn same_settings(on_disk: &[u8], rendered: &str) -> bool {
+    fn parsed(text: &str) -> Option<toml::Value> {
+        let mut doc: toml::Value = toml::from_str(text).ok()?;
+        if let Some(mostro) = doc.get_mut("mostro").and_then(toml::Value::as_table_mut) {
+            for key in ["name", "about", "website"] {
+                let Some(value) = mostro.get(key).and_then(toml::Value::as_str) else {
+                    continue;
+                };
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    mostro.remove(key);
+                } else {
+                    mostro.insert(key.into(), trimmed.into());
+                }
+            }
+        }
+        Some(doc)
+    }
+    std::str::from_utf8(on_disk)
+        .ok()
+        .and_then(parsed)
+        .is_some_and(|current| Some(current) == parsed(rendered))
+}
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -258,6 +345,48 @@ fn current_run_secs(active_dir: &Path) -> Option<u64> {
         .elapsed()
         .ok()
         .map(|elapsed| elapsed.as_secs())
+}
+
+/// What the files the supervisor keeps in `active/` say about the process.
+struct Runtime {
+    last_exit: Option<LastExit>,
+    run_secs: Option<u64>,
+    /// The daemon keeps dying right after it starts: it is not running, even
+    /// though the entrypoint has just respawned it.
+    crash_looping: bool,
+    /// Settings are active and a daemon that is not crash looping is alive.
+    running: bool,
+}
+
+impl Runtime {
+    fn read(active_dir: &Path, now: u64) -> Self {
+        let last_exit = read_last_exit(active_dir);
+        let run_secs = current_run_secs(active_dir);
+        let crash_looping = last_exit.as_ref().is_some_and(|exit| {
+            now.saturating_sub(exit.at_unix) < 120
+                && exit.uptime_secs < 60
+                && run_secs.is_none_or(|secs| secs < 30)
+        });
+        let running = active_dir.join("settings.toml").is_file()
+            && is_mostrod_running(active_dir)
+            && !crash_looping;
+        Self {
+            last_exit,
+            run_secs,
+            crash_looping,
+            running,
+        }
+    }
+
+    fn running_for_secs(&self) -> Option<u64> {
+        self.run_secs.filter(|_| self.running)
+    }
+}
+
+/// Seconds the daemon of this instance has been running. `None` when it is
+/// not seen running, or when its start is not known.
+pub fn running_for_secs(root: &Path) -> Option<u64> {
+    Runtime::read(&root.join("active"), unix_now()).running_for_secs()
 }
 
 pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
@@ -332,19 +461,18 @@ pub async fn report_with_node_info(
     notices.extend(lnd_notices(&lnd_probe));
 
     let now = unix_now();
-    let last_exit = read_last_exit(&active_dir);
-    let run_secs = current_run_secs(&active_dir);
-    // A daemon that keeps dying right after it starts is not running, even
-    // though the entrypoint has just respawned it.
-    let crash_looping = last_exit.as_ref().is_some_and(|exit| {
-        now.saturating_sub(exit.at_unix) < 120
-            && exit.uptime_secs < 60
-            && run_secs.is_none_or(|secs| secs < 30)
-    });
+    let runtime = Runtime::read(&active_dir, now);
+    let running_for_secs = runtime.running_for_secs();
+    let Runtime {
+        last_exit,
+        run_secs,
+        crash_looping,
+        running,
+    } = runtime;
 
     let can_activate = identity_present && draft_revision.is_some();
     let state = if active_settings_path.is_some() {
-        if is_mostrod_running(&active_dir) && !crash_looping {
+        if running {
             DaemonState::ActiveRunning
         } else {
             DaemonState::ActiveReady
@@ -358,7 +486,9 @@ pub async fn report_with_node_info(
     let announced_age_secs = node_info
         .as_ref()
         .map(|info| now.saturating_sub(info.created_at));
-    let announced_fresh = announced_age_secs.is_some_and(|age| age <= NODE_INFO_FRESH_SECS);
+    let announcement = AnnouncementAge::judge(announced_age_secs, running_for_secs);
+    let announced_before_start = announcement.before_start;
+    let announced_fresh = announcement.fresh();
     let announced_version = node_info
         .as_ref()
         .filter(|_| announced_fresh)
@@ -372,6 +502,28 @@ pub async fn report_with_node_info(
                 "El daemon terminó con código {} a los {} de arrancar y se está reiniciando. Revisa los registros del contenedor mostro: suele deberse a LND, a los relays o a la configuración.",
                 exit.code,
                 human_age(exit.uptime_secs)
+            ),
+        ));
+    }
+    // The supervisor restarts a daemon that ends on its own, so once the new
+    // process is up a single exit leaves no other trace in this report.
+    if !crash_looping
+        && active_settings_path.is_some()
+        && let Some(exit) = &last_exit
+        && now.saturating_sub(exit.at_unix) < UNEXPECTED_EXIT_NEWS_SECS
+    {
+        notices.push(DaemonNotice::new(
+            "daemon_unexpected_exit",
+            format!(
+                "El daemon terminó de forma inesperada hace {}, con {} y tras {} en marcha. {} Revisa los registros del contenedor mostro para ver la causa.",
+                human_age(now.saturating_sub(exit.at_unix)),
+                exit_code_text(exit.code),
+                human_age(exit.uptime_secs),
+                if state == DaemonState::ActiveRunning {
+                    "El supervisor lo volvió a arrancar."
+                } else {
+                    "El supervisor lo vuelve a intentar con una pausa entre intentos."
+                }
             ),
         ));
     }
@@ -425,8 +577,6 @@ pub async fn report_with_node_info(
         None => (packaged_version.clone(), packaged_source),
     };
 
-    let running_for_secs = run_secs.filter(|_| state == DaemonState::ActiveRunning);
-
     DaemonReport {
         state,
         identity_present,
@@ -448,6 +598,7 @@ pub async fn report_with_node_info(
         announced: node_info,
         announced_age_secs,
         announced_fresh,
+        announced_before_start,
         last_exit,
     }
 }
@@ -537,19 +688,30 @@ fn apply_settings(
     let active_dir = root.join("active");
     ensure_private_dir(&active_dir)?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(settings.as_bytes());
-    let settings_sha256 = format!("{:x}", hasher.finalize());
-
     let settings_file = active_dir.join("settings.toml");
     let status_file = active_dir.join("status.json");
     let now_unix = unix_now();
 
     // A draft that renders the same settings (a payment label, the contact
-    // link) must not restart a daemon that may have trades in flight.
-    let settings_changed = fs::read(&settings_file)
-        .map(|current| current != settings.as_bytes())
-        .unwrap_or(true);
+    // link) must not restart a daemon that may have trades in flight. Nor
+    // must a file that only differs in how an earlier version wrote it.
+    let on_disk = fs::read(&settings_file).ok();
+    let identical = on_disk.as_deref() == Some(settings.as_bytes());
+    let settings_changed = !on_disk
+        .as_deref()
+        .is_some_and(|current| identical || same_settings(current, &settings));
+    // An explicit activation restarts the daemon anyway, so it also brings
+    // an equivalent file up to date.
+    let rewrite = settings_changed || (restart_when_unchanged && !identical);
+
+    // The hash is the one of the file the daemon reads.
+    let active_bytes = match &on_disk {
+        Some(current) if !rewrite => current.as_slice(),
+        _ => settings.as_bytes(),
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(active_bytes);
+    let settings_sha256 = format!("{:x}", hasher.finalize());
 
     let status = ActiveStatus {
         revision: document.revision,
@@ -558,7 +720,7 @@ fn apply_settings(
         activated_at_unix: now_unix,
     };
 
-    if settings_changed {
+    if rewrite {
         write_private(&settings_file, settings.as_bytes())?;
     }
     // Ask for the restart as soon as the new settings are on disk. If a later

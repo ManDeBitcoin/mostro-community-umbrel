@@ -8,24 +8,36 @@ use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 fn setup() -> (tempfile::TempDir, axum::Router) {
     let dir = tempfile::tempdir().unwrap();
+    let app = app_for(dir.path());
+    (dir, app)
+}
+/// The API over whatever `root` already holds.
+fn app_for(root: &std::path::Path) -> axum::Router {
+    app_with_orders(root).0
+}
+/// The same, with the cache its relay monitor would fill.
+fn app_with_orders(
+    root: &std::path::Path,
+) -> (axum::Router, mostro_community_api::orders::SharedOrders) {
     let initial_config: mostro_community_api::config::Configuration =
         serde_json::from_str(include_str!("fixtures/community.json")).unwrap();
     let (tx, _rx) = tokio::sync::watch::channel(mostro_community_api::orders::MonitorCommand {
         config: initial_config,
         npub: None,
     });
+    let orders = Arc::new(tokio::sync::RwLock::new(
+        mostro_community_api::orders::OrdersCache::new(),
+    ));
     let app = router(AppState::new(
-        Arc::new(Mutex::new(Store::open(dir.path().into()).unwrap())),
+        Arc::new(Mutex::new(Store::open(root.into()).unwrap())),
         Integrations::default(),
-        Arc::new(tokio::sync::RwLock::new(
-            mostro_community_api::orders::OrdersCache::new(),
-        )),
+        orders.clone(),
         Arc::new(tokio::sync::RwLock::new(
             mostro_community_api::chat::ChatCache::new(),
         )),
         tx,
     ));
-    (dir, app)
+    (app, orders)
 }
 fn save(revision: u64, header: bool, origin: &str, config: serde_json::Value) -> Request<Body> {
     let mut builder = Request::builder()
@@ -1109,6 +1121,209 @@ async fn community_card_endpoint_contract() {
     assert!(mostro_community_api::connection::verify_community_card(
         &card
     ));
+}
+
+/// A draft saved by an earlier version may hold a separator the signed card
+/// cannot carry. The answer says so: nothing is missing, and saving again
+/// without changing it would be refused.
+#[tokio::test]
+async fn community_card_endpoint_says_why_there_is_no_card() {
+    let get_card = |app: axum::Router| async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/community/card")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        (
+            status,
+            body["error"].as_str().unwrap_or_default().to_string(),
+        )
+    };
+    let import_identity = |root: &std::path::Path| {
+        use nostr::{Keys, SecretKey, ToBech32};
+        let keys = Keys::new(SecretKey::from_slice(&[22; 32]).unwrap());
+        mostro_community_api::identity::import(
+            root,
+            &keys.secret_key().to_bech32().unwrap(),
+            &keys.public_key().to_bech32().unwrap(),
+        )
+        .unwrap();
+    };
+
+    // An identity and no rules: the rules are what is missing.
+    let dir = tempfile::tempdir().unwrap();
+    import_identity(dir.path());
+    let (status, reason) = get_card(app_for(dir.path())).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(reason.contains("necesita reglas guardadas"), "{reason}");
+    assert!(!reason.contains("identidad"), "{reason}");
+
+    // An identity and rules as v1.0.11 accepted them.
+    let dir = tempfile::tempdir().unwrap();
+    import_identity(dir.path());
+    let mut earlier = config();
+    earlier["community"]["name"] = "Compra & venta".into();
+    std::fs::write(
+        dir.path().join("community.json"),
+        serde_json::json!({"revision": 4, "config": earlier}).to_string(),
+    )
+    .unwrap();
+    let app = app_for(dir.path());
+    let (status, reason) = get_card(app.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        reason.contains("El nombre de la comunidad no puede contener «&»"),
+        "{reason}"
+    );
+    assert!(!reason.contains("identidad"), "{reason}");
+    assert!(!reason.contains("necesita reglas"), "{reason}");
+
+    // The connection data gives the panel the same reason.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/connection")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let connection: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(connection["status"], "ready");
+    assert!(connection.get("card").is_none());
+    assert_eq!(connection["card_unavailable"], reason);
+
+    // Saving it again as it is, is refused with the same rule.
+    let response = app
+        .clone()
+        .oneshot(save(4, true, "http://localhost:5173", earlier.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(reason.contains(body["error"].as_str().unwrap()), "{body}");
+
+    // Once the name is changed the card is back, with no reason to give.
+    earlier["community"]["name"] = "Compra y venta".into();
+    let response = app
+        .clone()
+        .oneshot(save(4, true, "http://localhost:5173", earlier))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let (status, _) = get_card(app.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/connection")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let connection: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(connection["card"].is_object());
+    assert!(connection.get("card_unavailable").is_none());
+}
+
+/// `/api/dashboard` and `/api/daemon/status` answer for the same node. After
+/// a restart neither takes what the previous process announced for the new one.
+#[tokio::test]
+async fn dashboard_and_status_agree_on_an_announcement_from_before_the_restart() {
+    use nostr::{Keys, SecretKey, ToBech32};
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let dir = tempfile::tempdir().unwrap();
+    // Activation only writes under a private CONFIG_DIR.
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let keys = Keys::new(SecretKey::from_slice(&[23; 32]).unwrap());
+    mostro_community_api::identity::import(
+        dir.path(),
+        &keys.secret_key().to_bech32().unwrap(),
+        &keys.public_key().to_bech32().unwrap(),
+    )
+    .unwrap();
+    let (app, orders) = app_with_orders(dir.path());
+    let response = app
+        .clone()
+        .oneshot(save(0, true, "http://localhost:5173", config()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    mostro_community_api::daemon::activate(dir.path(), "https://127.0.0.1:10009").unwrap();
+
+    // A daemon the supervisor has just started, and on the relays what the
+    // one before it announced three minutes ago.
+    let active = dir.path().join("active");
+    std::fs::write(active.join("mostro.pid"), "4242\n").unwrap();
+    std::fs::write(active.join("mostro.heartbeat"), "").unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    orders.write().await.node_info = Some(mostro_community_api::orders::NodeInfo {
+        event_id: "b".repeat(64),
+        created_at: now - 180,
+        name: None,
+        mostro_version: Some("0.17.5".into()),
+        protocol_version: Some("2".into()),
+        tags: Default::default(),
+    });
+    let get = |app: axum::Router, uri: &'static str| async move {
+        let response = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(
+            &response.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap()
+    };
+
+    let status = get(app.clone(), "/api/daemon/status").await;
+    assert_eq!(status["state"], "active_running");
+    assert_eq!(status["announced_fresh"], false);
+    assert_eq!(status["announced_before_start"], true);
+    let dashboard = get(app.clone(), "/api/dashboard").await;
+    assert_eq!(dashboard["market_started"], false, "{dashboard}");
+    assert_eq!(dashboard["mostro"]["status"], "unknown");
+    assert!(dashboard["mostro"].get("version").is_none(), "{dashboard}");
+    assert!(
+        dashboard["mostro"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("anterior a este arranque"),
+        "{dashboard}"
+    );
+
+    // The same announcement from a daemon that was already running counts,
+    // in both answers.
+    std::fs::File::options()
+        .write(true)
+        .open(active.join("mostro.pid"))
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(600))
+        .unwrap();
+    let status = get(app.clone(), "/api/daemon/status").await;
+    assert_eq!(status["announced_fresh"], true);
+    let dashboard = get(app, "/api/dashboard").await;
+    assert_eq!(dashboard["market_started"], true, "{dashboard}");
+    assert_eq!(dashboard["mostro"]["status"], "online");
+    assert_eq!(dashboard["mostro"]["version"], "0.17.5");
 }
 
 #[tokio::test]

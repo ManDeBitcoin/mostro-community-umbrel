@@ -74,7 +74,9 @@ export function ConnectPage({ data, navigate }: { data: PanelData; navigate: Nav
                 {svg ? (
                   <div className="qr-box" dangerouslySetInnerHTML={{ __html: svg }} title="Código QR de conexión" />
                 ) : (
-                  <span className="empty-hint">Sin tarjeta: guarda la configuración de la comunidad. El nombre, la web y el contacto no pueden contener «&», ni los relays y métodos de pago «&» o «,».</span>
+                  // With a link and no code, the link is too long for one. Without either, the server
+                  // says why there is no card: missing rules and rules it cannot carry are fixed differently.
+                  <span className="empty-hint">{link ? `Es demasiado largo para un código QR. Cópialo del campo «${linkLabel}».` : connection.card_unavailable ? `${connection.card_unavailable}.` : 'El panel no ha recibido la tarjeta de su servidor.'}</span>
                 )}
               </div>
               <span className="qr-hint-caption">{format.caption}</span>

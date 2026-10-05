@@ -586,7 +586,7 @@ fn is_invisible_format(c: char) -> bool {
 /// The first `keep` characters of a value a sender controls, on one line: the
 /// timeline shows this text as is, so line breaks and other control characters
 /// become spaces and invisible formatting characters are dropped.
-fn shorten(value: &str, keep: usize) -> String {
+pub(crate) fn shorten(value: &str, keep: usize) -> String {
     let mut clean = value
         .chars()
         .filter(|c| !is_invisible_format(*c))

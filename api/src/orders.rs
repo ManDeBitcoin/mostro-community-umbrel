@@ -9,7 +9,7 @@ use tokio::sync::{RwLock, watch};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-use crate::{AppState, config::Configuration};
+use crate::{AppState, chat::shorten, config::Configuration};
 
 pub const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_WS_FRAME_SIZE: usize = 128 * 1024; // 128 KB limit per message
@@ -502,6 +502,52 @@ pub fn is_closed_status(status: &str) -> bool {
     )
 }
 
+/// What the panel keeps of the `pm` tag of an order: the daemon copies there,
+/// split on commas, the text the maker typed.
+pub const MAX_ORDER_PAYMENT_METHODS: usize = 10;
+pub const MAX_PAYMENT_METHOD_CHARS: usize = 60;
+
+/// A fiat amount is a whole number in mostro-core (`i64`). Fifteen digits is
+/// more than any currency needs and still exact as a JavaScript number.
+const MAX_FIAT_AMOUNT_DIGITS: usize = 15;
+
+/// The payment methods of an order as the panel shows them: each one cleaned
+/// and cut like the sender text of the chat timeline, and no more than
+/// [`MAX_ORDER_PAYMENT_METHODS`]. A longer list ends in `…` so that the cut
+/// shows.
+fn clean_payment_methods(values: &[String]) -> Vec<String> {
+    let mut methods = Vec::new();
+    for value in values {
+        let method = shorten(value.trim(), MAX_PAYMENT_METHOD_CHARS);
+        let method = method.trim();
+        if method.is_empty() {
+            continue;
+        }
+        if methods.len() == MAX_ORDER_PAYMENT_METHODS {
+            methods.push("…".to_string());
+            break;
+        }
+        methods.push(method.to_string());
+    }
+    methods
+}
+
+/// The `fa` tag as mostrod writes it (`create_fiat_amt_array`): the fiat
+/// amount, or the two ends of a range, in digits. Anything else is not an
+/// amount the panel can show, and an empty list says so.
+fn clean_fiat_amounts(values: &[String]) -> Vec<String> {
+    let is_amount = |value: &String| {
+        !value.is_empty()
+            && value.len() <= MAX_FIAT_AMOUNT_DIGITS
+            && value.bytes().all(|b| b.is_ascii_digit())
+    };
+    if matches!(values.len(), 1 | 2) && values.iter().all(is_amount) {
+        values.to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Parses and strictly validates a Nostr Kind 38383 order event against upstream protocol rules.
 pub fn parse_and_validate_order_event(
     event: &Event,
@@ -574,7 +620,7 @@ pub fn parse_and_validate_order_event(
                     }
                 }
                 "fa" => {
-                    fiat_amount_range = s[1..].iter().map(|item| item.to_string()).collect();
+                    fiat_amount_range = clean_fiat_amounts(&s[1..]);
                 }
                 "amt" => {
                     if let Ok(parsed) = s[1].parse::<u64>() {
@@ -586,7 +632,7 @@ pub fn parse_and_validate_order_event(
                     }
                 }
                 "pm" => {
-                    payment_methods = s[1..].iter().map(|item| item.to_string()).collect();
+                    payment_methods = clean_payment_methods(&s[1..]);
                 }
                 "premium" => {
                     if let Ok(p) = s[1].parse::<i64>() {
@@ -788,9 +834,9 @@ fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> 
                 "k" => kind = Some(s[1].clone()),
                 "s" => status = Some(s[1].clone()),
                 "f" => fiat_code = Some(s[1].clone()),
-                "fa" => fiat_amount_range = s[1..].iter().map(|item| item.to_string()).collect(),
+                "fa" => fiat_amount_range = clean_fiat_amounts(&s[1..]),
                 "amt" => amount_sats = s[1].parse().unwrap_or(0),
-                "pm" => payment_methods = s[1..].iter().map(|item| item.to_string()).collect(),
+                "pm" => payment_methods = clean_payment_methods(&s[1..]),
                 "premium" => premium = s[1].parse().unwrap_or(0),
                 "expires_at" => expires_at = s[1].parse().ok(),
                 "expiration" => expiration_nip40 = s[1].parse().ok(),
