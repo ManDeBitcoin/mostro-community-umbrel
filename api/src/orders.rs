@@ -848,11 +848,9 @@ async fn run_relay_worker(
     let mut notified_down = false;
 
     loop {
-        {
-            let mut w = cache.write().await;
-            w.update_relay_status(&relay_url, MonitorState::Connecting, None, generation);
-        }
-
+        // The relay starts as "connecting" when the configuration is loaded. A
+        // retry keeps the last result: reporting "connecting" again on every
+        // attempt would hide an outage for as long as each attempt takes.
         let connect_fut = connect_async(&relay_url);
         let ws_res = tokio::time::timeout(timing.connect_timeout, connect_fut).await;
 

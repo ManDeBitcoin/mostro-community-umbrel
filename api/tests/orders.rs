@@ -491,6 +491,70 @@ async fn test_monitor_multirelay_failover_and_degraded_state() {
     relay_handle2.abort();
 }
 
+/// A relay that accepts the connection and then says nothing: the handshake
+/// never completes, so every attempt ends in the connect timeout.
+async fn spawn_silent_relay() -> (String, JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    (format!("ws://{addr}"), handle)
+}
+
+#[tokio::test]
+async fn a_relay_that_stops_answering_stays_down_between_retries() {
+    let keys = Keys::new(SecretKey::from_slice(&[12; 32]).unwrap());
+    let npub = keys.public_key().to_bech32().unwrap();
+    let (silent_url, silent_handle) = spawn_silent_relay().await;
+
+    let cache: SharedOrders = Arc::new(RwLock::new(OrdersCache::new()));
+    let (config_tx, config_rx) = watch::channel(MonitorCommand {
+        config: valid_config(vec![silent_url]),
+        npub: Some(npub),
+    });
+    let worker_handle = tokio::spawn(mostro_community_api::orders::monitor_worker(
+        cache.clone(),
+        config_rx,
+        MonitorTiming::test_timing(),
+    ));
+
+    // The first attempt is the only one reported as "connecting".
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    while cache.read().await.state != MonitorState::Disconnected {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "El primer intento debe acabar en desconectado"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Each retry waits at most 100 ms and takes 300 ms to time out, so this
+    // window covers about three of them.
+    for _ in 0..60 {
+        {
+            let r = cache.read().await;
+            assert_eq!(
+                r.state,
+                MonitorState::Disconnected,
+                "Un reintento no debe ocultar la caída"
+            );
+            assert!(r.is_stale);
+            assert!(r.relay_statuses.values().all(|relay| relay.state
+                == MonitorState::Disconnected
+                && relay.last_error.is_some()));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    drop(config_tx);
+    worker_handle.abort();
+    silent_handle.abort();
+}
+
 #[tokio::test]
 async fn test_monitor_config_change_clears_cache_and_latest_wins() {
     let keys_a = Keys::new(SecretKey::from_slice(&[10; 32]).unwrap());
