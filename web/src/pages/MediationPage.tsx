@@ -2,17 +2,29 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DisputeView, OrdersSnapshot, ChatMessage, ChatHistory } from '../types';
 import { copyToClipboard, api } from '../lib/api';
 import { ORDER_STATUS_LABELS, DISPUTE_STATUS_LABELS } from '../lib/constants';
+import { formatDateTime, formatNumber, formatStamp, formatWhen, shortId } from '../lib/format';
 import { Icon } from '../components/ui';
+import { Badge, Callout, PageHeader, Panel } from '../components/layout';
+
+const isOrderId = (text: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text);
+// A dispute the panel cannot tie to an order is addressed by its own id: `#/disputas/disputa-<id>`.
+const DISPUTE_PREFIX = 'disputa-';
 
 export function MediationConsole({
   initialOrderId = '',
   onSelectOrder,
 }: {
   initialOrderId?: string;
-  onSelectOrder?: (orderId: string) => void;
+  onSelectOrder?: (orderId: string, options?: { replace?: boolean }) => void;
 }) {
-  const [selectedOrderId, setSelectedOrderId] = useState<string>(initialOrderId);
-  const [inputOrderId, setInputOrderId] = useState<string>(initialOrderId);
+  // The order on screen is the one in the address, so Back and Forward, a
+  // reload and a shared link all show the same thing. Only a real order id is
+  // accepted: it goes into a request path.
+  const selectedOrderId = isOrderId(initialOrderId) ? initialOrderId.toLowerCase() : '';
+  const addressedDisputeId = initialOrderId.startsWith(DISPUTE_PREFIX) && isOrderId(initialOrderId.slice(DISPUTE_PREFIX.length)) ? initialOrderId.slice(DISPUTE_PREFIX.length).toLowerCase() : '';
+  const [inputOrderId, setInputOrderId] = useState<string>(selectedOrderId);
+  // The row clicked last, to tell apart two disputes of one order. It only
+  // counts while it belongs to the order on screen.
   const [selectedDisputeId, setSelectedDisputeId] = useState<string>('');
   const [history, setHistory] = useState<ChatHistory | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,11 +36,15 @@ export function MediationConsole({
   const selectedOrderRef = useRef<string>(initialOrderId);
 
   useEffect(() => {
-    if (initialOrderId && initialOrderId !== selectedOrderId) {
-      setSelectedOrderId(initialOrderId);
-      setInputOrderId(initialOrderId);
-    }
-  }, [initialOrderId]);
+    setInputOrderId(selectedOrderId);
+  }, [selectedOrderId]);
+
+  // The panel can learn the order of a dispute later, from its messages. The
+  // address then moves on to that order, where the guide can name both ids.
+  useEffect(() => {
+    const learned = addressedDisputeId ? (disputes || []).find((d) => d.id === addressedDisputeId)?.order_id : null;
+    if (learned && onSelectOrder) onSelectOrder(learned, { replace: true });
+  }, [addressedDisputeId, disputes, onSelectOrder]);
 
   const fetchDisputes = useCallback(async () => {
     // The two requests fail independently: a failed one must never read as
@@ -53,15 +69,15 @@ export function MediationConsole({
   }, [fetchDisputes]);
 
   const fetchChat = useCallback(async (orderId: string) => {
-    if (!orderId.trim()) return;
+    if (!isOrderId(orderId)) return;
     setLoading(true);
     setError('');
     try {
-      const data = await api<ChatHistory>(`/api/chat/${orderId.trim()}`);
+      const data = await api<ChatHistory>(`/api/chat/${encodeURIComponent(orderId)}`);
       // A slower answer for the order shown before must not replace this one.
       if (data.order_id === selectedOrderRef.current) setHistory(data);
     } catch (err) {
-      if (orderId.trim() === selectedOrderRef.current) {
+      if (orderId === selectedOrderRef.current) {
         setHistory(null);
         setError(err instanceof Error ? err.message : 'No se pudieron obtener los mensajes de la orden');
       }
@@ -85,30 +101,27 @@ export function MediationConsole({
   }, [selectedOrderId, fetchChat]);
 
   const selectOrder = (orderId: string) => {
-    setSelectedOrderId(orderId);
-    setInputOrderId(orderId);
     if (onSelectOrder) onSelectOrder(orderId);
   };
 
   const selectDispute = (d: DisputeView) => {
     setSelectedDisputeId(d.id);
-    if (d.order_id) selectOrder(d.order_id);
-    else {
-      setSelectedOrderId('');
-      setInputOrderId('');
-    }
+    selectOrder(d.order_id || `${DISPUTE_PREFIX}${d.id}`);
   };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const id = inputOrderId.trim();
-    if (id) {
-      setSelectedDisputeId('');
-      // Selecting another order loads it through the effect; asking again
-      // for the same one refreshes it.
-      if (id === selectedOrderId) void fetchChat(id);
-      else selectOrder(id);
+    const id = inputOrderId.trim().toLowerCase();
+    if (!id) return;
+    if (!isOrderId(id)) {
+      setError('Eso no es el identificador de una orden. Tiene este aspecto: edbd72f6-0bb0-4740-8b1c-7f51b6ad72ba.');
+      return;
     }
+    setSelectedDisputeId('');
+    // Selecting another order loads it through the effect; asking again
+    // for the same one refreshes it.
+    if (id === selectedOrderId) void fetchChat(id);
+    else selectOrder(id);
   };
 
   const copy = (text: string, key: string) =>
@@ -119,10 +132,17 @@ export function MediationConsole({
 
   const sortedDisputes = [...(disputes || [])].sort((a, b) => Number(b.is_open) - Number(a.is_open) || b.updated_at - a.updated_at);
   const openCount = sortedDisputes.filter((d) => d.is_open).length;
-  const selectedDispute =
-    sortedDisputes.find((d) => d.id === selectedDisputeId) ||
-    sortedDisputes.find((d) => selectedOrderId && d.order_id === selectedOrderId) ||
-    (history?.dispute_id && history.order_id === selectedOrderId ? sortedDisputes.find((d) => d.id === history.dispute_id) : undefined);
+  // A dispute is only shown together with the order it belongs to. After Back
+  // or Forward the address can name another order than the row clicked last,
+  // and the guide below prints commands with both ids.
+  const selectedDispute = addressedDisputeId
+    ? sortedDisputes.find((d) => d.id === addressedDisputeId && !d.order_id)
+    : selectedOrderId
+      ? sortedDisputes.find((d) => d.id === selectedDisputeId && d.order_id === selectedOrderId) ||
+        sortedDisputes.find((d) => d.order_id === selectedOrderId) ||
+        (history?.dispute_id && history.order_id === selectedOrderId ? sortedDisputes.find((d) => d.id === history.dispute_id) : undefined)
+      : undefined;
+  const badOrderParam = Boolean(initialOrderId) && !selectedOrderId && !addressedDisputeId;
   const monitorState = ordersSnapshot?.state;
   const monitorIsLive = monitorState === 'live' && !ordersSnapshot?.is_stale;
   const selectedOrder = ordersSnapshot?.orders.find((o) => o.id === selectedOrderId);
@@ -135,40 +155,34 @@ export function MediationConsole({
 
   return (
     <section className="content mediation-page">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">DISPUTAS Y MENSAJES DE PROTOCOLO · SOLO LECTURA</div>
-          <h1>Consola de Mediación</h1>
-          <p>Disputas que anuncia tu nodo e historial de mensajes entre los usuarios y el daemon para cada orden.</p>
-        </div>
-        <button
-          className="button button-secondary"
-          onClick={() => {
-            void fetchDisputes();
-            if (selectedOrderId) void fetchChat(selectedOrderId);
-          }}
-          disabled={loading}
-        >
-          <span className={loading ? 'spin' : ''}>↻</span> Actualizar
-        </button>
-      </div>
+      <PageHeader
+        group="Mercado"
+        title="Disputas"
+        description="Las disputas que anuncia tu nodo y el historial de mensajes entre los usuarios y el daemon en cada orden."
+        actions={
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => {
+              void fetchDisputes();
+              if (selectedOrderId) void fetchChat(selectedOrderId);
+            }}
+            disabled={loading}
+          >
+            <Icon name="refresh" size={14} /> Actualizar
+          </button>
+        }
+      />
 
-      <div className="dev-banner">
-        <div className="banner-icon"><Icon name="shield" size={18} /></div>
-        <div>
-          <b>Qué muestra esta consola y qué no</b>
-          <span>
-            Muestra las disputas publicadas por el nodo (kind 38386) y los mensajes de protocolo v2 (kind 14, cifrado NIP-44) entre cada usuario y el daemon, descifrados en memoria con la identidad del nodo. No puede leer el chat entre comprador y vendedor ni el del mediador con las partes: se cifran con claves que el nodo no tiene. Tampoco resuelve disputas. Lo que envía un usuario es una petición: solo una respuesta del daemon confirma que la procesó.
-          </span>
-        </div>
-        <div className="banner-status"><i /> SOLO LECTURA</div>
-      </div>
+      <Callout tone="info" title="Esta página observa, no resuelve">
+        Muestra las disputas que publica el nodo y los mensajes de protocolo entre cada usuario y el daemon, descifrados en memoria con la identidad del nodo. No puede leer el chat entre comprador y vendedor ni el del mediador con las partes: se cifran con claves que el nodo no tiene. Lo que envía un usuario es una petición: solo una respuesta del daemon confirma que la procesó.
+      </Callout>
 
-      <div className="section-title-row">
-        <div>
-          <h2>Disputas del nodo</h2>
-          <p>
-            {disputesError && disputes === null
+      <Panel
+        id="disputes-list"
+        title="Disputas del nodo"
+        description={
+          disputesError && disputes === null
               ? 'No se pudieron consultar las disputas.'
               : disputes === null
                 ? 'Cargando…'
@@ -176,40 +190,38 @@ export function MediationConsole({
                   ? monitorIsLive
                     ? 'El nodo no ha anunciado ninguna disputa en los relays configurados.'
                     : 'Sin disputas conocidas todavía.'
-                  : `${openCount} abierta${openCount === 1 ? '' : 's'} de ${sortedDisputes.length} anunciada${sortedDisputes.length === 1 ? '' : 's'}.`}
-          </p>
-        </div>
-      </div>
-
-      {(disputesError || (ordersSnapshot && !monitorIsLive)) && (
+                  : `${openCount} abierta${openCount === 1 ? '' : 's'} de ${sortedDisputes.length} anunciada${sortedDisputes.length === 1 ? '' : 's'}.`
+        }
+        aside={disputes !== null ? <Badge tone={openCount > 0 ? 'bad' : 'good'}>{openCount > 0 ? `${openCount} abierta${openCount === 1 ? '' : 's'}` : 'Ninguna abierta'}</Badge> : undefined}
+      >
+        {(disputesError || (ordersSnapshot && !monitorIsLive)) && (
         <div className="form-message error">
           {disputesError
             ? `No se pudieron consultar las disputas (${disputesError}). La lista puede estar incompleta.`
             : `El monitor de relays no está al día (estado: ${monitorState}${ordersSnapshot?.is_stale ? ', datos retenidos' : ''}). Puede haber disputas abiertas que aún no aparecen aquí.`}
         </div>
       )}
-
-      {sortedDisputes.length > 0 && (
-        <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%', marginBottom: '20px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Disputas anunciadas por el nodo">
-            <thead>
-              <tr>
-                <th>Disputa</th>
-                <th>Estado</th>
-                <th>La abrió</th>
-                <th>Abierta el</th>
-                <th>Orden</th>
-              </tr>
-            </thead>
-            <tbody>
+        {sortedDisputes.length > 0 && (
+          <div className="table-wrap">
+            <table className="data-table" aria-label="Disputas anunciadas por el nodo">
+              <thead>
+                <tr>
+                  <th>Disputa</th>
+                  <th>Estado</th>
+                  <th>La abrió</th>
+                  <th>Abierta</th>
+                  <th>Orden</th>
+                </tr>
+              </thead>
+              <tbody>
               {sortedDisputes.map((d) => (
                 <tr
                   key={d.id}
                   className={selectedDispute?.id === d.id ? 'order-row-highlight' : ''}
-                  style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', cursor: 'pointer' }}
+                  style={{ cursor: 'pointer' }}
                   onClick={() => selectDispute(d)}
                 >
-                  <td style={{ padding: '8px 0' }}>
+                  <td>
                     <button
                       type="button"
                       className="copy-button"
@@ -220,44 +232,47 @@ export function MediationConsole({
                         selectDispute(d);
                       }}
                     >
-                      <code>{d.id.slice(0, 8)}…</code>
+                      <code>{shortId(d.id)}</code>
                     </button>
                   </td>
                   <td>
-                    <span className={d.is_open ? 'dispute-badge' : 'sim-actor-badge'} title={d.status}>
-                      {DISPUTE_STATUS_LABELS[d.status] || d.status}
-                    </span>
+                    <Badge tone={d.status === 'initiated' ? 'bad' : d.is_open ? 'warn' : 'neutral'}>{DISPUTE_STATUS_LABELS[d.status] || d.status}</Badge>
                   </td>
                   <td>{d.initiator === 'buyer' ? 'Comprador' : d.initiator === 'seller' ? 'Vendedor' : '—'}</td>
-                  <td>{new Date((d.published_at || d.updated_at) * 1000).toLocaleString()}</td>
+                  <td title={formatDateTime(d.published_at || d.updated_at)}>{formatWhen(d.published_at || d.updated_at)}</td>
                   <td>
-                    {d.order_id ? <code>{d.order_id.slice(0, 8)}…</code> : <span style={{ fontSize: '13px', color: '#88988e' }}>Sin identificar</span>}
+                    {d.order_id ? <code>{shortId(d.order_id)}</code> : <small>Sin identificar</small>}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
+            </table>
+          </div>
+        )}
+      </Panel>
 
       <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: '1 1 320px', alignItems: 'center' }}>
-          <div className="sim-control-group" style={{ flex: 1, minWidth: '220px' }}>
-            <label>Ver los mensajes de una orden (UUID)</label>
+        <form onSubmit={handleSearch} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', flex: '1 1 220px', minWidth: 0, alignItems: 'flex-end' }}>
+          <div className="sim-control-group" style={{ flex: '1 1 180px', minWidth: 0 }}>
+            <label htmlFor="order-search">Ver los mensajes de una orden (UUID)</label>
             <input
+              id="order-search"
               type="text"
+              autoComplete="off"
+              spellCheck={false}
               placeholder="Ej. edbd72f6-0bb0-4740-8b1c-7f51b6ad72ba"
               value={inputOrderId}
               onChange={(e) => setInputOrderId(e.target.value)}
             />
           </div>
-          <button type="submit" className="button button-primary" style={{ marginTop: 'auto', height: '32px' }}>
+          <button type="submit" className="button button-primary" style={{ height: '32px' }}>
             Cargar mensajes
           </button>
         </form>
       </div>
 
-      {error && <div className="form-message error">{error}</div>}
+      {badOrderParam && <div className="form-message error" role="alert">La dirección no lleva el identificador de una orden. Elige una disputa de la tabla o escribe el UUID de la orden.</div>}
+      {error && <div className="form-message error" role="alert">{error}</div>}
 
       <div className="mediation-grid">
         <div className="chat-window">
@@ -308,13 +323,7 @@ export function MediationConsole({
             ) : (
               timelineMessages.map((msg) => {
                 const bubbleClass = msg.is_from_me ? 'chat-bubble from-me' : 'chat-bubble from-other';
-                const formattedTime = new Date(msg.created_at * 1000).toLocaleString([], {
-                  day: '2-digit',
-                  month: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                });
+                const formattedTime = formatStamp(msg.created_at);
                 return (
                   <div key={msg.id} className={bubbleClass}>
                     <div className="chat-meta">
@@ -341,7 +350,7 @@ export function MediationConsole({
                 </p>
                 {unrecognizedMessages.map((msg) => (
                   <div key={msg.id} style={{ borderTop: '1px solid #1f2b24', padding: '6px 0', wordBreak: 'break-word' }}>
-                    <code>{msg.sender.slice(0, 12)}…{msg.sender.slice(-4)}</code> · {new Date(msg.created_at * 1000).toLocaleString()} · {msg.action || 'sin acción'}
+                    <code>{msg.sender.slice(0, 12)}…{msg.sender.slice(-4)}</code> · {formatDateTime(msg.created_at)} · {msg.action || 'sin acción'}
                     {msg.content ? ` · ${msg.content}` : ''}
                   </div>
                 ))}
@@ -395,7 +404,7 @@ export function MediationConsole({
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#829288' }}>Importe:</span>
                     <strong>
-                      {selectedOrder.amount_sats > 0 ? `${selectedOrder.amount_sats.toLocaleString()} sats · ` : ''}
+                      {selectedOrder.amount_sats > 0 ? `${formatNumber(selectedOrder.amount_sats)} sats · ` : ''}
                       {selectedOrder.fiat_amount_range.join(' – ') || '0'} {selectedOrder.fiat_code.toUpperCase()}
                     </strong>
                   </div>

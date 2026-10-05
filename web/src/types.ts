@@ -10,14 +10,15 @@ export type ServiceInfo = {
   status: string;
   detail: string;
   version?: string;
-  alias?: string;
+  alias?: string | null;
   synced_to_chain?: boolean;
   synced_to_graph?: boolean | null;
   network?: string | null;
-  num_active_channels?: number;
-  num_pending_channels?: number;
-  num_inactive_channels?: number;
-  block_height?: number;
+  /** `null` when LND did not say: unknown is not zero. */
+  num_active_channels?: number | null;
+  num_pending_channels?: number | null;
+  num_inactive_channels?: number | null;
+  block_height?: number | null;
   liquidity?: { status: 'available' | 'unavailable'; local_balance_sats: string | null; remote_balance_sats: string | null; detail: string };
 };
 export type Dashboard = {
@@ -64,10 +65,14 @@ export type DaemonReport = {
   active_revision?: number | null;
   active_settings_hash?: string | null;
   active_settings_path?: string | null;
-  lnd_channel_count: number;
-  lnd_synced: boolean;
+  lnd_channel_count: number | null;
+  lnd_synced: boolean | null;
   can_activate: boolean;
   warnings: string[];
+  /** The same warnings with a stable code each. Absent on an older server. */
+  notices?: DaemonNotice[];
+  /** Seconds the current mostrod process has been running, when known. */
+  running_for_secs?: number | null;
   mostro_version?: string;
   version_source?: 'announced' | 'binary' | 'pinned' | string;
   packaged_version?: string;
@@ -77,6 +82,7 @@ export type DaemonReport = {
   announced_fresh?: boolean;
   last_exit?: { at_unix: number; code: number; uptime_secs: number } | null;
 };
+export type DaemonNotice = { code: string; text: string };
 export type NodeInfo = {
   event_id: string;
   created_at: number;
@@ -239,9 +245,7 @@ export type ChatHistory = {
 export type CommissionBondPreset = {
   id: string;
   nameEs: string;
-  nameEn: string;
   descEs: string;
-  descEn: string;
   feeBps: number;
   devFeeBps: number;
   maxRoutingFeeBps: number;

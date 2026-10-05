@@ -1,10 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OrdersSnapshot } from '../types';
+import type { Navigate } from '../lib/navigation';
 import { api } from '../lib/api';
-import { ORDER_STATUS_LABELS, CLOSED_ORDER_STATUSES, isOpenDispute } from '../lib/constants';
+import { ORDER_STATUS_LABELS, isOpenDispute } from '../lib/constants';
+import { formatDateTime, formatNumber, formatTime, formatWhen, shortId } from '../lib/format';
 import { Icon, StatusDot } from '../components/ui';
+import { type Tone, Badge, Callout, EmptyState, LinkButton, PageHeader, Panel } from '../components/layout';
 
-export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: string) => void }) {
+type StatusFilter = 'all' | 'pending' | 'in-progress' | 'success' | 'canceled';
+const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'all', label: 'Todas' },
+  { id: 'pending', label: 'Publicadas' },
+  { id: 'in-progress', label: 'En curso' },
+  { id: 'success', label: 'Completadas' },
+  { id: 'canceled', label: 'Canceladas' },
+];
+const isStatusFilter = (value: string): value is StatusFilter => STATUS_FILTERS.some((item) => item.id === value);
+const matchesStatus = (filter: StatusFilter, status: string) =>
+  filter === 'all' || status === filter || (filter === 'success' && status === 'completed-by-admin');
+const STATUS_TONE: Record<string, Tone> = { pending: 'info', 'in-progress': 'warn', success: 'good', 'completed-by-admin': 'good', canceled: 'neutral' };
+
+const MONITOR_STATE: Record<string, string> = {
+  unconfigured: 'Sin configurar',
+  connecting: 'Conectando con los relays',
+  syncing: 'Leyendo los eventos guardados',
+  live: 'En vivo',
+  degraded: 'Con relays caídos',
+  disconnected: 'Sin conexión con los relays',
+};
+const RELAY_STATE: Record<string, string> = { live: 'en vivo', connecting: 'conectando', syncing: 'sincronizando', degraded: 'con fallos', disconnected: 'sin conexión', unconfigured: 'sin configurar' };
+
+/**
+ * The node's public order book, read only. `initialStatus` comes from the
+ * address, so the summary page can link to "the orders in progress".
+ */
+export function OrdersPage({ initialStatus = '', navigate }: { initialStatus?: string; navigate: Navigate }) {
   const [snapshot, setSnapshot] = useState<OrdersSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -27,7 +57,10 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
   const [countdown, setCountdown] = useState<number>(3);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [filterKind, setFilterKind] = useState<'all' | 'buy' | 'sell'>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  // The status filter lives in the address: a figure of the summary can link
+  // to it, and the menu entry always opens the whole book.
+  const filterStatus: StatusFilter = isStatusFilter(initialStatus) ? initialStatus : 'all';
+  const setFilterStatus = (next: StatusFilter) => navigate('orders', next === 'all' ? '' : next);
   const [newOrdersCount, setNewOrdersCount] = useState<number>(0);
   const [newlyAddedIds, setNewlyAddedIds] = useState<Set<string>>(new Set());
 
@@ -113,42 +146,52 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
     return () => clearInterval(intervalTimer);
   }, [autoRefresh, refreshIntervalSec, fetchOrders]);
 
+  const header = (actions?: React.ReactNode) => (
+    <PageHeader
+      group="Mercado"
+      title="Órdenes"
+      description="Las órdenes que tu nodo anuncia en los relays. Es una vista de solo lectura: el panel no toma órdenes ni mueve fondos."
+      actions={actions}
+    />
+  );
+
   if (loading && !snapshot) {
-    return <section className="content"><div className="page-heading"><h1>Órdenes públicas</h1></div><p>Cargando monitor...</p></section>;
+    return <section className="content orders-page">{header()}<Panel><EmptyState icon="list" title="Leyendo las órdenes…" /></Panel></section>;
   }
 
   if (!snapshot) {
-    return <section className="content"><div className="page-heading"><h1>Órdenes públicas</h1></div><p>Error al cargar el estado.</p></section>;
+    return (
+      <section className="content orders-page">
+        {header()}
+        <Callout tone="bad" title="No se pudieron leer las órdenes" action={<button type="button" className="button button-secondary" onClick={() => void fetchOrders(true)}>Reintentar</button>}>
+          El panel no recibió respuesta de su servidor.
+        </Callout>
+      </section>
+    );
+  }
+
+  // Nothing to read yet: no toolbar and no filters, only what is missing.
+  if (snapshot.state === 'unconfigured') {
+    return (
+      <section className="content orders-page">
+        {header()}
+        <Panel>
+          <EmptyState icon="list" title="Aún no hay órdenes que leer" action={<LinkButton onClick={() => navigate('home')}>Ver la puesta en marcha</LinkButton>}>
+            El panel lee de los relays las órdenes de tu nodo. Para eso necesita la identidad del nodo y al menos un relay guardado en Configuración.
+          </EmptyState>
+        </Panel>
+      </section>
+    );
   }
 
   const { state, is_stale, last_update, source_npub, relays, orders } = snapshot;
   const openDisputes = (snapshot.disputes || []).filter((d) => isOpenDispute(d.status));
-
-  const stateLabels: Record<string, string> = {
-    unconfigured: "Sin configurar (falta identidad pública o relays)",
-    connecting: "Conectando a relays...",
-    syncing: "Sincronizando eventos...",
-    live: "En vivo (sincronizado)",
-    degraded: "Degradado (al menos un relay activo, otros desconectados)",
-    disconnected: "Desconectado"
-  };
-
-  const filteredOrders = orders.filter((o) => {
-    if (filterKind !== 'all' && o.kind !== filterKind) return false;
-    if (filterStatus === 'pending' && o.status !== 'pending') return false;
-    if (filterStatus === 'in-progress' && o.status !== 'in-progress') return false;
-    if (filterStatus === 'closed' && !CLOSED_ORDER_STATUSES.includes(o.status)) return false;
-    return true;
-  });
+  const countOf = (filter: StatusFilter) => orders.filter((o) => matchesStatus(filter, o.status)).length;
+  const filteredOrders = orders.filter((o) => (filterKind === 'all' || o.kind === filterKind) && matchesStatus(filterStatus, o.status));
 
   return (
     <section className="content orders-page">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">MONITOR DE SOLO LECTURA</div>
-          <h1>Órdenes públicas</h1>
-          <p>Órdenes anunciadas en Nostr por la identidad {source_npub ? <code style={{wordBreak: "break-all"}}>{source_npub.slice(0, 15)}...</code> : "no configurada"}</p>
-        </div>
+      {header(
         <div className="orders-updater-toolbar">
           <div className="orders-updater-status">
             <span className={`auto-refresh-pill ${autoRefresh ? 'is-live' : 'is-paused'}`}>
@@ -156,21 +199,17 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
               {autoRefresh ? (
                 <>
                   <b>En vivo</b>
-                  <small>({countdown}s)</small>
+                  <small>({countdown} s)</small>
                 </>
               ) : (
-                <b>Pausado</b>
+                <b>En pausa</b>
               )}
             </span>
-            {lastRefreshedAt && (
-              <span className="last-sync-label" title={lastRefreshedAt.toLocaleString()}>
-                Sincronizado {lastRefreshedAt.toLocaleTimeString()}
-              </span>
-            )}
+            {lastRefreshedAt && <span className="last-sync-label">Leído a las {formatTime(lastRefreshedAt)}</span>}
           </div>
           <div className="orders-updater-actions">
             <div className="interval-selector">
-              <label htmlFor="orders-refresh-interval" className="interval-label">Frecuencia:</label>
+              <label htmlFor="orders-refresh-interval" className="interval-label">Cada</label>
               <select
                 id="orders-refresh-interval"
                 value={refreshIntervalSec}
@@ -180,17 +219,17 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
                   setCountdown(val);
                 }}
                 className="interval-select"
-                title="Intervalo de actualización automática"
+                title="Cada cuánto se vuelven a leer las órdenes"
               >
-                <option value={3}>Cada 3 seg</option>
-                <option value={5}>Cada 5 seg</option>
-                <option value={10}>Cada 10 seg</option>
-                <option value={30}>Cada 30 seg</option>
+                <option value={3}>3 s</option>
+                <option value={5}>5 s</option>
+                <option value={10}>10 s</option>
+                <option value={30}>30 s</option>
               </select>
             </div>
             <button
               type="button"
-              className={`button ${autoRefresh ? 'button-secondary' : 'button-primary'} auto-toggle-btn`}
+              className="button button-secondary auto-toggle-btn"
               onClick={() => {
                 const nextState = !autoRefresh;
                 setAutoRefresh(nextState);
@@ -199,9 +238,8 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
                   void fetchOrders(true);
                 }
               }}
-              title={autoRefresh ? 'Pausar actualización periódica' : 'Activar actualización periódica'}
             >
-              {autoRefresh ? '⏸ Pausar' : '▶ Reanudar'}
+              {autoRefresh ? 'Pausar' : 'Reanudar'}
             </button>
             <button
               type="button"
@@ -211,175 +249,152 @@ export function OrdersPage({ onSelectDispute }: { onSelectDispute?: (orderId: st
                 void fetchOrders(true);
               }}
               disabled={refreshing || loading}
-              title="Forzar actualización inmediata"
             >
-              <span className={refreshing ? 'spin' : ''}>↻</span> Actualizar
+              <Icon name="refresh" size={14} /> Actualizar
             </button>
           </div>
-        </div>
-      </div>
+        </div>,
+      )}
+
       {newOrdersCount > 0 && (
         <div className="new-orders-banner" role="status">
           <div className="new-orders-info">
             <span className="new-orders-icon">⚡</span>
             <span>
-              <strong>{newOrdersCount === 1 ? '1 orden nueva detectada' : `${newOrdersCount} órdenes nuevas detectadas`}</strong> en el monitor.
+              <strong>{newOrdersCount === 1 ? '1 orden nueva' : `${newOrdersCount} órdenes nuevas`}</strong> desde que abriste esta página.
             </span>
           </div>
-          <button
-            type="button"
-            className="button button-secondary dismiss-btn"
-            onClick={() => setNewOrdersCount(0)}
-          >
+          <button type="button" className="button button-secondary dismiss-btn" onClick={() => setNewOrdersCount(0)}>
             Entendido
           </button>
         </div>
       )}
-      <div className="dev-banner">
-        <div className="banner-icon"><Icon name="alert" size={18}/></div>
-        <div>
-          <b>Aviso de Solo Lectura</b>
-          <span>Este monitor muestra el estado público que el daemon anuncia, que es menos detallado que el real: una orden «Pendiente» puede estar ya tomada y una «En curso» puede estar en disputa. No garantiza liquidez ni que el daemon esté en ejecución, y no permite pagar, tomar órdenes ni arbitrar.</span>
-        </div>
-      </div>
 
       {openDisputes.length > 0 && (
-        <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(235, 115, 29, 0.1)', border: '1px solid rgba(235, 115, 29, 0.3)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div>
-            <strong style={{ color: '#eb731d', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Icon name="shield" size={15} /> {openDisputes.length} disputa{openDisputes.length === 1 ? '' : 's'} abierta{openDisputes.length === 1 ? '' : 's'} en el nodo
-            </strong>
-            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#9ba3af' }}>
-              El nodo las anuncia en eventos propios (kind 38386). El estado público de una orden no cambia al entrar en disputa.
-            </p>
+        <Callout
+          tone="bad"
+          title={openDisputes.length === 1 ? 'Hay 1 disputa abierta' : `Hay ${openDisputes.length} disputas abiertas`}
+          action={<button type="button" className="button button-primary" onClick={() => navigate('disputes')}>Ver disputas</button>}
+        >
+          El nodo las anuncia aparte. El estado público de una orden no cambia cuando entra en disputa.
+        </Callout>
+      )}
+
+      <Panel
+        id="orders-monitor"
+        title="Libro de órdenes"
+        description={
+          <>
+            Publicadas por {source_npub ? <code>{shortId(source_npub, 16)}</code> : 'una identidad sin configurar'}.{' '}
+            {is_stale ? 'Datos retenidos: el panel no recibe eventos nuevos' : 'Datos al día'}
+            {last_update > 0 && `, último evento a las ${formatTime(last_update)}`}.
+          </>
+        }
+        aside={<Badge tone={state === 'live' && !is_stale ? 'good' : 'warn'}>{MONITOR_STATE[state] || state}</Badge>}
+      >
+        {relays && relays.length > 0 && (
+          <div className="relay-row">
+            <span className="field-label">Relays</span>
+            {relays.map((r) => (
+              <span key={r.url} className="chip" title={r.last_error || undefined}>
+                <StatusDot status={r.state === 'live' ? 'online' : r.state === 'connecting' || r.state === 'syncing' ? 'warning' : 'offline'} />
+                {r.url.replace(/^wss?:\/\//, '')} · {RELAY_STATE[r.state] || r.state}
+              </span>
+            ))}
           </div>
-          {onSelectDispute && (
-            <button
-              type="button"
-              className="button button-primary"
-              style={{ fontSize: '13px', height: '32px' }}
-              onClick={() => onSelectDispute('')}
-            >
-              Ver disputas →
-            </button>
-          )}
-        </div>
-      )}
+        )}
 
-      <div className="section-title-row">
-        <div><h2>Estado de Conexión</h2><p>{stateLabels[state]}</p></div>
-        <span className="updated-label">
-          {is_stale ? "Datos retenidos (obsoletos)" : "Datos frescos"}
-          {last_update > 0 && ` (Última vez: ${new Date(last_update * 1000).toLocaleTimeString()})`}
-        </span>
-      </div>
+        <details className="help-details">
+          <summary>Cómo leer el estado de una orden</summary>
+          <p>
+            El nodo solo publica cuatro estados y son menos precisos que el real. Una orden «Publicada» puede estar ya tomada, y una «En curso» sigue así mientras está activa, con el pago fiat enviado o en disputa. El detalle de cada orden está en sus mensajes.
+          </p>
+        </details>
 
-      {relays && relays.length > 0 && (
-        <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: '#88988e' }}>Relays:</span>
-          {relays.map((r) => (
-            <span key={r.url} className={`chip ${r.state === 'live' ? 'complete' : ''}`} style={{ fontSize: '13px', padding: '3px 8px' }}>
-              <StatusDot status={r.state === 'live' ? 'online' : r.state === 'connecting' || r.state === 'syncing' ? 'warning' : 'offline'} />
-              {r.url.replace(/^wss?:\/\//, '')} ({r.state})
-            </span>
-          ))}
+        <div className="orders-filters">
+          <div className="filter-chips" role="group" aria-label="Filtrar por estado">
+            {STATUS_FILTERS.map((item) => (
+              <button key={item.id} type="button" className={`filter-chip ${filterStatus === item.id ? 'active' : ''}`} aria-pressed={filterStatus === item.id} onClick={() => setFilterStatus(item.id)}>
+                {item.label} <span>{countOf(item.id)}</span>
+              </button>
+            ))}
+          </div>
+          <label className="inline-select">
+            <span>Tipo</span>
+            <select value={filterKind} onChange={(e) => setFilterKind(e.target.value as 'all' | 'buy' | 'sell')}>
+              <option value="all">Compras y ventas</option>
+              <option value="sell">Solo ventas</option>
+              <option value="buy">Solo compras</option>
+            </select>
+          </label>
         </div>
-      )}
 
-      <div className="sim-controls" style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="sim-control-group" style={{ minWidth: '150px' }}>
-          <label>Tipo</label>
-          <select value={filterKind} onChange={(e) => setFilterKind(e.target.value as any)}>
-            <option value="all">Todos los tipos</option>
-            <option value="sell">Solo ventas</option>
-            <option value="buy">Solo compras</option>
-          </select>
-        </div>
-        <div className="sim-control-group" style={{ minWidth: '160px' }}>
-          <label>Estado</label>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-            <option value="all">Todos los estados</option>
-            <option value="pending">Pendientes</option>
-            <option value="in-progress">En curso</option>
-            <option value="closed">Cerradas</option>
-          </select>
-        </div>
-        <div style={{ marginLeft: 'auto', fontSize: '15px', color: '#88988e' }}>
-          <span>{filteredOrders.length} {filteredOrders.length === 1 ? 'orden mostrada' : 'órdenes mostradas'}</span>
-        </div>
-      </div>
-
-      <div className="form-grid">
-        {state === 'unconfigured' ? (
-          <p className="empty-hint">El monitor no tiene un origen configurado. Si importaste una clave, recarga la configuración o define la identidad pública.</p>
-        ) : orders.length === 0 ? (
-          <p className="empty-hint">{state === 'syncing' ? "Esperando eventos confirmados (EOSE)..." : "No se encontraron órdenes publicadas para este autor."}</p>
+        {orders.length === 0 ? (
+          state === 'syncing' || state === 'connecting' ? (
+            <EmptyState icon="list" title="Leyendo los relays…">Las órdenes aparecerán en cuanto los relays respondan.</EmptyState>
+          ) : state === 'disconnected' || is_stale ? (
+            // No data is not the same as no orders.
+            <EmptyState icon="list" title="El panel no recibe datos de los relays">No puede saber si tu nodo tiene órdenes publicadas. Revisa el estado de cada relay, arriba.</EmptyState>
+          ) : (
+            <EmptyState icon="list" title="Tu nodo no ha publicado órdenes">Aparecerán aquí cuando alguien publique una orden en tu comunidad.</EmptyState>
+          )
         ) : filteredOrders.length === 0 ? (
-          <p className="empty-hint">No hay órdenes que coincidan con los filtros seleccionados.</p>
+          <EmptyState icon="list" title="Ninguna orden con ese filtro">
+            Cambia el estado o el tipo para ver las demás.
+          </EmptyState>
         ) : (
-          <div className="orders-table" style={{ overflowX: 'auto', maxWidth: '100%', gridColumn: '1 / -1' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Tabla de órdenes públicas">
+          <div className="table-wrap">
+            <table className="data-table" aria-label="Órdenes del nodo">
               <thead>
                 <tr>
-                  <th>UUID / Creada</th>
+                  <th>Orden</th>
                   <th>Tipo</th>
+                  <th>Importe</th>
                   <th>Sats</th>
-                  <th>Importe fiat y precio</th>
+                  <th>Pago</th>
                   <th>Estado</th>
-                  <th>Mensajes</th>
+                  <th><span className="sr-only">Mensajes</span></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map(o => {
-                  const isNew = newlyAddedIds.has(o.id);
-                  return (
-                    <tr
-                      key={o.id}
-                      className={isNew ? 'order-row-highlight' : ''}
-                      style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
-                    >
-                    <td style={{ padding: '8px 0' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 'bold' }}><code>{o.id.slice(0, 8)}...</code></div>
-                      <div style={{ fontSize: '13px', color: '#88988e' }}>{new Date((o.published_at || o.created_at) * 1000).toLocaleString()}</div>
+                {filteredOrders.map((o) => (
+                  <tr key={o.id} className={newlyAddedIds.has(o.id) ? 'order-row-highlight' : ''}>
+                    <td>
+                      <code className="order-id" title={o.id}>{shortId(o.id)}</code>
+                      <small title={formatDateTime(o.published_at || o.created_at)}>{formatWhen(o.published_at || o.created_at)}</small>
                     </td>
                     <td>{o.kind === 'sell' ? 'Venta' : 'Compra'}</td>
-                    <td>{o.amount_sats > 0 ? `${o.amount_sats_str || o.amount_sats.toLocaleString()} sats` : o.status === 'pending' ? 'Se fijan al tomarla' : '—'}</td>
                     <td>
-                      {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} – ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}
-                      {o.fiat_amount_range.length === 2 && <span style={{ fontSize: '13px', color: '#88988e' }}> (rango)</span>}
-                      <br/>
-                      <span style={{ fontSize: '13px', color: '#88988e' }}>
+                      <strong>
+                        {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} – ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}
+                      </strong>
+                      <small>
+                        {o.fiat_amount_range.length === 2 ? 'Rango · ' : ''}
                         {o.premium !== 0
                           ? `Precio de mercado, prima ${o.premium > 0 ? '+' : ''}${o.premium} %`
                           : o.status === 'pending' && o.amount_sats > 0
                             ? 'Precio fijo en sats'
-                            : o.status === 'pending' ? 'Precio de mercado, sin prima' : 'Sin prima'}
-                      </span>
+                            : o.status === 'pending'
+                              ? 'Precio de mercado, sin prima'
+                              : 'Sin prima'}
+                      </small>
                     </td>
-                    <td><span className="sim-actor-badge" title={o.status}>{ORDER_STATUS_LABELS[o.status] || o.status}</span></td>
-                    <td>
-                      {onSelectDispute ? (
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          style={{ padding: '3px 8px', fontSize: '13px' }}
-                          onClick={() => onSelectDispute(o.id)}
-                          title="Ver los mensajes de protocolo de esta orden"
-                        >
-                          <Icon name="message" size={13} /> Ver
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '13px', color: '#68776e' }}>—</span>
-                      )}
+                    <td>{o.amount_sats > 0 ? formatNumber(o.amount_sats_str || o.amount_sats) : o.status === 'pending' ? <small>Se fijan al tomarla</small> : '—'}</td>
+                    <td><small>{o.payment_methods.length > 0 ? o.payment_methods.join(', ') : '—'}</small></td>
+                    <td><Badge tone={STATUS_TONE[o.status] || 'neutral'}>{ORDER_STATUS_LABELS[o.status] || o.status}</Badge></td>
+                    <td className="cell-action">
+                      <button type="button" className="button button-secondary button-small" onClick={() => navigate('disputes', o.id)} title="Ver los mensajes de protocolo de esta orden">
+                        <Icon name="message" size={13} /> Mensajes
+                      </button>
                     </td>
                   </tr>
-                );
-              })}
+                ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+        {orders.length > 0 && <p className="panel-note">{filteredOrders.length} de {orders.length} órdenes.</p>}
+      </Panel>
     </section>
   );
 }
