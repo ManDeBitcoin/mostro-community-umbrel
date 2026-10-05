@@ -64,13 +64,9 @@ impl Notification {
         }
     }
 
-    /// `reference` is the dispute id announced by the daemon in kind 38386.
-    /// That event never names the order, so neither does this alert.
-    pub fn dispute_alert(
-        reference: &str,
-        message: &str,
-        details: Option<serde_json::Value>,
-    ) -> Self {
+    /// The daemon announces a dispute by its own id (kind 38386). That event
+    /// never names the order, so neither does this alert.
+    pub fn dispute_alert(message: &str, details: Option<serde_json::Value>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -79,7 +75,7 @@ impl Notification {
             id: format!("dispute-{timestamp}-{}", fastrand()),
             level: "warning".to_string(),
             category: "dispute".to_string(),
-            title: format!("Disputa abierta {reference}"),
+            title: "Disputa abierta".to_string(),
             message: message.to_string(),
             timestamp,
             details,
@@ -274,7 +270,9 @@ mod tests {
         assert_eq!(relay_notif.category, "relay");
         assert_eq!(relay_notif.level, "error");
 
-        let dispute_notif = Notification::dispute_alert("uuid-123", "Disputa abierta", None);
+        let dispute_notif =
+            Notification::dispute_alert("El nodo anuncia la disputa uuid-123", None);
+        assert_eq!(dispute_notif.title, "Disputa abierta");
         assert_eq!(dispute_notif.category, "dispute");
         assert_eq!(dispute_notif.level, "warning");
 

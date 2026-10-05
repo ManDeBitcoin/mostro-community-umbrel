@@ -524,7 +524,7 @@ pub async fn auto_backup_worker(
                 }
                 notifications
                     .publish(crate::notifications::Notification::backup_alert(
-                        "Backup automático completado",
+                        "Respaldo automático completado",
                         &format!("Respaldo guardado en {}", summary.path.display()),
                         true,
                         Some(serde_json::json!({
@@ -546,7 +546,7 @@ pub async fn auto_backup_worker(
                 }
                 notifications
                     .publish(crate::notifications::Notification::backup_alert(
-                        "Fallo en backup automático",
+                        "El respaldo automático falló",
                         &format!("Error al exportar respaldo: {e}"),
                         false,
                         Some(serde_json::json!({"error": e})),

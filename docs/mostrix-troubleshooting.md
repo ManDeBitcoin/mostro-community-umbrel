@@ -46,8 +46,8 @@ ni descarta información histórica del relay.
 4. Si existe otro daemon con la misma identidad, revisar primero su estado
    de operaciones y persistencia antes de cualquier migración o reinicio.
 
-Desde la versión 1.0.12 el panel hace esa comparación por ti: la tarjeta del
-daemon muestra la versión que el nodo **anuncia** en los relays (su evento
+Desde la versión 1.0.12 el panel hace esa comparación por ti: la página
+**Nodo Mostro** muestra la versión que el nodo **anuncia** en los relays (su evento
 kind 38385) y hace cuánto, y avisa si esa versión no coincide con el binario
 del paquete o si alguien anuncia la identidad sin que el panel vea el daemon.
 

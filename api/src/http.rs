@@ -510,30 +510,30 @@ async fn simulation_scenarios_handler() -> Json<Value> {
     Json(json!([
         {
             "id": "happy_path",
-            "label": "Intercambio Completo Exitoso (Happy Path)",
-            "name": "Intercambio Completo Exitoso (Happy Path)",
-            "description": "Modelo sintético de orden de venta, aceptación, bloqueo de fianza/garantía, transferencia fiat simulada y liberación de satoshis.",
+            "label": "Operación completada",
+            "name": "Operación completada",
+            "description": "Una venta de principio a fin: publicación, garantías, depósito del vendedor, pago fiat y liberación de los sats.",
             "is_default": true
         },
         {
             "id": "dispute_settled_for_buyer",
-            "label": "Disputa Resuelta a Favor del Comprador",
-            "name": "Disputa Resuelta a Favor del Comprador",
-            "description": "Modelo sintético donde el mediador valida comprobante de pago legítimo y liquida la garantía al comprador.",
+            "label": "Disputa resuelta a favor del comprador",
+            "name": "Disputa resuelta a favor del comprador",
+            "description": "El mediador comprueba que el pago fiat existió: Mostro cobra el depósito del vendedor y paga al comprador.",
             "is_default": false
         },
         {
             "id": "dispute_refunded_to_seller",
-            "label": "Disputa Resuelta con Devolución al Vendedor",
-            "name": "Disputa Resuelta con Devolución al Vendedor",
-            "description": "Modelo sintético donde el mediador confirma falta de pago fiat y devuelve los satoshis al vendedor.",
+            "label": "Disputa resuelta con devolución al vendedor",
+            "name": "Disputa resuelta con devolución al vendedor",
+            "description": "El mediador comprueba que el pago fiat no existió: Mostro cancela el depósito y los sats vuelven al vendedor.",
             "is_default": false
         },
         {
             "id": "seller_cancellation",
-            "label": "Cancelación Previa por el Vendedor",
-            "name": "Cancelación Previa por el Vendedor",
-            "description": "Modelo sintético donde el vendedor cancela su orden antes de ser tomada, anulando la Hold Invoice sin penalizaciones.",
+            "label": "Cancelación por el vendedor antes de la toma",
+            "name": "Cancelación por el vendedor antes de la toma",
+            "description": "El vendedor retira su orden antes de que alguien la tome.",
             "is_default": false
         }
     ]))
@@ -755,7 +755,7 @@ async fn save_community(
                     .publish(Notification::system_alert(
                         "Activación incompleta",
                         &format!(
-                            "El borrador se guardó, pero su activación no terminó: {reason}. Comprueba en la tarjeta del daemon qué revisión está activa y pulsa «Reactivar Mostro»."
+                            "Las reglas se guardaron, pero no llegaron a aplicarse al nodo: {reason}. Comprueba en la página Nodo Mostro qué revisión está activa y pulsa «Aplicar y reiniciar»."
                         ),
                         "critical",
                         None,
@@ -855,10 +855,12 @@ async fn backup_trigger_handler(
         target_dir
     };
 
+    // A manual backup prunes like the automatic ones, with the same limit.
+    let retention_count = state.backup_state.read().await.retention_count;
     let summary = backup::run_auto_backup_cycle(
         &root,
         &target_dir,
-        7,
+        retention_count,
         age::secrecy::SecretString::from(passphrase_str),
     )
     .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
@@ -881,7 +883,7 @@ async fn backup_trigger_handler(
     state
         .notifications
         .publish(Notification::backup_alert(
-            "Backup manual completado",
+            "Respaldo manual completado",
             &format!("Respaldo guardado en {}", summary.path.display()),
             true,
             Some(json!({

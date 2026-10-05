@@ -598,9 +598,9 @@ Si falta el evento de información, la app no debe inventar valores. Debe decir 
 | La app muestra garantía y el nodo no la exige | Valor fijo en la app en lugar de `bond_enabled` | Sección 3.2 |
 | La app muestra otra versión u otros límites | Lee un evento de información antiguo o de otra clave | Comparar `pubkey` y `created_at` |
 | La tarjeta no verifica | Cadena canónica distinta o relay con barra final | Sección 3.1 |
-| El pago al comprador no sale | Sin ruta dentro de `max_routing_fee`, o sin liquidez saliente en el nodo | Panel de liquidez del Manager |
+| El pago al comprador no sale | Sin ruta dentro de `max_routing_fee`, o sin liquidez saliente en el nodo | Página Lightning del Manager |
 
-Para el operador: en el Manager, la tarjeta del daemon muestra la versión que el nodo **anuncia** en los relays y hace cuánto. Si dice «sin anuncio», las apps verán el nodo como inactivo aunque el contenedor esté en marcha.
+Para el operador: en el Manager, la página **Nodo Mostro** muestra la versión que el nodo **anuncia** en los relays y hace cuánto. Si dice «Sin anuncio», las apps verán el nodo como inactivo aunque el contenedor esté en marcha.
 
 ## 12. Qué se verificó y cómo
 

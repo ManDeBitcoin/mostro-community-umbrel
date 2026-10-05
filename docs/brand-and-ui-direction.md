@@ -6,6 +6,30 @@ Esta propuesta le da identidad propia a Mostro Community Manager y fija una base
 
 El panel ya tiene una dirección reconocible: fondo verde carbón, tarjetas discretas, estados de servicio, acento menta y avisos ámbar. Esa combinación encaja con herramientas de operación y con la identidad de Mostro. El producto también creció más allá del primer dashboard: ahora reúne órdenes públicas, mediación, simulación, lectura de liquidez, configuración y controles del daemon.
 
+## Organización del panel
+
+Desde la versión 1.0.12 el panel se ordena por lo que el operador quiere hacer, no por el orden en que se construyó cada módulo.
+
+| Grupo | Páginas | Pregunta que responde |
+| --- | --- | --- |
+| Inicio | Resumen | ¿Está abierto mi mercado y qué requiere mi atención? |
+| Mercado | Órdenes, Disputas | ¿Qué está pasando en mi comunidad? |
+| Nodo | Nodo Mostro, Lightning, Conexión de apps | ¿Funciona lo que sostiene el mercado y cómo se conecta una app? |
+| Ajustes | Configuración, Respaldos, Alertas | ¿Qué reglas tiene mi comunidad y cómo la protejo? |
+| Herramientas | Simulador | ¿Qué pasaría en una operación con estas reglas? |
+
+Reglas que siguen todas las páginas:
+
+- **Una página, un asunto.** Cada una empieza con su grupo, su título y una frase que dice para qué sirve.
+- **Cada página tiene dirección propia** (`#/ordenes`, `#/nodo`…). Recargar no cambia de sitio y el retroceso del navegador funciona.
+- **El resumen no repite: enlaza.** Lo que requiere atención aparece una vez, con un botón a la página donde se resuelve. El servidor da a cada aviso un código estable y el panel decide con él a qué página lleva; no interpreta el texto.
+- **Durante la puesta en marcha manda la lista de pasos.** El titular y su botón nombran siempre el siguiente paso pendiente.
+- **El panel no inventa.** Si no puede leer un dato lo dice, y no muestra un cero ni un «no hay» en su lugar: «consultando» y «no se pudo leer» son estados distintos de «vacío». «Mercado abierto» exige dos cosas: que Mostro esté activado aquí con su daemon en ejecución, y que el nodo se haya anunciado en los relays en los últimos minutos, que es lo que una app puede comprobar.
+- **Un término por cosa.** «Garantía» es el bono antiabuso; «depósito» son los sats que retiene el vendedor; «publicada» es una orden que el nodo anuncia como oferta, aunque pueda estar ya tomada. El panel está en español; el idioma de la comunidad es un dato de la comunidad, no de la interfaz.
+- **Un formato por dato.** Fechas con `4 oct 2026, 17:08` y reloj de 24 horas; edades recientes como `hace 12 min`; sats agrupados con espacio fino; porcentajes con coma. Los textos que redacta el servidor siguen las mismas reglas, salvo las descripciones del simulador y los resúmenes de mensajes de protocolo, que aún escriben los sats sin agrupar.
+- **Los colores significan lo mismo en todas partes** y van siempre con texto: verde para lo confirmado, ámbar para lo que hay que revisar, rojo para lo que retiene fondos o falla, azul para lo informativo.
+- **Sirve en un teléfono.** Por debajo de 860 px el menú es un cajón y ninguna página se desborda a lo ancho; las tablas se desplazan dentro de su panel.
+
 La pantalla de operador prioriza densidad. En la app final conviene mantener el sistema visual y cambiar la jerarquía: más tamaño de texto, controles táctiles amplios y menos datos simultáneos. Las métricas del nodo y las tareas administrativas pertenecen al panel del operador; las acciones de compra y venta deben dominar el cliente.
 
 ## Marca y archivos
