@@ -153,7 +153,7 @@ async fn lifecycle_standby_to_activated_to_deactivated() {
         changed
             .warnings
             .iter()
-            .any(|warning| warning.contains("cambios en el borrador"))
+            .any(|warning| warning.contains("el nodo aún no tiene aplicadas"))
     );
 
     deactivate(&root).unwrap();
@@ -225,7 +225,7 @@ async fn saving_an_equivalent_draft_does_not_restart_the_daemon() {
     assert!(
         !rep.warnings
             .iter()
-            .any(|w| w.contains("cambios en el borrador"))
+            .any(|w| w.contains("el nodo aún no tiene aplicadas"))
     );
 
     // A change that does reach settings.toml restarts it.
@@ -425,4 +425,113 @@ async fn warns_when_first_contact_pow_can_lock_clients_out() {
             "pow {pow}, first contact {first_contact}"
         );
     }
+}
+
+/// A probe that could not read LND knows nothing about its channels.
+#[test]
+fn lnd_notices_do_not_invent_what_the_probe_did_not_read() {
+    use mostro_community_api::daemon::lnd_notices;
+    use serde_json::json;
+    let codes = |probe: serde_json::Value| -> Vec<String> {
+        lnd_notices(&probe)
+            .into_iter()
+            .map(|notice| notice.code)
+            .collect()
+    };
+
+    assert_eq!(
+        codes(json!({"status": "unconfigured"})),
+        ["lnd_unconfigured"]
+    );
+    assert_eq!(codes(json!({"status": "offline"})), ["lnd_unreadable"]);
+    assert_eq!(codes(json!({})), ["lnd_unreadable"]);
+    for probe in [
+        json!({"status": "unconfigured"}),
+        json!({"status": "offline"}),
+        json!({}),
+    ] {
+        let text = lnd_notices(&probe)[0].text.clone();
+        assert!(!text.contains("0 canales"), "{text}");
+        assert!(text.contains("no puede comprobar"), "{text}");
+    }
+
+    let healthy = json!({"status": "online", "synced_to_chain": true, "num_active_channels": 2});
+    assert!(lnd_notices(&healthy).is_empty());
+
+    let no_channels =
+        json!({"status": "online", "synced_to_chain": true, "num_active_channels": 0});
+    assert_eq!(codes(no_channels), ["lnd_no_channels"]);
+
+    let syncing =
+        json!({"status": "warning", "synced_to_chain": false, "num_active_channels": null});
+    assert_eq!(codes(syncing), ["lnd_channels_unknown", "lnd_not_synced"]);
+}
+
+#[tokio::test]
+async fn report_without_lnd_access_says_so_instead_of_zero_channels() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, _store) = configured_root(&temp, 36);
+    let rep = report(&root, &Integrations::default()).await;
+    assert!(
+        rep.notices
+            .iter()
+            .any(|notice| notice.code == "lnd_unconfigured")
+    );
+    assert!(!rep.warnings.iter().any(|w| w.contains("0 canales")));
+    // Unknown is not zero, in the fields a script would read either.
+    assert_eq!(rep.lnd_channel_count, None);
+    assert_eq!(rep.lnd_synced, None);
+}
+
+/// Every notice carries a code the panel knows, and `warnings` is the same
+/// list as plain sentences.
+#[tokio::test]
+async fn notices_have_known_codes_and_mirror_the_warnings() {
+    use mostro_community_api::daemon::NOTICE_CODES;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("config");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let empty = report(&root, &Integrations::default()).await;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (configured, mut store) = configured_root(&temp, 37);
+    let mut draft = config();
+    draft.market.max_routing_fee_bps = 0;
+    draft.safety.pow = 0;
+    draft.safety.pow_first_contact = 8;
+    store.save(draft).unwrap();
+    let standby = report(&configured, &Integrations::default()).await;
+
+    for rep in [&empty, &standby] {
+        assert!(!rep.notices.is_empty());
+        for notice in &rep.notices {
+            assert!(
+                NOTICE_CODES.contains(&notice.code.as_str()),
+                "unknown code {}",
+                notice.code
+            );
+        }
+        let texts: Vec<&str> = rep.notices.iter().map(|n| n.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            rep.warnings.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+    let codes = |rep: &mostro_community_api::daemon::DaemonReport| -> Vec<String> {
+        rep.notices.iter().map(|n| n.code.clone()).collect()
+    };
+    assert_eq!(
+        codes(&empty),
+        ["identity_missing", "rules_missing", "lnd_unconfigured"]
+    );
+    assert_eq!(
+        codes(&standby),
+        [
+            "lnd_unconfigured",
+            "routing_fee_zero",
+            "pow_first_contact_above_base"
+        ]
+    );
 }

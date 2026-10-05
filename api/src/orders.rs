@@ -1007,9 +1007,13 @@ async fn run_relay_worker(
                                                         && is_recent
                                                         && let Some(ref hub) = notifications
                                                     {
+                                                        let opened_by = match initiator.as_deref() {
+                                                            Some("buyer") => ", abierta por el comprador",
+                                                            Some("seller") => ", abierta por el vendedor",
+                                                            _ => "",
+                                                        };
                                                         hub.publish(crate::notifications::Notification::dispute_alert(
-                                                            &dispute_id,
-                                                            &format!("Se abrió la disputa {dispute_id} en el nodo"),
+                                                            &format!("El nodo anuncia la disputa {dispute_id}{opened_by}. Necesita un mediador."),
                                                             Some(serde_json::json!({
                                                                 "dispute_id": dispute_id,
                                                                 "initiator": initiator,

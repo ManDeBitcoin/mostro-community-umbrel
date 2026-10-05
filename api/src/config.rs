@@ -111,16 +111,23 @@ impl Configuration {
             return Err("Selecciona códigos de moneda de tres letras, únicos y en mayúsculas");
         }
         let s = &self.safety;
-        if s.bond_bps > 10_000
-            || s.base_bond_sats > 100_000_000
-            || s.pow > 32
-            || s.pow_first_contact > 32
-            || s.pow_first_contact < s.pow
-        {
-            return Err("Bond o dificultad PoW inválidos");
+        if s.bond_bps > 10_000 || s.base_bond_sats > 100_000_000 {
+            return Err(
+                "La garantía debe estar entre 0 y 100 % y su mínimo no superar 100 millones de sats",
+            );
+        }
+        if s.pow > 32 || s.pow_first_contact > 32 {
+            return Err("La prueba de trabajo debe estar entre 0 y 32");
+        }
+        if s.pow_first_contact < s.pow {
+            return Err(
+                "La prueba de trabajo de la primera conversación no puede ser menor que la general",
+            );
         }
         if s.bond_enabled && s.bond_bps == 0 && s.base_bond_sats == 0 {
-            return Err("Un bond habilitado debe tener importe positivo");
+            return Err(
+                "Con la garantía activada, el porcentaje o el mínimo deben ser mayores que cero",
+            );
         }
         let mut relays = HashSet::new();
         if self.nostr.relays.is_empty()

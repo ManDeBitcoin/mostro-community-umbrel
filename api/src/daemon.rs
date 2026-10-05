@@ -91,10 +91,19 @@ pub struct DaemonReport {
     pub active_revision: Option<u64>,
     pub active_settings_hash: Option<String>,
     pub active_settings_path: Option<String>,
-    pub lnd_channel_count: u64,
-    pub lnd_synced: bool,
+    /// `None` when the panel could not read LND: unknown is not zero.
+    pub lnd_channel_count: Option<u64>,
+    pub lnd_synced: Option<bool>,
     pub can_activate: bool,
+    /// What the operator should know, as plain sentences.
     pub warnings: Vec<String>,
+    /// The same warnings, each with a stable code, so that a client can decide
+    /// where to send the operator without parsing the sentence.
+    #[serde(default)]
+    pub notices: Vec<DaemonNotice>,
+    /// Seconds the current mostrod process has been running, when known.
+    #[serde(default)]
+    pub running_for_secs: Option<u64>,
     /// Best known daemon version: the one the daemon announces on the relays
     /// when that announcement is recent, otherwise the packaged binary's.
     pub mostro_version: String,
@@ -115,6 +124,54 @@ pub struct DaemonReport {
     pub announced_fresh: bool,
     #[serde(default)]
     pub last_exit: Option<LastExit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonNotice {
+    pub code: String,
+    pub text: String,
+}
+
+impl DaemonNotice {
+    fn new(code: &str, text: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            text: text.into(),
+        }
+    }
+}
+
+/// Every code `report` can emit. The panel maps each one to a page, and
+/// `scripts/tests` checks that it knows them all.
+pub const NOTICE_CODES: &[&str] = &[
+    "identity_missing",
+    "rules_missing",
+    "lnd_unconfigured",
+    "lnd_unreadable",
+    "lnd_no_channels",
+    "lnd_channels_unknown",
+    "lnd_not_synced",
+    "daemon_crash_loop",
+    "daemon_not_verified",
+    "announcement_stale",
+    "announcement_without_daemon",
+    "version_mismatch",
+    "rules_not_applied",
+    "routing_fee_zero",
+    "pow_first_contact_above_base",
+];
+
+/// `45 s`, `12 min`, `3 h`, `2 d`: an age in the unit a person would say it in.
+fn human_age(secs: u64) -> String {
+    if secs < 90 {
+        format!("{secs} s")
+    } else if secs < 5_400 {
+        format!("{} min", (secs + 30) / 60)
+    } else if secs < 172_800 {
+        format!("{} h", (secs + 1_800) / 3_600)
+    } else {
+        format!("{} d", (secs + 43_200) / 86_400)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -256,26 +313,23 @@ pub async fn report_with_node_info(
     let lnd_probe = integrations.lightning().await;
     let lnd_channel_count = lnd_probe
         .get("num_active_channels")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let lnd_synced = lnd_probe
-        .get("synced_to_chain")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .and_then(|v| v.as_u64());
+    let lnd_synced = lnd_probe.get("synced_to_chain").and_then(|v| v.as_bool());
 
-    let mut warnings = Vec::new();
+    let mut notices = Vec::new();
     if !identity_present {
-        warnings.push("Falta importar la clave privada Nostr (nsec) del bot.".into());
+        notices.push(DaemonNotice::new(
+            "identity_missing",
+            "Falta la identidad del nodo: crea o importa su clave privada Nostr (nsec).",
+        ));
     }
     if draft_revision.is_none() {
-        warnings.push("Falta configurar el borrador de reglas de la comunidad.".into());
+        notices.push(DaemonNotice::new(
+            "rules_missing",
+            "Faltan las reglas de la comunidad: aún no hay ninguna configuración guardada.",
+        ));
     }
-    if lnd_channel_count == 0 {
-        warnings.push("LND reporta 0 canales activos. Mostro requiere canales Lightning abiertos para crear y liquidar hold invoices.".into());
-    }
-    if !lnd_synced {
-        warnings.push("LND no está sincronizado con la cadena de bloques.".into());
-    }
+    notices.extend(lnd_notices(&lnd_probe));
 
     let now = unix_now();
     let last_exit = read_last_exit(&active_dir);
@@ -312,50 +366,66 @@ pub async fn report_with_node_info(
     let (packaged_version, packaged_source) = packaged_mostrod_version();
 
     if crash_looping && let Some(exit) = &last_exit {
-        warnings.push(format!(
-            "El daemon terminó con código {} a los {} s de arrancar y se está reiniciando. Revisa los registros del contenedor mostro (LND, relays o configuración).",
-            exit.code, exit.uptime_secs
+        notices.push(DaemonNotice::new(
+            "daemon_crash_loop",
+            format!(
+                "El daemon terminó con código {} a los {} de arrancar y se está reiniciando. Revisa los registros del contenedor mostro: suele deberse a LND, a los relays o a la configuración.",
+                exit.code,
+                human_age(exit.uptime_secs)
+            ),
         ));
     }
     if state == DaemonState::ActiveReady && !crash_looping {
-        warnings.push("Configuración guardada, pero ejecución del daemon sin verificar. En Umbrel el daemon está en otro contenedor; guardar settings.toml no confirma su arranque ni la versión que reciben los clientes.".into());
+        notices.push(DaemonNotice::new("daemon_not_verified", "Configuración guardada, pero ejecución del daemon sin verificar. En Umbrel el daemon está en otro contenedor; guardar settings.toml no confirma su arranque ni la versión que reciben los clientes."));
     }
     if state == DaemonState::ActiveRunning
         && !announced_fresh
         && run_secs.is_some_and(|secs| secs > NODE_INFO_FRESH_SECS)
     {
-        warnings.push("El daemon figura en ejecución, pero su evento de información (kind 38385) no aparece actualizado en los relays configurados. Los clientes no pueden confirmar que el nodo está activo: revisa los relays y los registros.".into());
+        notices.push(DaemonNotice::new("announcement_stale", "El daemon figura en ejecución, pero su evento de información (kind 38385) no aparece actualizado en los relays configurados. Los clientes no pueden confirmar que el nodo está activo: revisa los relays y los registros."));
     }
     if state != DaemonState::ActiveRunning
         && announced_fresh
         && let Some(age) = announced_age_secs
     {
-        warnings.push(format!(
-            "El nodo anunció su información en los relays hace {age} s, pero este panel no ve el daemon en ejecución. Es normal durante unos minutos después de detenerlo. Si el anuncio se sigue renovando, otra instancia de Mostro usa esta misma clave: no actives una segunda."
+        notices.push(DaemonNotice::new(
+            "announcement_without_daemon",
+            format!(
+                "El nodo anunció su información en los relays hace {}, pero este panel no ve el daemon en ejecución. Es normal durante unos minutos después de detenerlo. Si el anuncio se sigue renovando, otra instancia de Mostro usa esta misma clave: no actives una segunda.",
+                human_age(age)
+            ),
         ));
     }
     if let Some(announced) = &announced_version
         && state == DaemonState::ActiveRunning
         && *announced != packaged_version
     {
-        warnings.push(format!(
-            "El daemon anuncia la versión {announced} y este paquete incluye la {packaged_version}. Reinicia la aplicación para aplicar la actualización o comprueba que no responda otra instancia."
+        notices.push(DaemonNotice::new(
+            "version_mismatch",
+            format!(
+                "El daemon anuncia la versión {announced} y este paquete incluye la {packaged_version}. Reinicia la aplicación para aplicar la actualización o comprueba que no responda otra instancia."
+            ),
         ));
     }
     if active_revision.is_some() && active_revision != draft_revision {
-        warnings.push("Hay cambios en el borrador que no están en la configuración activa.".into());
+        notices.push(DaemonNotice::new(
+            "rules_not_applied",
+            "Hay reglas guardadas que el nodo aún no tiene aplicadas.",
+        ));
     }
     if max_routing_fee_bps == Some(0) {
-        warnings.push("La comisión máxima de enrutamiento es 0: Mostro solo podrá pagar a los compradores por rutas sin comisión y los pagos pueden quedar reintentándose. El valor por defecto de Mostro es 0,2 %.".into());
+        notices.push(DaemonNotice::new("routing_fee_zero", "La comisión máxima de enrutamiento es 0: Mostro solo podrá pagar a los compradores por rutas sin comisión y los pagos pueden quedar reintentándose. El valor por defecto de Mostro es 0,2 %."));
     }
     if first_contact_pow_above_base {
-        warnings.push("La prueba de trabajo de la primera conversación es mayor que la general: el daemon descarta sin respuesta las órdenes, tomas y valoraciones de las apps que no la calculan. Comprueba que tus clientes leen pow_first_contact antes de activarla.".into());
+        notices.push(DaemonNotice::new("pow_first_contact_above_base", "La prueba de trabajo de la primera conversación es mayor que la general: el daemon descarta sin respuesta las órdenes, tomas, valoraciones y acciones de mediación de los clientes que no la calculan. Comprueba que tus clientes leen pow_first_contact antes de activarla."));
     }
 
     let (mostro_version, version_source) = match announced_version {
         Some(version) => (version, VERSION_SOURCE_ANNOUNCED),
         None => (packaged_version.clone(), packaged_source),
     };
+
+    let running_for_secs = run_secs.filter(|_| state == DaemonState::ActiveRunning);
 
     DaemonReport {
         state,
@@ -368,7 +438,9 @@ pub async fn report_with_node_info(
         lnd_channel_count,
         lnd_synced,
         can_activate,
-        warnings,
+        warnings: notices.iter().map(|notice| notice.text.clone()).collect(),
+        notices,
+        running_for_secs,
         mostro_version,
         version_source: version_source.to_string(),
         packaged_version,
@@ -378,6 +450,43 @@ pub async fn report_with_node_info(
         announced_fresh,
         last_exit,
     }
+}
+
+/// What the read-only LND probe lets the panel say. A probe that could not
+/// read LND knows nothing about its channels: it must not report "0 channels".
+pub fn lnd_notices(probe: &serde_json::Value) -> Vec<DaemonNotice> {
+    use serde_json::Value;
+    match probe.get("status").and_then(Value::as_str) {
+        Some("online" | "warning") => {}
+        Some("unconfigured") => {
+            return vec![DaemonNotice::new(
+                "lnd_unconfigured",
+                "El panel no tiene acceso de lectura a LND: no puede comprobar los canales ni la sincronización.",
+            )];
+        }
+        _ => {
+            return vec![DaemonNotice::new(
+                "lnd_unreadable",
+                "El panel no pudo leer LND: no puede comprobar los canales ni la sincronización. Revisa la conexión, el certificado y los permisos.",
+            )];
+        }
+    }
+    let mut notices = Vec::new();
+    match probe.get("num_active_channels").and_then(Value::as_u64) {
+        Some(0) => notices.push(DaemonNotice::new("lnd_no_channels", "LND reporta 0 canales activos. Mostro requiere canales Lightning abiertos para crear y liquidar hold invoices.")),
+        Some(_) => {}
+        None => notices.push(DaemonNotice::new(
+            "lnd_channels_unknown",
+            "LND no informó de cuántos canales activos tiene.",
+        )),
+    }
+    if probe.get("synced_to_chain").and_then(Value::as_bool) != Some(true) {
+        notices.push(DaemonNotice::new(
+            "lnd_not_synced",
+            "LND no está sincronizado con la cadena de bloques.",
+        ));
+    }
+    notices
 }
 
 /// Explicit activation requested by the operator: writes the settings and

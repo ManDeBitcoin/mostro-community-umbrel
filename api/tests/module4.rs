@@ -58,8 +58,7 @@ async fn test_notifications_broadcast_and_sse_stream() {
     .await;
 
     hub.publish(Notification::dispute_alert(
-        "d3b07384-d113-4001-a111-a8e0f1112222",
-        "Disputa iniciada por comprador",
+        "El nodo anuncia la disputa d3b07384-d113-4001-a111-a8e0f1112222, abierta por el comprador",
         Some(serde_json::json!({"amount_sats": 50000})),
     ))
     .await;
@@ -80,7 +79,8 @@ async fn test_notifications_broadcast_and_sse_stream() {
     let n2 = rx.recv().await.unwrap();
     assert_eq!(n2.category, "dispute");
     assert_eq!(n2.level, "warning");
-    assert!(n2.title.contains("d3b07384"));
+    assert_eq!(n2.title, "Disputa abierta");
+    assert!(n2.message.contains("d3b07384"));
 
     let n3 = rx.recv().await.unwrap();
     assert_eq!(n3.category, "backup");
@@ -273,7 +273,12 @@ async fn test_dispute_notification_emitted_by_order_monitor() {
 
     assert_eq!(notif.category, "dispute");
     assert_eq!(notif.level, "warning");
-    assert!(notif.title.contains("d3b07384-d113-4001-a111-a8e0f1113333"));
+    assert_eq!(notif.title, "Disputa abierta");
+    assert!(
+        notif
+            .message
+            .contains("d3b07384-d113-4001-a111-a8e0f1113333, abierta por el comprador")
+    );
     assert_eq!(
         notif.details.as_ref().unwrap()["dispute_id"],
         "d3b07384-d113-4001-a111-a8e0f1113333"
