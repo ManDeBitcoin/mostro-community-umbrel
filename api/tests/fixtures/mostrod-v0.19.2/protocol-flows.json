@@ -1,0 +1,1028 @@
+{
+ "_comment": "Decrypted protocol v2 messages of nine flows, captured from the official mostrod v0.19.2 binary on an isolated regtest network on 2026-10-04. Node A has no bond; node B asks both sides for a 3 % bond and a first-contact proof of work of 8 bits. Messages are in the order the relay received them; `at` is the event created_at in seconds since the first message of the flow, so equal values are real same-second ties. Parties are named by their side of the order; a second or third taker is buyer2, buyer3. The admin is the node key. All keys are throwaway and the invoices are regtest ones.",
+ "flows": {
+  "inline_invoice_take": {
+   "node": "A",
+   "order_id": "bc404264-3e9d-4605-9ada-85b16e44a700",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093301,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093301,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130933,\"expires_at\":1791217333}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093302,\"action\":\"take-sell\",\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"payload\":{\"payment_request\":[null,\"lnbcrt1p4vylfkpp58cua8jks2cf3rnxcsqsqdkeu653lye55j3rn8grgytjmjlaha7hsdqqcqzzsxqr8pqsp5h8gtr9aszscgu2eq8em4557qrp4rtzl4rxvtsr8fl7zu97lsksps9qxpqysgq6xaavfh47h5fes9rprk8lsggpep25x6xum0qr4g7fda7tfxaa6f55zycj8z6pmc5cfgdswef0cpdtcz5p2nlcdlafjnzhlq4zgdurjgqn4vwp8\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093302,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"kind\":\"sell\",\"status\":\"waiting-payment\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130933,\"expires_at\":1791217333},\"lnbcrt352900n1p4vylfkpp5apz89962sd68jxtd8qcgpunn3lgm34w9nz4dac9ksc758uj6t2wsdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qyd3xxdpsxservdpdxdjnjepdxsmrqdfd89skgcfd8q6kyvfkv56rgcfhxqcr5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp5ppxlcl09kx59mu9ce695pcd80plvgh4dv6wtea6y3p2qjx0ckvxq9qxpqysgqzxn43qqd8jwlrtkwm5ra72p6ccmvh295nwg43zkrpl453q25jff5m5swxxkmegykqqg2jjl3gwezus9960ca9tarclvlktxuvg0km7sq3naf48\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093302,\"trade_index\":0,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093302,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"29a8e9c3423a167fb1fe76fe1d336410eb915a79a946ddfc5bfb949525610e6e\",\"seller_trade_pubkey\":\"6945eb8db988f19faf4f8fdb3a9f8f35d35ad1366e1f0c775c19fff9ad010f3a\",\"created_at\":1791130933,\"expires_at\":1791217333}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093302,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"29a8e9c3423a167fb1fe76fe1d336410eb915a79a946ddfc5bfb949525610e6e\",\"seller_trade_pubkey\":\"6945eb8db988f19faf4f8fdb3a9f8f35d35ad1366e1f0c775c19fff9ad010f3a\",\"created_at\":1791130933,\"expires_at\":1791217333}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093303,\"action\":\"fiat-sent\",\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"29a8e9c3423a167fb1fe76fe1d336410eb915a79a946ddfc5bfb949525610e6e\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093304,\"action\":\"release\",\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093303,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"6945eb8db988f19faf4f8fdb3a9f8f35d35ad1366e1f0c775c19fff9ad010f3a\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"released\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093304,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"hold-invoice-payment-settled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"purchase-completed\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 6,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3093304,\"trade_index\":null,\"id\":\"bc404264-3e9d-4605-9ada-85b16e44a700\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "range_order": {
+   "node": "A",
+   "order_id": "206c3485-210c-4950-b0e7-e40ac5f5e07d",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095001,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":0,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"created_at\":0,\"min_amount\":20,\"max_amount\":60}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095001,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":20,\"max_amount\":60,\"fiat_amount\":0,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"created_at\":1791130951,\"expires_at\":1791217351}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095002,\"action\":\"take-sell\",\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"cant-do\":{\"version\":2,\"request_id\":3095002,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"cant-do\",\"payload\":{\"cant_do\":\"out_of_range_sats_amount\"}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer2",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095003,\"action\":\"take-sell\",\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"payload\":{\"amount\":30}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095003,\"trade_index\":0,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":34377,\"fiat_code\":\"USD\",\"min_amount\":20,\"max_amount\":60,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"created_at\":1791130951,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095003,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer2",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095004,\"action\":\"add-invoice\",\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"payload\":{\"payment_request\":[null,\"lnbcrt343770n1p4vyl2fpp5ldt70wfy420mga0hyljterpc0ekmzr8k3t03mz3hp9kqgjjtemwqdqqcqzzsxqr8pqsp50lemykt9dh366ngd3pnw78u65rjhcfrp6vg5j5u7h7wfcu5t4fpq9qxpqysgqktrqytpfg562hpsslyux7t6ywg9m2frpd7dv346pazmazna8h9vxdyyqk3kpafsw83em3fwpm99amnu78ktxmp9urmfgjfwxuyrn8asqm89lzt\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"pay-invoice\",\"payload\":{\"peer\":{\"pubkey\":\"\",\"reputation\":{\"rating\":0.0,\"reviews\":0,\"operating_days\":0}}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095004,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"kind\":\"sell\",\"status\":\"waiting-payment\",\"amount\":34583,\"fiat_code\":\"USD\",\"min_amount\":20,\"max_amount\":60,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"created_at\":1791130951,\"expires_at\":1791217351},\"lnbcrt345830n1p4vyl22pp5pmm9sdk0wct6kwv004wmxa6y4mp74wsv0ktfvy62rdq48w8x0cnqdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qyverqdnrxv6rsdfdxgcnqcedxsun2vpdvgcx2dedv56rqctrx4nr2efsxajr5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp5jkrngvk58tq584pl9wv2z0mar922lfz0tpm3zpl27jt6usc0cahq9qxpqysgqucgyd7tcg6q6e8ex9uujn662999rcc6j0aatk0gkcycup3xencg87q2uklfje326e6yeeg7sqtj0k9wcvh4d3epqxc69gywd33pzz3cq38r4mf\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095004,\"trade_index\":0,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095004,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":34583,\"fiat_code\":\"USD\",\"min_amount\":20,\"max_amount\":60,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"buyer_trade_pubkey\":\"2a49b1122208d1bc97df6f898627411bda36137c37bb1e38e6f9da08c3e499a2\",\"seller_trade_pubkey\":\"83a728bb92ffb5ce80e3867f008f301555f93960160eae75ebc64fddcb8a9883\",\"created_at\":1791130951,\"expires_at\":1791217351}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095004,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":34377,\"fiat_code\":\"USD\",\"min_amount\":20,\"max_amount\":60,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":2,\"buyer_trade_pubkey\":\"2a49b1122208d1bc97df6f898627411bda36137c37bb1e38e6f9da08c3e499a2\",\"seller_trade_pubkey\":\"83a728bb92ffb5ce80e3867f008f301555f93960160eae75ebc64fddcb8a9883\",\"created_at\":1791130951,\"expires_at\":1791217351}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer2",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095005,\"action\":\"fiat-sent\",\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"2a49b1122208d1bc97df6f898627411bda36137c37bb1e38e6f9da08c3e499a2\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095006,\"action\":\"release\",\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095005,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"83a728bb92ffb5ce80e3867f008f301555f93960160eae75ebc64fddcb8a9883\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"released\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095006,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"hold-invoice-payment-settled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"purchase-completed\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095006,\"trade_index\":null,\"id\":\"206c3485-210c-4950-b0e7-e40ac5f5e07d\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "buy_order_taken": {
+   "node": "A",
+   "order_id": "531dda85-7867-48c3-93b9-7254fb58e30f",
+   "kind": "buy",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095007,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"buy\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095007,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"kind\":\"buy\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130958,\"expires_at\":1791217358}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095008,\"action\":\"take-buy\",\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095008,\"trade_index\":0,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"kind\":\"buy\",\"status\":\"waiting-payment\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130958,\"expires_at\":1791217358},\"lnbcrt352900n1p4vyl2wpp59mvwtd4ws3dlh0wnjnxp0e0qep7ty7takk5y6vfzkpx2ew76kgfqdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qyv6nxvtyv3snsdfdxuurvdedxsuxxved8yekywfdxuer2drxvg6nsefnxpnr5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp56cqhvlxsqe0xgyl2vm58zcflk6lypj0494cv4qhmczn3zjk8jm6q9qxpqysgqh6685a6f7ah96e8yt6px9smdlne7pn5shymp6up2hhsgktjh8wpxsacgjek6zvutnf9vcw8gfwrkmts6ccccmwg4xtlp443kvhr28eqqeddla9\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095008,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095008,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"kind\":\"buy\",\"status\":\"waiting-buyer-invoice\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130958,\"expires_at\":1791217358}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095009,\"action\":\"add-invoice\",\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"payload\":{\"payment_request\":[null,\"lnbcrt350780n1p4vyl2spp54nwgtk2avrcdmz4msjx7m3d8awua8cvtfem6rzz2fjvfw4qlwamsdqqcqzzsxqr8pqsp5vcqk6k8zxhqxwal264zzukynwfcqmsee4768s8extc55lmuya6hq9qxpqysgqzujqaxtuhsetf9qumeap8ck0mpet92vq65psg6a690alvyzxf6rqe7yk9kp8q2hnk4utmlh30rp5d7l3rqau0kfyg8xah9q5hytskzgq74c4m9\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095008,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"add-invoice\",\"payload\":{\"peer\":{\"pubkey\":\"\",\"reputation\":{\"rating\":0.0,\"reviews\":0,\"operating_days\":0}}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"kind\":\"buy\",\"status\":\"active\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"65f54b7fff52ea16d57e6aa3aade7ecd95cd69d3119c7b66b27691641bc07cb6\",\"seller_trade_pubkey\":\"6983c5233712b17a8e86da5352ea61cd4be4e2b0e5b04b3aba50ac4885582b66\",\"created_at\":1791130958,\"expires_at\":1791217358}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095009,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"kind\":\"buy\",\"status\":\"active\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"65f54b7fff52ea16d57e6aa3aade7ecd95cd69d3119c7b66b27691641bc07cb6\",\"seller_trade_pubkey\":\"6983c5233712b17a8e86da5352ea61cd4be4e2b0e5b04b3aba50ac4885582b66\",\"buyer_invoice\":\"lnbcrt350780n1p4vyl2spp54nwgtk2avrcdmz4msjx7m3d8awua8cvtfem6rzz2fjvfw4qlwamsdqqcqzzsxqr8pqsp5vcqk6k8zxhqxwal264zzukynwfcqmsee4768s8extc55lmuya6hq9qxpqysgqzujqaxtuhsetf9qumeap8ck0mpet92vq65psg6a690alvyzxf6rqe7yk9kp8q2hnk4utmlh30rp5d7l3rqau0kfyg8xah9q5hytskzgq74c4m9\",\"created_at\":1791130958,\"expires_at\":1791217358}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095010,\"action\":\"fiat-sent\",\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"65f54b7fff52ea16d57e6aa3aade7ecd95cd69d3119c7b66b27691641bc07cb6\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095011,\"action\":\"release\",\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095010,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"6983c5233712b17a8e86da5352ea61cd4be4e2b0e5b04b3aba50ac4885582b66\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"released\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095011,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"hold-invoice-payment-settled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 6,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 6,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"purchase-completed\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 6,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3095011,\"trade_index\":null,\"id\":\"531dda85-7867-48c3-93b9-7254fb58e30f\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "dispute_admin_cancel": {
+   "node": "A",
+   "order_id": "deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099001,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099001,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130990,\"expires_at\":1791217390}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099002,\"action\":\"take-sell\",\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099002,\"trade_index\":0,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130990,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099002,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099003,\"action\":\"add-invoice\",\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"payload\":{\"payment_request\":[null,\"lnbcrt350780n1p4vylt0pp5654wq7hrut2k4vhesmpf2zcqc827jr4ef8n46agalfgk2h9uusqsdqqcqzzsxqr8pqsp56mmgfdscfzrw8jwv7nfzln4yyae7kluv5cx2dcu6u547txc3732q9qxpqysgqpjgflglndq8tfr5dtrvzazy5tzlzp0298cy06cc25zflryhwanlz7nhldg63zx0he3enj0dsz97st3rmgkql84qv8xs23t7mc88e42gp6ujdv4\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"pay-invoice\",\"payload\":{\"peer\":{\"pubkey\":\"\",\"reputation\":{\"rating\":0.0,\"reviews\":0,\"operating_days\":0}}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099003,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"waiting-payment\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130990,\"expires_at\":1791217390},\"lnbcrt352900n1p4vylt0pp504xefw5rnpk726xg5ulu0kvdp7z2ujvawfyh35s6ljqm430038csdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qydjx2c3evd3kge3dx3nr2cedxsekzved8yunswpdxpjxxd3nxp3xywrrx4nr5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp5kstxmljxu68cdu4us673a73u3d52hez7cqheaya6ckv8gpug8v6q9qxpqysgq2hu0xu3k0y02zuq9k5hl7g064azjanzp36xx8rlrtuav7h5jnwgn7dh87us7qw3cw8pet9jvxmwjn9c74jesf2avjh6dpuzf5vf9tagq3jc66k\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099003,\"trade_index\":0,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099003,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"333fc4aa88f83b1717c9e6248fb0bf1418fab80b3c2c529f9e7b2e2308c3c8bf\",\"seller_trade_pubkey\":\"114caa7156be8786a04a1820fe4aac72ddf2dc8dcca5e3f4bf0dc880e0d35616\",\"created_at\":1791130990,\"expires_at\":1791217390}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099003,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"333fc4aa88f83b1717c9e6248fb0bf1418fab80b3c2c529f9e7b2e2308c3c8bf\",\"seller_trade_pubkey\":\"114caa7156be8786a04a1820fe4aac72ddf2dc8dcca5e3f4bf0dc880e0d35616\",\"created_at\":1791130990,\"expires_at\":1791217390}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099004,\"action\":\"fiat-sent\",\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"333fc4aa88f83b1717c9e6248fb0bf1418fab80b3c2c529f9e7b2e2308c3c8bf\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"dispute\":{\"version\":2,\"request_id\":3099005,\"action\":\"dispute\",\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099004,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"114caa7156be8786a04a1820fe4aac72ddf2dc8dcca5e3f4bf0dc880e0d35616\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099005,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"dispute-initiated-by-peer\",\"payload\":{\"dispute\":[\"1b84909d-bbf5-405a-ae1e-3e2beafa5458\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099005,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"dispute-initiated-by-you\",\"payload\":{\"dispute\":[\"1b84909d-bbf5-405a-ae1e-3e2beafa5458\",null]}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "admin",
+     "at": 4,
+     "plaintext": "[{\"dispute\":{\"version\":2,\"request_id\":3099006,\"action\":\"admin-take-dispute\",\"id\":\"1b84909d-bbf5-405a-ae1e-3e2beafa5458\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "admin",
+     "at": 4,
+     "plaintext": "[{\"dispute\":{\"version\":2,\"request_id\":3099006,\"trade_index\":null,\"id\":\"1b84909d-bbf5-405a-ae1e-3e2beafa5458\",\"action\":\"admin-took-dispute\",\"payload\":{\"dispute\":[\"1b84909d-bbf5-405a-ae1e-3e2beafa5458\",{\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"kind\":\"sell\",\"status\":\"dispute\",\"hash\":\"7d4d94ba83986de568c8a73fc7d98d0f84ae499d724978d21afc81bac5ef89f1\",\"preimage\":\"8abec8eb004fec457792f2dabc6a80899d2a724462fb5ad57c8ce78d8b2c59b6\",\"order_previous_status\":\"fiat-sent\",\"initiator_pubkey\":\"114caa7156be8786a04a1820fe4aac72ddf2dc8dcca5e3f4bf0dc880e0d35616\",\"buyer_pubkey\":\"333fc4aa88f83b1717c9e6248fb0bf1418fab80b3c2c529f9e7b2e2308c3c8bf\",\"seller_pubkey\":\"114caa7156be8786a04a1820fe4aac72ddf2dc8dcca5e3f4bf0dc880e0d35616\",\"initiator_full_privacy\":true,\"counterpart_full_privacy\":true,\"initiator_info\":null,\"counterpart_info\":null,\"premium\":0,\"payment_method\":\"Transferencia bancaria\",\"amount\":35184,\"fiat_amount\":30,\"fee\":106,\"routing_fee\":0,\"buyer_invoice\":\"lnbcrt350780n1p4vylt0pp5654wq7hrut2k4vhesmpf2zcqc827jr4ef8n46agalfgk2h9uusqsdqqcqzzsxqr8pqsp56mmgfdscfzrw8jwv7nfzln4yyae7kluv5cx2dcu6u547txc3732q9qxpqysgqpjgflglndq8tfr5dtrvzazy5tzlzp0298cy06cc25zflryhwanlz7nhldg63zx0he3enj0dsz97st3rmgkql84qv8xs23t7mc88e42gp6ujdv4\",\"invoice_held_at\":1791130992,\"taken_at\":1791130991,\"created_at\":1791130990}]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099006,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"admin-took-dispute\",\"payload\":{\"peer\":{\"pubkey\":\"30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099006,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"admin-took-dispute\",\"payload\":{\"peer\":{\"pubkey\":\"30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "admin",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099007,\"action\":\"admin-cancel\",\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "admin",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099007,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"admin-canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099007,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"admin-canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099007,\"trade_index\":null,\"id\":\"deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f\",\"action\":\"admin-canceled\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "cooperative_cancel": {
+   "node": "A",
+   "order_id": "d429c866-aae5-4e1e-adef-bd926dadaf46",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099008,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099008,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130998,\"expires_at\":1791217398}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099009,\"action\":\"take-sell\",\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099009,\"trade_index\":0,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130998,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099010,\"action\":\"add-invoice\",\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"payload\":{\"payment_request\":[null,\"lnbcrt350780n1p4vyltkpp52fdedhrwc8m72rch7dtfxr8kmgfkgwwc97yvh7ksv2e8ge60mpysdqqcqzzsxqr8pqsp5s5zrkavwadcrg9p47srz6yc7ae28h9npgen4q9u8dnq4hggdddqq9qxpqysgq9ka7c43vzv3sluzwx62sv6ucydm2qw45np9p5jscer9hvr8tq3nqp9rydgzmyf9fdg9vf0xrfnl0gym64fgqzdn9kunhxwncl8wy9jqq05tyqc\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099009,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"pay-invoice\",\"payload\":{\"peer\":{\"pubkey\":\"\",\"reputation\":{\"rating\":0.0,\"reviews\":0,\"operating_days\":0}}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099010,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"kind\":\"sell\",\"status\":\"waiting-payment\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791130998,\"expires_at\":1791217398},\"lnbcrt352900n1p4vyltkpp5hvrwxlny65vn7j3qltyp326h506h2yr7qkdh2y7hwtkvwpr8ctxqdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qydjrgv3evvurvd3dv9sk2dfdx3jnzefdv9jx2e3dvfjrjv3kv3skgctxxsmr5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp52wpenewac8lcs2vwcs3489rd08uqrk887s48xggk3yey50pgnceq9qxpqysgqayxyvx0zcl84wupgjlzx8luuzfmyfswrymsx6ap55k9jfzcxhdlpz2xkjxl6ca9a63rf5xaya8mfyenvkcx0mev9u2j8rqmee4fkgeqpax8jn6\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099010,\"trade_index\":0,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099010,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35290,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"e10738845c93402e740cd3c5be852ee0f50cea7fe46bd8ee9ae0b8d091a512ab\",\"seller_trade_pubkey\":\"02e0484ed67c00777ad1c59939ffb9a42420743275d384e21316b921ef011836\",\"created_at\":1791130998,\"expires_at\":1791217398}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099010,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"kind\":\"sell\",\"status\":\"active\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"e10738845c93402e740cd3c5be852ee0f50cea7fe46bd8ee9ae0b8d091a512ab\",\"seller_trade_pubkey\":\"02e0484ed67c00777ad1c59939ffb9a42420743275d384e21316b921ef011836\",\"created_at\":1791130998,\"expires_at\":1791217398}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099011,\"action\":\"cancel\",\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099011,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"cooperative-cancel-initiated-by-you\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"cooperative-cancel-initiated-by-peer\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099012,\"action\":\"cancel\",\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3099012,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"cooperative-cancel-accepted\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"d429c866-aae5-4e1e-adef-bd926dadaf46\",\"action\":\"cooperative-cancel-accepted\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "taker_leaves": {
+   "node": "A",
+   "order_id": "b231d85e-e789-4e0f-97b4-93976be15d19",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101201,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101201,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791131013,\"expires_at\":1791217413}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101202,\"action\":\"take-sell\",\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"cant-do\":{\"version\":2,\"request_id\":3101202,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"cant-do\",\"payload\":{\"cant_do\":\"invalid_pubkey\"}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101203,\"action\":\"take-sell\",\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101203,\"trade_index\":0,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":35078,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791131013,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer2",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101204,\"action\":\"take-sell\",\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101203,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 1,
+     "plaintext": "[{\"cant-do\":{\"version\":2,\"request_id\":3101204,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"cant-do\",\"payload\":{\"cant_do\":\"invalid_order_status\"}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101205,\"action\":\"cancel\",\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101205,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101205,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"seller_trade_pubkey\":\"c0299ed69463c7a581d20ee45d68a79f99192cc587645c81ffdf8dff02abfd57\",\"created_at\":1791131013,\"expires_at\":1791217413}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101206,\"action\":\"cancel\",\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3101206,\"trade_index\":null,\"id\":\"b231d85e-e789-4e0f-97b4-93976be15d19\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "take_timeout": {
+   "node": "B",
+   "order_id": "c8687ae3-c630-473a-b170-7066539fbed5",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9pl5pp58quz3qzgaugcw5cxv9a9yktzly5aneuqpxku8waymhpdq7h08grsdzud4hhxarjdusxymmwvssx7unyv4e976ty843nsd3cxask2vedvvmrxvpdxsmnxcfdvgcnwvpdxucrvd34xvukvcn9vs6scqzysxqzuysp5d4klwgvety6fc9xr37uu4zjszc80gllzm8e5m0pmm37ztvuvc28s9qxpqysgq5ft9greyz7f2lysj2anc6tccgs900wmhlnpc63m0qdk5qwedduzjuft4t4l4ssvjf3elvxdrevcplqwxu3y6zg0ugv9ahy425uqkhtspphryxz\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791133684,\"expires_at\":1791220084}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"action\":\"take-sell\",\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":0,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9pl4pp50cy2x6v2qdwr9nqzflqgqjpf3m2n4nqggdnjcdemfeuxxmat9hgsdzud4hhxarjdusxymmwvssx7unyv4e976ty843nsd3cxask2vedvvmrxvpdxsmnxcfdvgcnwvpdxucrvd34xvukvcn9vs6scqzysxqzfvsp50qygyq36epwy97g47lk9eg8urv02cnyj8qptase8mgvw32aewfns9qxpqysgqrvhfna7kzhf0m2s8mecs3x0wvx25cspq987596t7arfvw2j2x03sf59k0e6z8p7m5fgmpf92atteyaaeh4ymh6e2mqx2ykuy6ntk3dqqdzxn49\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":0,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":35034,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791133684,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 908,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"seller_trade_pubkey\":\"1e179116dee3568ad67d6a7b0881cc33b1492ffd0f8109dd5e84c452cd75d92c\",\"created_at\":1791133684,\"expires_at\":1791220084}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 908,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 917,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368403,\"action\":\"cancel\",\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 918,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368403,\"trade_index\":null,\"id\":\"c8687ae3-c630-473a-b170-7066539fbed5\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "buy_order_with_invoice": {
+   "node": "B",
+   "order_id": "b70abad6-9bdf-4663-9404-c983abb58f5a",
+   "kind": "buy",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"buy\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0,\"buyer_invoice\":\"lnbcrt1p4v9pl5pp50agzg5pv36xnympmx98j3z5t6kxar3dp5jw9apa8fgfs9u9338qsdqqcqzzsxqr8pqsp53jtq5jy2uvsm8893h5yh705dtlw009cqv3fw5anw67zx34ergnts9qxpqysgqpm5g8z5eyjnaqdhhnv58sxxsgs3pseatadl6mhgc0xhha8xhyv6y6yu5ayz2h0kwtthjuy3su8lzrxpmyz03xyvn2xumwp9frmqu43gq9d2z35\"}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9pl5pp5na07m6dc5yjgc8q5sh2phs5t842zd05kq6yztxsl964tm543rh6qdzud4hhxarjdusxymmwvssx7unyv4e976ty843rwvrpvfskgd3d893xge3dxsmrvved8y6rqdpdvvunsvmpvf3r2wrxx4sscqzysxqzuysp5vvag4sa03a7zw9ftae29vg3mpzus9z9rxvsnp45h7qp6c4pz0rcq9qxpqysgqeqwda737ay5n9x7v6fgwav2uvsaackzcn8dry7dadwrgpe2nm6she3fpq8x69dxpdw6jrnql4tqk63axxys2p4lpvkswghnlyyp0gcspagl6gd\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368401,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_invoice\":\"lnbcrt1p4v9pl5pp50agzg5pv36xnympmx98j3z5t6kxar3dp5jw9apa8fgfs9u9338qsdqqcqzzsxqr8pqsp53jtq5jy2uvsm8893h5yh705dtlw009cqv3fw5anw67zx34ergnts9qxpqysgqpm5g8z5eyjnaqdhhnv58sxxsgs3pseatadl6mhgc0xhha8xhyv6y6yu5ayz2h0kwtthjuy3su8lzrxpmyz03xyvn2xumwp9frmqu43gq9d2z35\",\"created_at\":1791133684,\"expires_at\":1791220084}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"action\":\"take-buy\",\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":0,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9pl4pp57qwvpm9hpzep3cy4k7fmd7cysv5sz25v5s8kxztpq5nz05ssmhfqdzud4hhxarjdusxymmwvssx7unyv4e976ty843rwvrpvfskgd3d893xge3dxsmrvved8y6rqdpdvvunsvmpvf3r2wrxx4sscqzysxqzfvsp5qjfmzx2gvxea2v20jkc5prq65a27h746psgsw9ye4lxkqnytlgrq9qxpqysgqldpjyhu4jm0a66xs6ydrehj7tm3cer6e5m3y2cmnxzwgajm2502ptmms9jqqyyr7pc8rlzj7u6mulzeykemglepr993pnhm05mr72ksqeua65v\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":0,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"pay-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"waiting-payment\",\"amount\":35244,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791133684,\"expires_at\":1791220084},\"lnbcrt352440n1p4v9plkpp52k76u8q69q2n3wj63lfw03nhuqe46696xglvtzuc44hwtq644l3qdf4g4ekxun0wusxzmt0w4h8ggz0wfjx2u3qyd3rwvrpvfskgd3d893xge3dxsmrvved8y6rqdpdvvunsvmpvf3r2wrxx4sn5gzng4xycgzz23pjqen0wgs9256yyqenqgpdypyhggzhf9xycgzx2fz52kj9ypy5ugzhg9xyc3259csyjapqwa5kcmpqwfjkcetpwdjjqmmwvdjjq7t0w5s8yetvv4shxefwypyhggrhd9kxcgrjv4682unwyp5kvgrzw4uk2u3qv3hk2ueqdehhggrrdahxv6tjd5s8g6r9ypcxz7tdv4h8gcqzysxqyz5vqsp5ev8tgnnvcpyynzs8g2t9z5kvw9ja0hcvwxy9n9p3fjh8lf60ja6s9qxpqysgqp4uuq54vwe0dw67tnedz70v04a40s9xpwr2e6p3wsppq657n63r478xp0xvxl80ftd74nmdmyax9456hsgj7jrzpuezy73rm9yg63tgpeth74w\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"waiting-seller-to-pay\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"buyer-took-order\",\"payload\":{\"order\":{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"active\",\"amount\":35244,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"ea90c6b243ab9f1b3dff83d98c3838d84d95a0a98f2cf8710d1b9a9f228fb818\",\"seller_trade_pubkey\":\"482f6d632ab1312fa6812d67ae107bcb6d6d7a0166b05738e1cb606b378f0063\",\"created_at\":1791133684,\"expires_at\":1791220084}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368402,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"hold-invoice-payment-accepted\",\"payload\":{\"order\":{\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"kind\":\"buy\",\"status\":\"active\",\"amount\":35034,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"buyer_trade_pubkey\":\"ea90c6b243ab9f1b3dff83d98c3838d84d95a0a98f2cf8710d1b9a9f228fb818\",\"seller_trade_pubkey\":\"482f6d632ab1312fa6812d67ae107bcb6d6d7a0166b05738e1cb606b378f0063\",\"created_at\":1791133684,\"expires_at\":1791220084}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368403,\"action\":\"fiat-sent\",\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"ea90c6b243ab9f1b3dff83d98c3838d84d95a0a98f2cf8710d1b9a9f228fb818\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368404,\"action\":\"release\",\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368403,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"fiat-sent-ok\",\"payload\":{\"peer\":{\"pubkey\":\"482f6d632ab1312fa6812d67ae107bcb6d6d7a0166b05738e1cb606b378f0063\",\"reputation\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"released\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368404,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"hold-invoice-payment-settled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"purchase-completed\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 5,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3368404,\"trade_index\":null,\"id\":\"b70abad6-9bdf-4663-9404-c983abb58f5a\",\"action\":\"rate\",\"payload\":null}},null,null]"
+    }
+   ]
+  },
+  "concurrent_takes": {
+   "node": "B",
+   "order_id": "0cb0df40-b6a3-4caf-9132-82477e5b1ccc",
+   "kind": "sell",
+   "messages": [
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373301,\"action\":\"new-order\",\"payload\":{\"order\":{\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":0}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373301,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9zpxpp5allg73zvrvcr6tda55s8m79ql4kwe4aqaq3sg77ulmqhkhk8czqqdzud4hhxarjdusxymmwvssx7unyv4e976ty85cxxc3sv3nrgvpdvgmxzvedx33kze3d8ycnxv3d8qergdehv56kyvtrvd3scqzysxqzuysp5srhsrzg002fwz0805nxztj6urspr2yty0mefluzekja73263pzrs9qxpqysgqjfpyy0qanpmr34m5ez0lj4kggkrmws94am6qu2nmyul307uf3hcxre0xhhvq4vpvr9ccec9wj9ghnm529cusdjhhz9s6xjmtachey9cpfyrzfg\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373301,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791133734,\"expires_at\":1791220134}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373302,\"action\":\"take-sell\",\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer2",
+     "at": 0,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373303,\"action\":\"take-sell\",\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373302,\"trade_index\":0,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9zpxpp5r0cqzea7qx88seda5uh5qq8a0v5ncmzqt9s7cha7w254mcle67vsdzud4hhxarjdusxymmwvssx7unyv4e976ty85cxxc3sv3nrgvpdvgmxzvedx33kze3d8ycnxv3d8qergdehv56kyvtrvd3scqzysxqzfvsp5s203kg3uh6hlmfe6tnp33v86uh6ahy2ae5g5dumvxke936yxhlgs9qxpqysgq46hjskckaz09pgdn7cmqlgvyvx6p7xueg7s5spvjpydx33z65nu5j7nj67lzkxc9nmflqt2naz4ev4f72trlzntujeu82cv420rfwwgph4stky\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373303,\"trade_index\":0,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"pay-bond-invoice\",\"payload\":{\"payment_request\":[{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":1054,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":null,\"expires_at\":null},\"lnbcrt10540n1p4v9zp8pp5dwdgxktr2mprqz62gkg26f9l3k3wqzhvgwq0mstem68jnhfstrtqdzud4hhxarjdusxymmwvssx7unyv4e976ty85cxxc3sv3nrgvpdvgmxzvedx33kze3d8ycnxv3d8qergdehv56kyvtrvd3scqzysxqzfvsp5fxrne2j80rrywkxawrpdr7cuz8rulqx2rs4k50ftw7zayyp25scs9qxpqysgq6gfsnqvlfrl9p9kvfmx8yg0yvw7hktjvnaxf22jcymvnmz9glxsh9avgnl5tqkugx95zagfnfutxmddgv6g0ft5yyan8eym3gvw370qqefgkd3\",null]}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer2",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":null,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 1,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373302,\"trade_index\":0,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"add-invoice\",\"payload\":{\"order\":{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"waiting-buyer-invoice\",\"amount\":35034,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"created_at\":1791133734,\"expires_at\":null}}}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 2,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373302,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"waiting-buyer-invoice\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer3",
+     "at": 3,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373304,\"action\":\"take-sell\",\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer3",
+     "at": 3,
+     "plaintext": "[{\"cant-do\":{\"version\":2,\"request_id\":3373304,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"cant-do\",\"payload\":{\"cant_do\":\"invalid_order_status\"}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373305,\"action\":\"cancel\",\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "buyer",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373305,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373305,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"new-order\",\"payload\":{\"order\":{\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"kind\":\"sell\",\"status\":\"pending\",\"amount\":0,\"fiat_code\":\"USD\",\"min_amount\":null,\"max_amount\":null,\"fiat_amount\":30,\"payment_method\":\"Transferencia bancaria\",\"premium\":0,\"seller_trade_pubkey\":\"bd486c20bd934b585a3ca864a656ff3fd75629e3e4fc156bcabdba0839ce2242\",\"created_at\":1791133734,\"expires_at\":1791220134}}}},null,null]"
+    },
+    {
+     "dir": "user->daemon",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373306,\"action\":\"cancel\",\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"payload\":null}},null,null]"
+    },
+    {
+     "dir": "daemon->user",
+     "party": "seller",
+     "at": 4,
+     "plaintext": "[{\"order\":{\"version\":2,\"request_id\":3373306,\"trade_index\":null,\"id\":\"0cb0df40-b6a3-4caf-9132-82477e5b1ccc\",\"action\":\"canceled\",\"payload\":null}},null,null]"
+    }
+   ]
+  }
+ }
+}

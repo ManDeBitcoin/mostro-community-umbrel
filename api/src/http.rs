@@ -129,10 +129,7 @@ impl AppState {
 
 pub fn router(state: AppState) -> Router {
     let api_routes = Router::new()
-        .route(
-            "/api/health",
-            get(|| async { Json(json!({"status":"ok","version":"0.1.0","mode":"development"})) }),
-        )
+        .route("/api/health", get(health))
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
         .route("/api/community/card", get(community_card_handler))
@@ -164,6 +161,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/simulation/run", post(simulation_run_handler))
         .route("/api/orders", get(orders::get_orders_handler))
         .route("/api/chat/{order_id}", get(chat::get_chat_handler))
+        .route("/api/disputes", get(chat::get_disputes_handler))
         .route("/api/notifications", get(notifications_list_handler))
         .route("/api/backup/status", get(backup_status_handler))
         .route("/api/backup/trigger", post(backup_trigger_handler))
@@ -280,7 +278,14 @@ async fn community_card_handler(
         )
     })?;
     let root = store.root().to_path_buf();
-    Ok(Json(connection::get_community_card(&root, &store)))
+    connection::get_community_card(&root, &store)
+        .map(Json)
+        .ok_or_else(|| {
+            error(
+                StatusCode::CONFLICT,
+                "La tarjeta requiere identidad Nostr y configuración guardada",
+            )
+        })
 }
 
 async fn community_presets_handler() -> Json<Vec<crate::config::RegionalPreset>> {
@@ -424,7 +429,10 @@ async fn daemon_status_handler(
         })?
         .root()
         .to_path_buf();
-    Ok(Json(daemon::report(&root, &state.integrations).await))
+    let node_info = state.orders.read().await.node_info.clone();
+    Ok(Json(
+        daemon::report_with_node_info(&root, &state.integrations, node_info).await,
+    ))
 }
 
 async fn daemon_activate_handler(
@@ -502,30 +510,30 @@ async fn simulation_scenarios_handler() -> Json<Value> {
     Json(json!([
         {
             "id": "happy_path",
-            "label": "Intercambio Completo Exitoso (Happy Path)",
-            "name": "Intercambio Completo Exitoso (Happy Path)",
-            "description": "Modelo sintético de orden de venta, aceptación, bloqueo de fianza/garantía, transferencia fiat simulada y liberación de satoshis.",
+            "label": "Operación completada",
+            "name": "Operación completada",
+            "description": "Una venta de principio a fin: publicación, garantías, depósito del vendedor, pago fiat y liberación de los sats.",
             "is_default": true
         },
         {
             "id": "dispute_settled_for_buyer",
-            "label": "Disputa Resuelta a Favor del Comprador",
-            "name": "Disputa Resuelta a Favor del Comprador",
-            "description": "Modelo sintético donde el mediador valida comprobante de pago legítimo y liquida la garantía al comprador.",
+            "label": "Disputa resuelta a favor del comprador",
+            "name": "Disputa resuelta a favor del comprador",
+            "description": "El mediador comprueba que el pago fiat existió: Mostro cobra el depósito del vendedor y paga al comprador.",
             "is_default": false
         },
         {
             "id": "dispute_refunded_to_seller",
-            "label": "Disputa Resuelta con Devolución al Vendedor",
-            "name": "Disputa Resuelta con Devolución al Vendedor",
-            "description": "Modelo sintético donde el mediador confirma falta de pago fiat y devuelve los satoshis al vendedor.",
+            "label": "Disputa resuelta con devolución al vendedor",
+            "name": "Disputa resuelta con devolución al vendedor",
+            "description": "El mediador comprueba que el pago fiat no existió: Mostro cancela el depósito y los sats vuelven al vendedor.",
             "is_default": false
         },
         {
             "id": "seller_cancellation",
-            "label": "Cancelación Previa por el Vendedor",
-            "name": "Cancelación Previa por el Vendedor",
-            "description": "Modelo sintético donde el vendedor cancela su orden antes de ser tomada, anulando la Hold Invoice sin penalizaciones.",
+            "label": "Cancelación por el vendedor antes de la toma",
+            "name": "Cancelación por el vendedor antes de la toma",
+            "description": "El vendedor retira su orden antes de que alguien la tome.",
             "is_default": false
         }
     ]))
@@ -584,6 +592,20 @@ async fn simulation_run_handler(
         .map_err(|e| error(StatusCode::BAD_REQUEST, e))
 }
 
+/// Liveness of the API itself. `version` is the released package version when
+/// the image was built by the release workflow, otherwise the crate version.
+async fn health() -> Json<Value> {
+    let release = option_env!("MANAGER_VERSION")
+        .map(|v| v.trim_start_matches('v'))
+        .filter(|v| !v.is_empty() && *v != "dev");
+    Json(json!({
+        "status": "ok",
+        "version": release.unwrap_or(env!("CARGO_PKG_VERSION")),
+        "mode": if release.is_some() { "release" } else { "development" },
+        "mostro_pinned_version": daemon::MOSTRO_VERSION,
+    }))
+}
+
 async fn dashboard(State(state): State<AppState>) -> Json<Value> {
     let (mut mostro, lightning) =
         tokio::join!(state.integrations.mostro(), state.integrations.lightning());
@@ -601,17 +623,46 @@ async fn dashboard(State(state): State<AppState>) -> Json<Value> {
             (false, None)
         }
     };
-    if state.integrations.mostro_rpc.is_none() && is_active {
-        mostro = json!({
-            "status": "unknown",
-            "detail": "Configuración guardada; ejecución y versión del daemon sin verificar",
-            "configured_revision": active_rev
-        });
+    // The daemon's own info event on the relays is the evidence that a node
+    // with this identity is serving clients. Without a recent one the panel
+    // reports what it knows and no more.
+    let (announced, announced_age) = {
+        let orders = state.orders.read().await;
+        let now = nostr::Timestamp::now().as_secs();
+        (orders.node_info.clone(), orders.node_info_age_secs(now))
+    };
+    let announced_fresh = announced_age.is_some_and(|age| age <= orders::NODE_INFO_FRESH_SECS);
+    let in_maintenance = announced
+        .as_ref()
+        .is_some_and(|info| info.tags.get("maintenance_mode").map(String::as_str) == Some("true"));
+    if state.integrations.mostro_rpc.is_none() {
+        if let (true, Some(info)) = (announced_fresh, announced.as_ref()) {
+            mostro = json!({
+                "status": if in_maintenance { "warning" } else { "online" },
+                "detail": if in_maintenance {
+                    "El daemon anuncia modo mantenimiento: no acepta órdenes nuevas".to_string()
+                } else {
+                    format!(
+                        "El daemon anunció su información en los relays hace {} s",
+                        announced_age.unwrap_or_default()
+                    )
+                },
+                "version": info.mostro_version,
+                "announced_age_secs": announced_age,
+                "configured_revision": active_rev
+            });
+        } else if is_active {
+            mostro = json!({
+                "status": "unknown",
+                "detail": "Configuración guardada; el daemon no ha anunciado su información en los relays recientemente",
+                "configured_revision": active_rev
+            });
+        }
     }
     Json(json!({"mostro":mostro,"lightning":lightning,
         "bitcoin":{"status":"unknown","detail":"Verificación directa de Bitcoin pendiente; el estado de LND no la sustituye"},
         "configuration_active":is_active,
-        "market_started":false}))
+        "market_started":announced_fresh && !in_maintenance}))
 }
 
 #[derive(Deserialize, Default)]
@@ -652,7 +703,7 @@ async fn save_community(
     verify_protection(&headers)?;
     request
         .config
-        .validate()
+        .validate_for_save()
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     let (result, root) = {
         let mut store = state.store.lock().map_err(|_| {
@@ -686,20 +737,31 @@ async fn save_community(
 
         let active_dir = root.join("active");
         if active_dir.join("settings.toml").is_file() {
-            let origin = std::fs::read(active_dir.join("status.json"))
+            // The LND origin of the running daemon is the one recorded at
+            // activation. Without that record the draft is not applied: a
+            // guessed origin could point the daemon at another node.
+            let recorded_origin = std::fs::read(active_dir.join("status.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<daemon::ActiveStatus>(&b).ok())
-                .map(|s| s.lnd_grpc_origin)
-                .unwrap_or_else(|| {
-                    format!(
-                        "https://{}:{}",
-                        std::env::var("APP_LIGHTNING_NODE_IP")
-                            .unwrap_or_else(|_| "10.21.21.9".into()),
-                        std::env::var("APP_LIGHTNING_NODE_GRPC_PORT")
-                            .unwrap_or_else(|_| "10009".into())
-                    )
-                });
-            let _ = daemon::activate(&root, &origin);
+                .map(|s| s.lnd_grpc_origin);
+            // Restarts the daemon only if the rendered settings changed.
+            let outcome = match recorded_origin {
+                Some(origin) => daemon::sync_active_settings(&root, &origin).map(|_| ()),
+                None => Err("falta el registro de la activación (status.json)"),
+            };
+            if let Err(reason) = outcome {
+                state
+                    .notifications
+                    .publish(Notification::system_alert(
+                        "Activación incompleta",
+                        &format!(
+                            "Las reglas se guardaron, pero no llegaron a aplicarse al nodo: {reason}. Comprueba en la página Nodo Mostro qué revisión está activa y pulsa «Aplicar y reiniciar»."
+                        ),
+                        "critical",
+                        None,
+                    ))
+                    .await;
+            }
         }
     }
 
@@ -793,10 +855,12 @@ async fn backup_trigger_handler(
         target_dir
     };
 
+    // A manual backup prunes like the automatic ones, with the same limit.
+    let retention_count = state.backup_state.read().await.retention_count;
     let summary = backup::run_auto_backup_cycle(
         &root,
         &target_dir,
-        7,
+        retention_count,
         age::secrecy::SecretString::from(passphrase_str),
     )
     .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
@@ -819,7 +883,7 @@ async fn backup_trigger_handler(
     state
         .notifications
         .publish(Notification::backup_alert(
-            "Backup manual completado",
+            "Respaldo manual completado",
             &format!("Respaldo guardado en {}", summary.path.display()),
             true,
             Some(json!({

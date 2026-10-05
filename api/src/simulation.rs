@@ -1,8 +1,10 @@
-//! Regtest and protocol simulation engine for Mostro P2P trades.
-//! Simulates the complete order lifecycle, hold invoices, bonds, fee accounting,
-//! and dispute resolution without exposing real satoshis or private keys.
+//! Synthetic walkthrough of a Mostro trade, following what mostrod v0.19.2 does.
+//!
+//! The sequence of messages, order statuses and hold invoices mirrors a trade
+//! run against the official v0.19.2 binary on regtest (see
+//! `docs/validation.md`). Nothing here touches Lightning, relays or keys.
 
-use crate::config::{BondApply, Configuration};
+use crate::config::{BondApply, Configuration, MIN_DEV_FEE_BPS};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -66,7 +68,18 @@ pub struct FinancialBreakdown {
     pub dev_fee_sats: u64,
     #[serde(default)]
     pub fee_sats: u64,
+    /// Escrow hold invoice the seller pays: trade amount plus the seller's
+    /// half of the fee.
+    #[serde(default)]
+    pub seller_hold_invoice_sats: u64,
+    /// What the buyer's invoice receives: trade amount minus the buyer's half
+    /// of the fee. The buyer never pays the fee up front.
+    #[serde(default)]
+    pub buyer_receives_sats: u64,
+    /// Everything the seller has locked at once: escrow plus bond, which are
+    /// two separate hold invoices.
     pub seller_total_locked_sats: u64,
+    /// Everything the buyer has locked: only the bond, when one applies.
     pub buyer_total_locked_sats: u64,
 }
 
@@ -80,7 +93,25 @@ pub const SYNTHETIC_SOLVER_NPUB: &str =
     "npub1synthet1c0solver00000000000000000000000000000000000000000003";
 
 pub const SIMULATION_MODE_LABEL: &str = "synthetic_dry_run";
-pub const SIMULATION_DISCLAIMER: &str = "Simulación sintética en memoria: no ejecuta regtest ni interactúa con nodos Bitcoin/Lightning o relays Nostr reales; eventos y transacciones son modelos para verificación previa; equivalencia fiat referencial sin oráculo en tiempo real; no valida conformidad de cliente upstream.";
+pub const SIMULATION_DISCLAIMER: &str = "Simulación sintética en memoria: no ejecuta regtest ni interactúa con nodos Bitcoin/Lightning o relays Nostr reales. La secuencia de mensajes y facturas sigue la de Mostro v0.19.2; los importes se calculan con la configuración guardada y la equivalencia fiat es referencial, sin cotización en tiempo real.";
+
+/// Appends one step to the walkthrough.
+type PushStep<'a> = dyn FnMut(
+        &str,
+        &str,
+        Actor,
+        &str,
+        String,
+        Option<NostrEventSummary>,
+        Option<LightningActionSummary>,
+    ) + 'a;
+
+/// Kind of every user↔daemon message in protocol v2 (NIP-44 encrypted).
+const KIND_PROTOCOL_MESSAGE: u64 = 14;
+/// Public order event.
+const KIND_ORDER: u64 = 38383;
+/// Public dispute event.
+const KIND_DISPUTE: u64 = 38386;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SimulationReport {
@@ -110,10 +141,9 @@ pub fn calculate_financials(
     fiat_code: &str,
     fiat_amount: &str,
 ) -> FinancialBreakdown {
-    // Upstream Mostro v0.18.8 src/util.rs calculates:
-    // split_fee = (mostro_settings.fee * amount as f64) / 2.0; split_fee.round() as i64
-    // Using checked u128 integer arithmetic with exact rounding:
-    // round(X / 20000) = (X + 10000) / 20000
+    // Upstream mostrod v0.19.2 `src/util.rs::get_fee`:
+    //   split_fee = (mostro_settings.fee * amount as f64) / 2.0; split_fee.round()
+    // In integer arithmetic: round(X / 20000) = (X + 10000) / 20000.
     let fee_bps_u128 = config.market.fee_bps as u128;
     let trade_sats_u128 = trade_sats as u128;
 
@@ -126,11 +156,12 @@ pub fn calculate_financials(
         .checked_div(20_000)
         .unwrap_or(0) as u64;
 
-    // Real total fee retained by Mostro node is exactly 2 * fee_per_side
+    // The node keeps exactly one half from each party.
     let total_mostro_fee_sats = fee_per_side_sats.checked_mul(2).unwrap_or(0);
 
-    // Dev fee is calculated/rounded on the real total fee (participation)
-    let dev_fee_bps_u128 = config.market.dev_fee_bps as u128;
+    // `calculate_dev_fee`: share of the total fee sent to Mostro development.
+    // The renderer never writes less than the minimum mostrod accepts.
+    let dev_fee_bps_u128 = config.market.dev_fee_bps.max(MIN_DEV_FEE_BPS) as u128;
     let dev_fee_sats = (total_mostro_fee_sats as u128)
         .checked_mul(dev_fee_bps_u128)
         .unwrap_or(0)
@@ -139,34 +170,32 @@ pub fn calculate_financials(
         .checked_div(10_000)
         .unwrap_or(0) as u64;
 
+    // `src/app/bond/math.rs::compute_bond_amount`:
+    //   bond = max(round(amount_pct * order_amount_sats), base_amount_sats)
+    // The base amount is a floor, not an addition.
     let bond_sats = if config.safety.bond_enabled {
         let bond_bps_u128 = config.safety.bond_bps as u128;
-        let variable_bond = trade_sats_u128
+        let proportional = trade_sats_u128
             .checked_mul(bond_bps_u128)
             .unwrap_or(0)
             .checked_add(5_000)
             .unwrap_or(0)
             .checked_div(10_000)
             .unwrap_or(0) as u64;
-        config
-            .safety
-            .base_bond_sats
-            .checked_add(variable_bond)
-            .unwrap_or(0)
+        proportional.max(config.safety.base_bond_sats)
     } else {
         0
     };
 
+    // In this walkthrough the seller is the maker and the buyer the taker.
     let (seller_bond, buyer_bond) = match config.safety.bond_apply_to {
         BondApply::Make => (bond_sats, 0),
         BondApply::Take => (0, bond_sats),
         BondApply::Both => (bond_sats, bond_sats),
     };
 
-    let seller_total_locked = trade_sats
-        .saturating_add(seller_bond)
-        .saturating_add(fee_per_side_sats);
-    let buyer_total_locked = buyer_bond.saturating_add(fee_per_side_sats);
+    let seller_hold_invoice_sats = trade_sats.saturating_add(fee_per_side_sats);
+    let buyer_receives_sats = trade_sats.saturating_sub(fee_per_side_sats);
 
     FinancialBreakdown {
         trade_amount_sats: trade_sats,
@@ -178,8 +207,10 @@ pub fn calculate_financials(
         fee_per_side_sats,
         dev_fee_sats,
         fee_sats: total_mostro_fee_sats,
-        seller_total_locked_sats: seller_total_locked,
-        buyer_total_locked_sats: buyer_total_locked,
+        seller_hold_invoice_sats,
+        buyer_receives_sats,
+        seller_total_locked_sats: seller_hold_invoice_sats.saturating_add(seller_bond),
+        buyer_total_locked_sats: buyer_bond,
     }
 }
 
@@ -245,116 +276,146 @@ pub fn run_simulation(
         "ord-{}",
         &hash_hex(&format!("{}-{}", now_unix, trade_sats))[0..12]
     );
-    let seller_hash = hash_hex(&format!("{}-seller-hold", order_id));
-    let buyer_hash = hash_hex(&format!("{}-buyer-hold", order_id));
+    let escrow_hash = hash_hex(&format!("{}-seller-hold", order_id));
+    let maker_bond_hash = hash_hex(&format!("{}-maker-bond", order_id));
+    let taker_bond_hash = hash_hex(&format!("{}-taker-bond", order_id));
+    let payout_hash = hash_hex(&format!("{}-buyer-payout", order_id));
+    let dispute_id = format!("dsp-{}", &hash_hex(&format!("{}-dispute", order_id))[0..12]);
 
-    let mut steps = Vec::new();
-    let mut step_count = 1;
+    let fin = &financials;
+    let mut steps: Vec<SimulationStep> = Vec::new();
+    let message = |from: &str, to: &str, summary: String| NostrEventSummary {
+        kind: KIND_PROTOCOL_MESSAGE,
+        event_id: String::new(),
+        sender: from.into(),
+        recipient: Some(to.into()),
+        summary,
+    };
+    let public = |kind: u64, summary: String| NostrEventSummary {
+        kind,
+        event_id: String::new(),
+        sender: bot.into(),
+        recipient: None,
+        summary,
+    };
+    let lightning = |action: &str, amount_sats: u64, hash: &str, status: &str| {
+        Some(LightningActionSummary {
+            action: action.into(),
+            amount_sats,
+            payment_hash: hash.into(),
+            status: status.into(),
+        })
+    };
+    let mut push = |action_code: &str,
+                    title: &str,
+                    actor: Actor,
+                    order_status: &str,
+                    description: String,
+                    nostr_event: Option<NostrEventSummary>,
+                    lightning_action: Option<LightningActionSummary>| {
+        let step_number = steps.len() + 1;
+        steps.push(SimulationStep {
+            step_number,
+            action_code: action_code.into(),
+            title: title.into(),
+            actor,
+            order_status: order_status.into(),
+            description,
+            nostr_event: nostr_event.map(|mut event| {
+                event.event_id = hash_hex(&format!("{order_id}-step-{step_number}"));
+                event
+            }),
+            lightning_action,
+        });
+    };
 
-    // Paso 1: Vendedor solicita nueva orden
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "new_order".into(),
-        title: "Creación de Orden de Venta".into(),
-        actor: Actor::Seller,
-        order_status: "pending".into(),
-        description: format!(
-            "Vendedor solicita publicar orden para vender {} sats por {} {} usando {}.",
-            financials.trade_amount_sats,
-            financials.fiat_amount,
-            financials.fiat_currency,
-            payment_method
+    // 1. The maker asks the daemon to publish the order. Nothing is locked yet
+    //    except, when the node requires it, the maker's bond.
+    push(
+        "new_order",
+        "Creación de la orden de venta (new-order)",
+        Actor::Seller,
+        if fin.seller_bond_sats > 0 {
+            "waiting-maker-bond"
+        } else {
+            "pending"
+        },
+        format!(
+            "El vendedor pide publicar una orden para vender {} sats por {} {} mediante {}. Envía importe fijo en sats y prima 0: Mostro rechaza una orden que combine sats fijos con una prima distinta de cero.",
+            fin.trade_amount_sats, fin.fiat_amount, fin.fiat_currency, payment_method
         ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: seller_npub.into(),
-            recipient: Some(bot.into()),
-            summary: format!(
-                "Order Action: NewOrder (Sell, {} sats)",
-                financials.trade_amount_sats
+        Some(message(
+            seller_npub,
+            bot,
+            format!("new-order: venta de {} sats", fin.trade_amount_sats),
+        )),
+        None,
+    );
+    if fin.seller_bond_sats > 0 {
+        push(
+            "maker_bond_accepted",
+            "Garantía del creador de la orden",
+            Actor::Seller,
+            "waiting-maker-bond",
+            format!(
+                "Mostro envía al vendedor una factura retenida de garantía por {} sats (pay-bond-invoice). La orden no se publica hasta que la paga; la garantía es una factura distinta del depósito de la operación.",
+                fin.seller_bond_sats
             ),
-        }),
-        lightning_action: None,
-    });
-    step_count += 1;
-
-    // Paso 2: Mostro genera Hold Invoice para el Vendedor (Monto + Bond + Fee)
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "hold_invoice_created".into(),
-        title: "Bloqueo de Garantía del Vendedor (Hold Invoice)".into(),
-        actor: Actor::Mostro,
-        order_status: "waiting_payment".into(),
-        description: format!(
-            "Mostro genera Hold Invoice de {} sats ({} trade + {} fianza + {} fee/2). Vendedor la paga para activar la orden.",
-            financials.seller_total_locked_sats,
-            financials.trade_amount_sats,
-            financials.seller_bond_sats,
-            financials.fee_per_side_sats
-        ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: bot.into(),
-            recipient: Some(seller_npub.into()),
-            summary: format!("Hold invoice enviada: {} sats", financials.seller_total_locked_sats),
-        }),
-        lightning_action: Some(LightningActionSummary {
-            action: "HoldInvoiceCreated".into(),
-            amount_sats: financials.seller_total_locked_sats,
-            payment_hash: seller_hash.clone(),
-            status: "OPEN".into(),
-        }),
-    });
-    step_count += 1;
-
-    // Paso 3: Vendedor paga Hold Invoice -> Orden pasa a Active en Relays
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "hold_invoice_accepted".into(),
-        title: "Fondo Bloqueado y Publicación en Relays".into(),
-        actor: Actor::Seller,
-        order_status: "active".into(),
-        description: "El nodo Lightning acepta y congela los fondos del vendedor. Mostro publica la orden en los relays Nostr (Kind 38383).".into(),
-        nostr_event: Some(NostrEventSummary {
-            kind: 38383,
-            event_id: hash_hex(&format!("{}-order-kind38383", order_id)),
-            sender: bot.into(),
-            recipient: None,
-            summary: format!("Kind 38383: Orden disponible para compra ({}, {} sats)", financials.fiat_currency, financials.trade_amount_sats),
-        }),
-        lightning_action: Some(LightningActionSummary {
-            action: "HoldInvoiceAccepted".into(),
-            amount_sats: financials.seller_total_locked_sats,
-            payment_hash: seller_hash.clone(),
-            status: "ACCEPTED".into(),
-        }),
-    });
-    step_count += 1;
+            Some(message(
+                bot,
+                seller_npub,
+                format!("pay-bond-invoice: {} sats", fin.seller_bond_sats),
+            )),
+            lightning(
+                "MakerBondHoldInvoiceAccepted",
+                fin.seller_bond_sats,
+                &maker_bond_hash,
+                "ACCEPTED",
+            ),
+        );
+    }
+    push(
+        "order_published",
+        "Publicación de la orden en los relays",
+        Actor::Mostro,
+        "pending",
+        "Mostro confirma la orden al vendedor y publica el evento público de la orden (kind 38383) con estado pending. Todavía no existe depósito: se crea cuando alguien toma la orden.".into(),
+        Some(public(
+            KIND_ORDER,
+            format!(
+                "Orden pending: venta de {} sats por {} {}",
+                fin.trade_amount_sats, fin.fiat_amount, fin.fiat_currency
+            ),
+        )),
+        None,
+    );
 
     if scenario == SimulationScenario::SellerCancellation {
-        steps.push(SimulationStep {
-            step_number: step_count,
-            action_code: "cancel_order".into(),
-            title: "Cancelación de Orden por Vendedor".into(),
-            actor: Actor::Seller,
-            order_status: "canceled".into(),
-            description: "El vendedor cancela la orden antes de que nadie la tome. Mostro cancela la Hold Invoice sin costo.".into(),
-            nostr_event: Some(NostrEventSummary {
-                kind: 4,
-                event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                sender: seller_npub.into(),
-                recipient: Some(bot.into()),
-                summary: "Order Action: Cancel".into(),
-            }),
-            lightning_action: Some(LightningActionSummary {
-                action: "HoldInvoiceCanceled".into(),
-                amount_sats: financials.seller_total_locked_sats,
-                payment_hash: seller_hash,
-                status: "CANCELED".into(),
-            }),
-        });
+        push(
+            "cancel_order",
+            "Cancelación de la orden por el vendedor (cancel)",
+            Actor::Seller,
+            "canceled",
+            if fin.seller_bond_sats > 0 {
+                format!(
+                    "El vendedor cancela antes de que nadie tome la orden. No hay depósito que devolver; Mostro cancela la factura de garantía de {} sats y el vendedor recupera esos fondos sin coste.",
+                    fin.seller_bond_sats
+                )
+            } else {
+                "El vendedor cancela antes de que nadie tome la orden. No hay depósito ni garantía bloqueados, así que no se mueve ningún sat.".into()
+            },
+            Some(message(seller_npub, bot, "cancel".into())),
+            if fin.seller_bond_sats > 0 {
+                lightning(
+                    "MakerBondHoldInvoiceCanceled",
+                    fin.seller_bond_sats,
+                    &maker_bond_hash,
+                    "CANCELED",
+                )
+            } else {
+                None
+            },
+        );
 
         return Ok(SimulationReport {
             scenario,
@@ -372,349 +433,357 @@ pub fn run_simulation(
         });
     }
 
-    // Paso 4: Comprador toma la orden
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "take_sell".into(),
-        title: "Comprador Acepta la Oferta (TakeSell)".into(),
-        actor: Actor::Buyer,
-        order_status: "waiting_buyer_invoice".into(),
-        description: format!(
-            "El comprador envía TakeSell a Mostro y aporta una factura Lightning de {} sats para recibir sus fondos.",
-            financials.trade_amount_sats
-        ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: buyer_npub.into(),
-            recipient: Some(bot.into()),
-            summary: format!("Order Action: TakeSell ({}) con factura de destino", order_id),
-        }),
-        lightning_action: None,
-    });
-    step_count += 1;
-
-    // Paso 5: Comprador paga su Fianza (Bond)
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "buyer_bond_accepted".into(),
-        title: "Bloqueo de Garantía del Comprador".into(),
-        actor: Actor::Buyer,
-        order_status: "waiting_buyer_invoice".into(),
-        description: format!(
-            "El comprador paga la factura de fianza ({} sats bond + {} fee/2 = {} sats total).",
-            financials.buyer_bond_sats,
-            financials.fee_per_side_sats,
-            financials.buyer_total_locked_sats
-        ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: bot.into(),
-            recipient: Some(buyer_npub.into()),
-            summary: format!(
-                "Pago de fianza comprador {} sats confirmado",
-                financials.buyer_total_locked_sats
+    // 2. A buyer takes the order.
+    push(
+        "take_sell",
+        "El comprador toma la orden (take-sell)",
+        Actor::Buyer,
+        if fin.buyer_bond_sats > 0 {
+            "waiting-taker-bond"
+        } else {
+            "waiting-buyer-invoice"
+        },
+        if fin.buyer_bond_sats > 0 {
+            "El comprador envía take-sell a Mostro. En los relays la orden sigue anunciada como pending hasta que el comprador paga su garantía.".to_string()
+        } else {
+            "El comprador envía take-sell a Mostro, que fija los sats de la operación y pasa la orden a in-progress en los relays.".to_string()
+        },
+        Some(message(buyer_npub, bot, format!("take-sell: {order_id}"))),
+        None,
+    );
+    if fin.buyer_bond_sats > 0 {
+        push(
+            "taker_bond_accepted",
+            "Garantía del comprador",
+            Actor::Buyer,
+            "waiting-taker-bond",
+            format!(
+                "Mostro envía al comprador una factura retenida de garantía por {} sats (pay-bond-invoice) y el comprador la paga. No incluye comisión: la del comprador se descuenta de lo que recibe. Con la garantía pagada, la orden pasa a in-progress en los relays.",
+                fin.buyer_bond_sats
             ),
-        }),
-        lightning_action: Some(LightningActionSummary {
-            action: "BuyerBondHoldInvoiceAccepted".into(),
-            amount_sats: financials.buyer_total_locked_sats,
-            payment_hash: buyer_hash.clone(),
-            status: "ACCEPTED".into(),
-        }),
-    });
-    step_count += 1;
-
-    // Paso 6: Mostro coordina intercambio Fiat
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "fiat_coordination".into(),
-        title: "Coordinación de Pago Fiat".into(),
-        actor: Actor::Mostro,
-        order_status: "waiting_payment".into(),
-        description: format!(
-            "Mostro envía los datos de pago al comprador: {} {} vía {}. Se inicia ventana de pago.",
-            financials.fiat_amount, financials.fiat_currency, payment_method
-        ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: bot.into(),
-            recipient: Some(buyer_npub.into()),
-            summary: format!(
-                "Detalles de pago compartidos: {} {}",
-                financials.fiat_amount, financials.fiat_currency
+            Some(message(
+                bot,
+                buyer_npub,
+                format!("pay-bond-invoice: {} sats", fin.buyer_bond_sats),
+            )),
+            lightning(
+                "BuyerBondHoldInvoiceAccepted",
+                fin.buyer_bond_sats,
+                &taker_bond_hash,
+                "ACCEPTED",
             ),
-        }),
-        lightning_action: None,
-    });
-    step_count += 1;
-
-    // Paso 7: Comprador envía dinero fiat y confirma
-    steps.push(SimulationStep {
-        step_number: step_count,
-        action_code: "fiat_sent".into(),
-        title: "Comprador Notifica Pago Fiat (FiatSent)".into(),
-        actor: Actor::Buyer,
-        order_status: "fiat_sent".into(),
-        description: format!(
-            "El comprador realiza la transferencia bancaria de {} {} y envía FiatSent a Mostro.",
-            financials.fiat_amount, financials.fiat_currency
+        );
+    }
+    push(
+        "add_invoice",
+        "Factura de cobro del comprador (add-invoice)",
+        Actor::Buyer,
+        "waiting-buyer-invoice",
+        format!(
+            "Mostro pide al comprador una factura Lightning por {} sats: los {} sats de la operación menos su mitad de la comisión ({} sats). El comprador la envía con add-invoice.",
+            fin.buyer_receives_sats, fin.trade_amount_sats, fin.fee_per_side_sats
         ),
-        nostr_event: Some(NostrEventSummary {
-            kind: 4,
-            event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-            sender: buyer_npub.into(),
-            recipient: Some(bot.into()),
-            summary: "Order Action: FiatSent".into(),
-        }),
-        lightning_action: None,
-    });
-    step_count += 1;
+        Some(message(
+            buyer_npub,
+            bot,
+            format!("add-invoice: factura de {} sats", fin.buyer_receives_sats),
+        )),
+        None,
+    );
 
-    match scenario {
+    // 3. Escrow: created only now, and it is the seller who funds it.
+    push(
+        "hold_invoice_created",
+        "Depósito del vendedor (pay-invoice)",
+        Actor::Mostro,
+        "waiting-payment",
+        format!(
+            "Mostro envía al vendedor la factura retenida del depósito por {} sats: {} sats de la operación más su mitad de la comisión ({} sats).",
+            fin.seller_hold_invoice_sats, fin.trade_amount_sats, fin.fee_per_side_sats
+        ),
+        Some(message(
+            bot,
+            seller_npub,
+            format!("pay-invoice: {} sats", fin.seller_hold_invoice_sats),
+        )),
+        lightning(
+            "HoldInvoiceCreated",
+            fin.seller_hold_invoice_sats,
+            &escrow_hash,
+            "OPEN",
+        ),
+    );
+    push(
+        "hold_invoice_accepted",
+        "Fondos del vendedor retenidos",
+        Actor::Seller,
+        "active",
+        "El vendedor paga la factura retenida. Los sats quedan bloqueados en su canal, sin llegar a Mostro, y la operación pasa a active: Mostro avisa a ambas partes y les da la clave de la contraparte para hablar entre ellos.".into(),
+        Some(message(
+            bot,
+            buyer_npub,
+            "hold-invoice-payment-accepted".into(),
+        )),
+        lightning(
+            "HoldInvoiceAccepted",
+            fin.seller_hold_invoice_sats,
+            &escrow_hash,
+            "ACCEPTED",
+        ),
+    );
+
+    // 4. Fiat leg, off-chain between the parties.
+    push(
+        "fiat_sent",
+        "El comprador avisa del pago fiat (fiat-sent)",
+        Actor::Buyer,
+        "fiat-sent",
+        format!(
+            "El comprador paga {} {} por {} fuera de Mostro y envía fiat-sent. Mostro se lo comunica al vendedor (fiat-sent-ok).",
+            fin.fiat_amount, fin.fiat_currency, payment_method
+        ),
+        Some(message(buyer_npub, bot, "fiat-sent".into())),
+        None,
+    );
+
+    let release_bonds = |push: &mut PushStep<'_>, final_status: &str, release_taker: bool| {
+        if fin.seller_bond_sats > 0 {
+            push(
+                "maker_bond_released",
+                "Devolución de la garantía del vendedor",
+                Actor::Mostro,
+                final_status,
+                format!(
+                    "Mostro cancela la factura de garantía del vendedor: recupera sus {} sats íntegros.",
+                    fin.seller_bond_sats
+                ),
+                None,
+                lightning(
+                    "MakerBondHoldInvoiceCanceled",
+                    fin.seller_bond_sats,
+                    &maker_bond_hash,
+                    "CANCELED",
+                ),
+            );
+        }
+        if release_taker && fin.buyer_bond_sats > 0 {
+            push(
+                "taker_bond_released",
+                "Devolución de la garantía del comprador",
+                Actor::Mostro,
+                final_status,
+                format!(
+                    "Mostro cancela la factura de garantía del comprador: recupera sus {} sats íntegros.",
+                    fin.buyer_bond_sats
+                ),
+                None,
+                lightning(
+                    "BuyerBondHoldInvoiceCanceled",
+                    fin.buyer_bond_sats,
+                    &taker_bond_hash,
+                    "CANCELED",
+                ),
+            );
+        }
+    };
+
+    let (final_status, duration_simulated_ms) = match scenario {
         SimulationScenario::HappyPath => {
-            // Paso 8: Vendedor verifica fondos y libera
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "release".into(),
-                title: "Vendedor Confirma Recepción y Libera (Release)".into(),
-                actor: Actor::Seller,
-                order_status: "settled_hold_invoice".into(),
-                description: format!(
-                    "El vendedor comprueba en su aplicación de banca la recepción de los {} {} y envía Release a Mostro.",
-                    financials.fiat_amount, financials.fiat_currency
+            push(
+                "release",
+                "El vendedor confirma el cobro y libera (release)",
+                Actor::Seller,
+                "settled-hold-invoice",
+                format!(
+                    "El vendedor comprueba que recibió {} {} y envía release. Mostro cobra la factura retenida: los {} sats pasan al nodo.",
+                    fin.fiat_amount, fin.fiat_currency, fin.seller_hold_invoice_sats
                 ),
-                nostr_event: Some(NostrEventSummary {
-                kind: 4,
-                event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                sender: seller_npub.into(),
-                recipient: Some(bot.into()),
-                summary: "Order Action: Release".into(),
-            }),
-                lightning_action: Some(LightningActionSummary {
-                    action: "SellerHoldInvoiceSettled".into(),
-                    amount_sats: financials.seller_total_locked_sats,
-                    payment_hash: seller_hash,
-                    status: "SETTLED".into(),
-                }),
-            });
-            step_count += 1;
-
-            // Paso 9: Liquidación y Entrega de Satoshis
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "success".into(),
-                title: "Liquidación Lightning y Devolución de Fianzas".into(),
-                actor: Actor::Mostro,
-                order_status: "success".into(),
-                description: format!(
-                    "Mostro paga {} sats a la factura del comprador, devuelve {} sats de fianza al vendedor y {} sats al comprador. Comisión de {} sats recaudada (Dev fee: {} sats).",
-                    financials.trade_amount_sats,
-                    financials.seller_bond_sats,
-                    financials.buyer_bond_sats,
-                    financials.total_mostro_fee_sats,
-                    financials.dev_fee_sats
+                Some(message(seller_npub, bot, "release".into())),
+                lightning(
+                    "SellerHoldInvoiceSettled",
+                    fin.seller_hold_invoice_sats,
+                    &escrow_hash,
+                    "SETTLED",
                 ),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 38383,
-                    event_id: hash_hex(&format!("{}-step-success", order_id)),
-                    sender: bot.into(),
-                    recipient: None,
-                    summary: "Order Status: Success (Trade finalizado)".into(),
-                }),
-                lightning_action: Some(LightningActionSummary {
-                    action: "PayoutToBuyerDispatched".into(),
-                    amount_sats: financials.trade_amount_sats,
-                    payment_hash: buyer_hash,
-                    status: "SETTLED".into(),
-                }),
-            });
-
-            Ok(SimulationReport {
-                scenario,
-                order_id,
-                bot_npub: bot.into(),
-                payment_method,
-                financials,
-                steps,
-                final_status: "success".into(),
-                is_success: true,
-                duration_simulated_ms: 2400,
-                timestamp_unix: now_unix,
-                simulation_mode: SIMULATION_MODE_LABEL.into(),
-                disclaimer: SIMULATION_DISCLAIMER.into(),
-            })
+            );
+            push(
+                "success",
+                "Pago al comprador y cierre",
+                Actor::Mostro,
+                "success",
+                format!(
+                    "Mostro paga {} sats a la factura del comprador y publica la orden como success. El nodo retiene {} sats de comisión ({} de cada parte), de los que {} sats se envían al fondo de desarrollo de Mostro cuando el nodo opera en mainnet.",
+                    fin.buyer_receives_sats,
+                    fin.total_mostro_fee_sats,
+                    fin.fee_per_side_sats,
+                    fin.dev_fee_sats
+                ),
+                Some(public(KIND_ORDER, "Orden success".into())),
+                lightning(
+                    "PayoutToBuyerDispatched",
+                    fin.buyer_receives_sats,
+                    &payout_hash,
+                    "SUCCEEDED",
+                ),
+            );
+            release_bonds(&mut push, "success", true);
+            ("success", 3200)
         }
         SimulationScenario::DisputeSettledForBuyer => {
-            // Disputa abierta
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "dispute_opened".into(),
-                title: "Apertura de Disputa (Dispute)".into(),
-                actor: Actor::Seller,
-                order_status: "dispute".into(),
-                description: "El vendedor no ve reflejado el dinero en el tiempo límite y abre una disputa ante Mostro.".into(),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 4,
-                    event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                    sender: seller_npub.into(),
-                    recipient: Some(bot.into()),
-                    summary: "Order Action: Dispute (Conflicto abierto)".into(),
-                }),
-                lightning_action: None,
-            });
-            step_count += 1;
-
-            // Solver interviene y falla a favor del comprador
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "adm_settle".into(),
-                title: "Resolución del Mediador a Favor del Comprador (AdmSettle)".into(),
-                actor: Actor::Solver,
-                order_status: "settled_hold_invoice".into(),
-                description: "El mediador (Solver) comprueba justificante bancario oficial válido. Emite resolución AdmSettle para liberar los satoshis al comprador.".into(),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 4,
-                    event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                    sender: solver_npub.into(),
-                    recipient: Some(bot.into()),
-                    summary: "Admin Action: AdmSettle (Fallo favorable a comprador)".into(),
-                }),
-                lightning_action: Some(LightningActionSummary {
-                    action: "SellerHoldInvoiceSettledBySolver".into(),
-                    amount_sats: financials.seller_total_locked_sats,
-                    payment_hash: seller_hash,
-                    status: "SETTLED".into(),
-                }),
-            });
-            step_count += 1;
-
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "dispute_payout".into(),
-                title: "Liquidación Final Forzada".into(),
-                actor: Actor::Mostro,
-                order_status: "success".into(),
-                description: format!(
-                    "Mostro ejecuta el fallo del solver: entrega {} sats al comprador, devuelve fianza al comprador y retiene o penaliza según política.",
-                    financials.trade_amount_sats
+            push(
+                "dispute_opened",
+                "Apertura de disputa (dispute)",
+                Actor::Buyer,
+                "dispute",
+                "El vendedor no libera tras recibir el pago y el comprador abre una disputa. Mostro avisa a ambas partes y publica el evento público de la disputa (kind 38386) con estado initiated; ese evento no nombra la orden.".into(),
+                Some(public(
+                    KIND_DISPUTE,
+                    format!("Disputa {dispute_id} initiated, iniciada por el comprador"),
+                )),
+                None,
+            );
+            push(
+                "admin_take_dispute",
+                "Un solver toma la disputa (admin-take-dispute)",
+                Actor::Solver,
+                "dispute",
+                "Un solver registrado en el nodo toma la disputa con su cliente de mediación. Mostro le entrega los datos de la orden y las claves de las partes para hablar con ellas, y la disputa pasa a in-progress.".into(),
+                Some(message(
+                    solver_npub,
+                    bot,
+                    format!("admin-take-dispute: {dispute_id}"),
+                )),
+                None,
+            );
+            push(
+                "adm_settle",
+                "El solver resuelve a favor del comprador (admin-settle)",
+                Actor::Solver,
+                "settled-by-admin",
+                format!(
+                    "Con las pruebas del pago fiat, el solver envía admin-settle. Mostro cobra la factura retenida del vendedor ({} sats) sin su intervención.",
+                    fin.seller_hold_invoice_sats
                 ),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 38383,
-                    event_id: hash_hex(&format!("{}-dispute-success", order_id)),
-                    sender: bot.into(),
-                    recipient: None,
-                    summary: "Order Status: Success (Resuelto por mediación)".into(),
-                }),
-                lightning_action: Some(LightningActionSummary {
-                    action: "DisputePayoutDispatched".into(),
-                    amount_sats: financials.trade_amount_sats,
-                    payment_hash: buyer_hash,
-                    status: "SETTLED".into(),
-                }),
-            });
-
-            Ok(SimulationReport {
-                scenario,
-                order_id,
-                bot_npub: bot.into(),
-                payment_method,
-                financials,
-                steps,
-                final_status: "success_dispute_resolved".into(),
-                is_success: true,
-                duration_simulated_ms: 3800,
-                timestamp_unix: now_unix,
-                simulation_mode: SIMULATION_MODE_LABEL.into(),
-                disclaimer: SIMULATION_DISCLAIMER.into(),
-            })
+                Some(message(
+                    solver_npub,
+                    bot,
+                    format!("admin-settle: {order_id}"),
+                )),
+                lightning(
+                    "SellerHoldInvoiceSettled",
+                    fin.seller_hold_invoice_sats,
+                    &escrow_hash,
+                    "SETTLED",
+                ),
+            );
+            push(
+                "dispute_payout",
+                "Pago al comprador tras la resolución",
+                Actor::Mostro,
+                "success",
+                format!(
+                    "Mostro paga {} sats a la factura del comprador, cierra la disputa como settled y publica la orden como success. La comisión de {} sats se cobra igual que en una operación normal.",
+                    fin.buyer_receives_sats, fin.total_mostro_fee_sats
+                ),
+                Some(public(KIND_ORDER, "Orden success".into())),
+                lightning(
+                    "PayoutToBuyerDispatched",
+                    fin.buyer_receives_sats,
+                    &payout_hash,
+                    "SUCCEEDED",
+                ),
+            );
+            release_bonds(&mut push, "success", true);
+            ("success_dispute_resolved", 4800)
         }
         SimulationScenario::DisputeRefundedToSeller => {
-            // Disputa abierta
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "dispute_opened".into(),
-                title: "Apertura de Disputa por Falta de Pago Real".into(),
-                actor: Actor::Seller,
-                order_status: "dispute".into(),
-                description: "El comprador marcó FiatSent pero nunca transfirió los fondos. El vendedor abre disputa.".into(),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 4,
-                    event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                    sender: seller_npub.into(),
-                    recipient: Some(bot.into()),
-                    summary: "Order Action: Dispute".into(),
-                }),
-                lightning_action: None,
-            });
-            step_count += 1;
-
-            // Solver falla a favor del vendedor
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "adm_refund".into(),
-                title: "Resolución del Mediador con Devolución al Vendedor (AdmRefund)".into(),
-                actor: Actor::Solver,
-                order_status: "canceled".into(),
-                description: "El comprador no aportó evidencia bancaria legítima. El mediador emite AdmRefund para reembolsar los sats al vendedor y penalizar el bond del comprador.".into(),
-                nostr_event: Some(NostrEventSummary {
-                    kind: 4,
-                    event_id: hash_hex(&format!("{}-step-{}", order_id, step_count)),
-                    sender: solver_npub.into(),
-                    recipient: Some(bot.into()),
-                    summary: "Admin Action: AdmRefund".into(),
-                }),
-                lightning_action: Some(LightningActionSummary {
-                    action: "SellerHoldInvoiceCanceled".into(),
-                    amount_sats: financials.seller_total_locked_sats,
-                    payment_hash: seller_hash,
-                    status: "CANCELED".into(),
-                }),
-            });
-            step_count += 1;
-
-            steps.push(SimulationStep {
-                step_number: step_count,
-                action_code: "buyer_bond_slashed".into(),
-                title: "Ejecución de Penalización de Fianza del Comprador".into(),
-                actor: Actor::Mostro,
-                order_status: "canceled".into(),
-                description: format!(
-                    "Mostro ejecuta la penalización dictada por el mediador: liquida la factura de fianza del comprador ({} sats) reteniendo los fondos por incumplimiento.",
-                    financials.buyer_total_locked_sats
+            push(
+                "dispute_opened",
+                "Apertura de disputa por falta de pago (dispute)",
+                Actor::Seller,
+                "dispute",
+                "El comprador marcó el pago como enviado, pero el vendedor no lo recibe y abre una disputa. Mostro avisa a ambas partes y publica el evento público de la disputa (kind 38386) con estado initiated.".into(),
+                Some(public(
+                    KIND_DISPUTE,
+                    format!("Disputa {dispute_id} initiated, iniciada por el vendedor"),
+                )),
+                None,
+            );
+            push(
+                "admin_take_dispute",
+                "Un solver toma la disputa (admin-take-dispute)",
+                Actor::Solver,
+                "dispute",
+                "Un solver registrado en el nodo toma la disputa y pide al comprador el comprobante del pago. La disputa pasa a in-progress.".into(),
+                Some(message(
+                    solver_npub,
+                    bot,
+                    format!("admin-take-dispute: {dispute_id}"),
+                )),
+                None,
+            );
+            push(
+                "adm_refund",
+                "El solver devuelve los fondos al vendedor (admin-cancel)",
+                Actor::Solver,
+                "canceled-by-admin",
+                format!(
+                    "Sin comprobante válido, el solver envía admin-cancel. Mostro cancela la factura retenida y los {} sats vuelven al vendedor; nadie paga comisión. La orden se publica como canceled y la disputa como seller-refunded.",
+                    fin.seller_hold_invoice_sats
                 ),
-                nostr_event: None,
-                lightning_action: Some(LightningActionSummary {
-                    action: "BuyerBondHoldInvoiceSettled".into(),
-                    amount_sats: financials.buyer_total_locked_sats,
-                    payment_hash: buyer_hash,
-                    status: "SETTLED".into(),
-                }),
-            });
-
-            Ok(SimulationReport {
-                scenario,
-                order_id,
-                bot_npub: bot.into(),
-                payment_method,
-                financials,
-                steps,
-                final_status: "refunded_to_seller".into(),
-                is_success: true,
-                duration_simulated_ms: 3600,
-                timestamp_unix: now_unix,
-                simulation_mode: SIMULATION_MODE_LABEL.into(),
-                disclaimer: SIMULATION_DISCLAIMER.into(),
-            })
+                Some(message(
+                    solver_npub,
+                    bot,
+                    format!("admin-cancel: {order_id}"),
+                )),
+                lightning(
+                    "SellerHoldInvoiceCanceled",
+                    fin.seller_hold_invoice_sats,
+                    &escrow_hash,
+                    "CANCELED",
+                ),
+            );
+            if fin.buyer_bond_sats > 0 {
+                push(
+                    "buyer_bond_slashed",
+                    "Ejecución de la garantía del comprador",
+                    Actor::Mostro,
+                    "canceled",
+                    format!(
+                        "El solver indica en su resolución que el comprador pierde la garantía. Mostro cobra esa factura de {} sats: el nodo conserva la mitad y el vendedor puede reclamar el resto con una factura propia.",
+                        fin.buyer_bond_sats
+                    ),
+                    None,
+                    lightning(
+                        "BuyerBondHoldInvoiceSettled",
+                        fin.buyer_bond_sats,
+                        &taker_bond_hash,
+                        "SETTLED",
+                    ),
+                );
+            }
+            release_bonds(&mut push, "canceled", false);
+            ("refunded_to_seller", 5100)
         }
-        SimulationScenario::SellerCancellation => unreachable!(),
-    }
+        SimulationScenario::SellerCancellation => unreachable!("handled above"),
+    };
+
+    Ok(SimulationReport {
+        scenario,
+        order_id,
+        bot_npub: bot.into(),
+        payment_method,
+        financials,
+        steps,
+        final_status: final_status.into(),
+        is_success: true,
+        duration_simulated_ms,
+        timestamp_unix: now_unix,
+        simulation_mode: SIMULATION_MODE_LABEL.into(),
+        disclaimer: SIMULATION_DISCLAIMER.into(),
+    })
 }
 
-/// Runs a simulation invoked via CLI, performing strict validation on all arguments.
-/// Never defaults silently when explicit invalid scenarios or amounts are supplied.
 pub fn run_cli_simulation(
     root: &std::path::Path,
     args: &[String],

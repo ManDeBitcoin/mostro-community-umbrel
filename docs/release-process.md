@@ -5,7 +5,7 @@ El manifiesto de la tienda solo debe anunciar una versión cuya imagen multi-arq
 ## Regla de publicación
 
 1. Preparar los cambios y escribir `docs/release-notes.md` con el encabezado `# Mostro Community Manager vX.Y.Z`. **No cambiar todavía** la versión de `umbrel-app.yml`, las cuatro imágenes de `docker-compose.yml` ni la versión anunciada en el README.
-2. Ejecutar `./scripts/check.sh` y `python3 -m unittest discover -s scripts/tests`. Crear y publicar el tag anotado `vX.Y.Z` en el commit probado.
+2. Ejecutar `./scripts/check.sh` y `python3 -m unittest discover -s scripts/tests`. Abrir el PR hacia `main`: `image-check.yml` construye la imagen de amd64 y arm64 y ejecuta las pruebas de humo sin publicar nada. El mismo workflow corre en `main` para que los PR partan de su caché de construcción. No es un check obligatorio: los PR de promoción no tocan código y no lo disparan. Con el PR fusionado, crear y publicar el tag anotado `vX.Y.Z` en el commit probado.
 3. `publish.yml` rechaza un tag si el manifiesto ya anuncia la nueva versión. Construye y prueba amd64 y arm64, publica la imagen, verifica acceso anónimo a ambas arquitecturas y crea la release.
 4. Solo después de esas comprobaciones, el mismo workflow actualiza en `main` el manifiesto, las cuatro referencias de Compose, las notas de Umbrel y el README. Si la publicación o la promoción fallan, la tienda conserva la versión anterior.
 5. `store-guard.yml` comprueba que cualquier versión anunciada en la tienda tenga una imagen pública para ambas arquitecturas. `main` exige ese check antes de aceptar un commit; la promoción automática lo ejecuta en una rama temporal antes de avanzar `main`.

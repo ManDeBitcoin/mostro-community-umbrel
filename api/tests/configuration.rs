@@ -64,8 +64,14 @@ fn renderer_escapes_text_and_maps_percentage_units() {
         doc["lightning"]["escrow_deadline_margin_blocks"].as_integer(),
         Some(24)
     );
-    // In Mostro v0.19.0, protocol v1 was removed and transport is exclusively protocol v2
+    // Since Mostro v0.19.0 protocol v1 is gone and the transport is always protocol v2
     assert!(doc["mostro"].get("transport").is_none());
+    // The fixture has no website: an empty value is left out instead of
+    // making mostrod warn about an invalid URL on every start.
+    assert!(doc["mostro"].get("website").is_none());
+    assert_eq!(doc["mostro"]["about"].as_str(), Some("Mercado local"));
+    // Optional v0.19.2 key the Manager does not manage.
+    assert!(doc["mostro"].get("serbero_pubkey").is_none());
     assert_eq!(
         doc["anti_abuse_bond"]["maker_bond_payment_timeout_seconds"].as_integer(),
         Some(900)
@@ -139,4 +145,130 @@ fn corrupt_persistence_fails_closed() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("community.json"), "not JSON").unwrap();
     assert!(Store::open(root.path().into()).is_err());
+}
+
+/// The renderer embeds the v0.19.0 template (MIT). It is valid for the pinned
+/// mostrod v0.19.2 as long as both templates describe the same settings: this
+/// fails the day upstream adds, removes or changes a default, so the embedded
+/// template cannot silently fall behind the daemon that is shipped.
+#[test]
+fn embedded_template_is_equivalent_to_the_pinned_upstream_release() {
+    let embedded: toml::Value =
+        toml::from_str(include_str!("../../config/upstream/settings.v0.19.0.toml")).unwrap();
+    let pinned: toml::Value =
+        toml::from_str(include_str!("../../config/upstream/settings.v0.19.2.toml")).unwrap();
+    assert_eq!(embedded, pinned);
+
+    // Same for the admin gRPC contract the API is compiled against.
+    assert_eq!(
+        include_str!("../../config/upstream/admin.v0.19.0.proto"),
+        include_str!("../../config/upstream/admin.v0.19.2.proto")
+    );
+
+    // The pin recorded for packaging matches the constant the API reports.
+    let versions: serde_json::Value =
+        serde_json::from_str(include_str!("../../config/versions.json")).unwrap();
+    assert_eq!(
+        versions["mostro"]["version"],
+        mostro_community_api::daemon::MOSTRO_VERSION
+    );
+    assert_eq!(
+        versions["mostro"]["tag"],
+        format!("v{}", mostro_community_api::daemon::MOSTRO_VERSION)
+    );
+}
+
+#[test]
+fn optional_metadata_is_rendered_only_when_present() {
+    let mut c = config();
+    c.community.website = "https://comunidad.example".into();
+    c.community.about = "  ".into();
+    let rendered = render_settings(
+        &c,
+        "https://lnd:10009",
+        "/lnd/tls.cert",
+        "/lnd/admin.macaroon",
+    )
+    .unwrap();
+    let doc: toml::Value = toml::from_str(&rendered).unwrap();
+    assert_eq!(
+        doc["mostro"]["website"].as_str(),
+        Some("https://comunidad.example")
+    );
+    assert!(doc["mostro"].get("about").is_none());
+    assert_eq!(
+        doc["mostro"]["name"].as_str(),
+        Some(c.community.name.as_str())
+    );
+}
+
+#[test]
+fn saving_requires_a_dev_fee_mostrod_accepts() {
+    let mut c = config();
+    assert!(c.validate_for_save().is_ok());
+
+    // mostrod refuses to start below 10 % of the node fee.
+    c.market.dev_fee_bps = 999;
+    assert!(c.validate().is_ok(), "stored drafts must still open");
+    assert!(c.validate_for_save().is_err());
+    // The renderer keeps such a draft loadable by raising it to the minimum.
+    let rendered = render_settings(
+        &c,
+        "https://lnd:10009",
+        "/lnd/tls.cert",
+        "/lnd/admin.macaroon",
+    )
+    .unwrap();
+    let doc: toml::Value = toml::from_str(&rendered).unwrap();
+    assert_eq!(doc["mostro"]["dev_fee_percentage"].as_float(), Some(0.1));
+
+    c.market.dev_fee_bps = 1_000;
+    assert!(c.validate_for_save().is_ok());
+    c.market.dev_fee_bps = 10_000;
+    assert!(c.validate_for_save().is_ok());
+    c.market.dev_fee_bps = 10_001;
+    assert!(c.validate_for_save().is_err());
+}
+
+/// Every place that names the pinned mostrod release agrees with
+/// `config/versions.json`. Files outside `api/` and `config/` are not part of
+/// the Docker build context of the API stage, so they are checked only when
+/// present (a normal checkout).
+#[test]
+fn every_pin_of_the_daemon_release_agrees() {
+    let versions: serde_json::Value =
+        serde_json::from_str(include_str!("../../config/versions.json")).unwrap();
+    let version = versions["mostro"]["version"].as_str().unwrap();
+    let amd64 = versions["mostro"]["linux_amd64_sha256"].as_str().unwrap();
+    let arm64 = versions["mostro"]["linux_arm64_sha256"].as_str().unwrap();
+    assert_eq!(amd64.len(), 64);
+    assert_eq!(arm64.len(), 64);
+
+    let notice = include_str!("../../config/upstream/NOTICE-mostrod.md");
+    assert!(notice.contains(&format!("Version: {version}")));
+    assert!(notice.contains(&format!("/tree/v{version}")));
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let read = |relative: &str| std::fs::read_to_string(root.join(relative)).ok();
+    for dockerfile in ["docker/Dockerfile.umbrel", "docker/Dockerfile.mostro"] {
+        if let Some(text) = read(dockerfile) {
+            assert!(
+                text.contains(&format!("/releases/download/v{version}/")),
+                "{dockerfile} downloads another release"
+            );
+            assert!(text.contains(amd64), "{dockerfile}: amd64 checksum");
+            assert!(text.contains(arm64), "{dockerfile}: arm64 checksum");
+        }
+    }
+    for script in [
+        "scripts/container-smoke.sh",
+        "scripts/verify-mostro-image.sh",
+    ] {
+        if let Some(text) = read(script) {
+            assert!(
+                text.contains(&format!("mostro p2p {version}")),
+                "{script} expects another version"
+            );
+        }
+    }
 }

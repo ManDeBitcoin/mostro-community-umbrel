@@ -280,5 +280,122 @@ El operador ejecutó el script con `sudo` y obtuvo: `Verificación aprobada: ima
   - Guía completa de despliegue y manual de operaciones redactado en `docs/DEPLOYMENT.md`.
 - Reporte detallado generado en `/tmp/mostro-gemini-module5-report.md`.
 
+## Mostro v0.19.2 e interoperabilidad con apps (2026-10-03 y 2026-10-04)
 
+Validación previa a la versión 1.0.12. El nodo en producción no se tocó: todo se ejecutó en un entorno regtest aislado en el mismo equipo, con puertos locales y una identidad desechable.
 
+### Binario y configuración
+
+- Binarios oficiales `mostrod` v0.19.2 descargados de la release de GitHub. SHA-256 calculados sobre los artefactos y coincidentes con `manifest.txt`: amd64 `4d9aa45bbbca12a16024d72d2bf4f5fcb243196226750c50b741d035ffc2c071`, arm64 `73c69e18f9d417e2e23347770b68be942eb1e28fd69d7180a54d18e9409d6c31`.
+- Firma GPG de `manifest.txt` válida con la clave `1E41631D137BA2ADE55344F73852B843679AD6F0` (negrunch). La clave no está certificada por una cadena de confianza propia.
+- El binario amd64 responde `mostro p2p 0.19.2`. El de arm64 no se ejecutó.
+- `settings.toml` generado por el Manager y cargado por el binario real: `Settings correctly loaded!` y `Transport: nip44 (protocol v2, event kind 14)`.
+- Entre v0.19.0 y v0.19.2 no cambian las migraciones de base de datos ni `proto/admin.proto`, y la plantilla de configuración solo gana un bloque comentado.
+
+### Ciclo completo en regtest
+
+Bitcoin Core 31.1, tres nodos LND 0.21.3-beta (nodo de Mostro, vendedor y comprador) con canales abiertos, un relay Nostr local y un cliente de prueba de protocolo v2 en modo de privacidad total.
+
+- Trece variantes de `new-order`, con los resultados de la tabla de `docs/INTEGRACION-APPS.md`, sección 6.2. La combinación de sats fijos y prima distinta de cero devuelve `cant-do: invalid_parameters`; con `amount = 0` la orden se acepta.
+- Operación de venta de 50 USD con prima +5 % y comisión 0,6 %: orden de 56 076 sats, factura retenida de 56 244 sats pagada por el vendedor y 55 908 sats recibidos por el comprador (factura `SETTLED`).
+- Disputa abierta por el comprador, tomada con `admin-take-dispute` y resuelta con `admin-settle` usando la clave del nodo. Eventos kind 38386 `initiated`, `in-progress` y `settled`.
+- El Manager, conectado al mismo relay, mostró las órdenes con sus estados (`pending`, `in-progress`, `success`, `canceled`), la disputa enlazada con su orden, los 26 mensajes de protocolo de la orden disputada y la versión 0.19.2 anunciada por el daemon.
+- Los eventos y mensajes capturados se guardan como fixtures en `api/tests/fixtures/mostrod-v0.19.2/` y los usan las pruebas de `api/tests/orders.rs` y `api/tests/chat.rs`.
+- Supervisión real: con `docker/mostro-entrypoint.sh` en modo de espera y el binario v0.19.2, la activación desde la API del Manager arrancó el daemon; al faltar el certificado de LND el daemon salió con código 1, el supervisor registró la caída y reintentó con pausa, y el panel informó «terminó con código 1 a los 1 s de arrancar y se está reiniciando». La desactivación desde la API devolvió el supervisor a la espera.
+
+### Ampliación del 4 de octubre
+
+Mismo entorno, con dos nodos `mostrod` v0.19.2: el anterior y otro con garantía del 3 % para ambas partes, mínimo de 1 000 sats y `pow_first_contact = 8`. Los dos `settings.toml` los generó el Manager. Todos los escenarios terminaron con el resultado esperado.
+
+Nodo sin garantía, cliente en privacidad total:
+
+- Venta tomada con la factura sin importe adjunta en `take-sell`: un solo `pay-invoice` al vendedor, estados públicos `pending` y `success`, y 35 078 sats cobrados sobre 35 184.
+- Orden de rango de 20 a 60 USD: tomarla sin importe devuelve `cant-do: out_of_range_sats_amount`; con `{"amount": 30}` se completa.
+- Orden de compra tomada con `take-buy` hasta `success`.
+- Disputa abierta por el vendedor y resuelta con `admin-cancel`: factura retenida `CANCELED`, disputa `seller-refunded`, orden `canceled`.
+- Cancelación de mutuo acuerdo con la operación activa: el depósito sigue retenido tras el primer `cancel` y se cancela con el segundo.
+- Tomar la propia orden (`invalid_pubkey`), tomar una orden ya tomada (`invalid_order_status`) y actuar sobre una orden inexistente (`not_found`).
+- Quien toma se retira antes de enviar la factura: la orden vuelve a publicarse `pending` y quien publicó recibe de nuevo `new-order`.
+- Sin respuesta: `take-sell` sin `id`, `new-order` sin payload y un evento con `created_at` 60 s atrás. Con 8 s de antigüedad se aceptó.
+
+Nodo con garantía y prueba de trabajo de primer contacto:
+
+- El evento de información anuncia los tags `bond_*`, `pow = 0` y `pow_first_contact = 8`, y el Manager los lee.
+- `new-order`, `take-sell` y `admin-take-dispute` sin prueba de trabajo no reciben respuesta. Con ella se aceptan, y los mensajes siguientes de esa clave ya no la necesitan.
+- Garantía de quien publica: la respuesta a `new-order` es `pay-bond-invoice` (1 056 sats, 900 s de vigencia) y la orden no se publica hasta pagarla. Garantía de quien toma: 300 s de vigencia, y la orden sigue `pending` hasta pagarla.
+- Venta completa con ambas garantías: depósito `SETTLED` y las dos garantías `CANCELED`, es decir, devueltas. Lo mismo tras una disputa resuelta con `admin-settle` sin penalización.
+- Dos tomas simultáneas de una misma orden: ambas reciben `pay-bond-invoice`, gana la primera garantía pagada y la otra parte recibe `canceled` con su factura de garantía `CANCELED`. Una tercera toma devuelve `invalid_order_status`.
+- Penalización: disputa resuelta con `admin-cancel` y `bond_resolution` contra el comprador. Garantía del comprador `SETTLED` (1 054 sats) y `bond-slashed`; el vendedor recibe `add-bond-invoice` por 527 sats, envía su factura y recibe `bond-invoice-accepted` y `bond-payout-completed` con la factura `SETTLED`. Su propia garantía queda `CANCELED`.
+- Orden de compra creada con la factura del comprador incluida: no hay petición `add-invoice` y el comprador cobra al liberarse la operación.
+- Vencimiento: quien toma no envía su factura. A los 915 s, con `expiration_seconds = 900`, recibe `canceled`, quien publicó recibe de nuevo `new-order`, la orden vuelve a `pending` y la garantía de quien tomó queda `CANCELED`.
+
+Modo de reputación, con un cliente propio que no usa mostro-core:
+
+- Venta completa con clave de identidad, una clave por operación, `trade_index`, firma interna y prueba de identidad. Confirma la serialización canónica y el texto de la prueba de identidad descritos en la guía, que incluye un vector verificable.
+- `trade_index` repetido: `cant-do: invalid_trade_index`. Firma interna o prueba de identidad alteradas: sin respuesta.
+- Valoraciones: `rate-user` devuelve `rate-received`. No hay respuesta si la otra parte opera en privacidad total ni en una segunda valoración. La siguiente orden de la identidad valorada anuncia el tag `rating` actualizado. Los eventos kind 38384 salieron en el lote horario del daemon, con `d` igual a la clave de operación de quien valoró.
+- Una valoración enviada 135 s después del cierre sin prueba de trabajo no recibe respuesta. Con la prueba se acepta. El panel avisa ahora cuando `pow_first_contact` supera a `pow`.
+
+El Manager, conectado a ese relay, mostró las cinco órdenes del nodo con garantía, su disputa enlazada con la orden y los 26 mensajes de la operación en modo de reputación. Las capturas nuevas se añadieron a los fixtures.
+
+A petición de la sesión que adapta la app, el tráfico cifrado de esas pruebas se descifró después con las claves desechables de los dos nodos de regtest y se guardó por flujos en `protocol-flows.json`: compra, compra con factura incluida, venta con factura adjunta, rango, cancelación de mutuo acuerdo, retirada de quien tomó, vencimiento, tomas simultáneas y disputa con `admin-cancel`. Conserva el orden de llegada al relay y el segundo de cada mensaje. La consola del Manager reproduce los nueve en las pruebas, con el mismo orden sea cual sea el orden de entrega. De ese tráfico sale la tabla de qué mensajes repiten el `request_id`, sección 5.5 de la guía.
+
+### Tarjeta de la comunidad
+
+- La tarjeta emitida por el Manager, en JSON y como enlace `mostro://community/<base64url>`, verifica con una copia del verificador de la app BitMaxis (`k256`, `verify_raw` sobre el digest de la cadena canónica). Antes del cambio no verificaba.
+
+### Comprobaciones del repositorio
+
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked` (124 pruebas) con Rust 1.97 y con Rust 1.94.0, la versión de la imagen de compilación. Las suites asíncronas se repitieron 20 veces sin fallos.
+- Revisión independiente de los cambios en seis frentes (backend, seguridad, script supervisor y empaquetado, interfaz, guía de integración y pruebas), con verificación de cada hallazgo. Los hallazgos se corrigieron antes de cerrar esta validación.
+- Segunda revisión independiente de los cambios del 4 de octubre: sin hallazgos bloqueantes ni mayores. De los menores se corrigieron los de la consola (texto de un remitente en una sola línea y sin caracteres de control, etiquetas del daemon solo para mensajes del daemon, cupo de rechazos, orden de las respuestas), el script de humo, el workflow y la prueba de versiones fijadas, que ahora también corre fuera de la imagen.
+- `npm --prefix web run build` y `python3 -m unittest discover -s scripts/tests`, que incluye la coherencia de la versión y los checksums de mostrod entre `config/versions.json`, los Dockerfile y los scripts de humo.
+- `sh scripts/mostro-entrypoint-smoke.sh`, ampliado con el modo de espera: salida con error ante un arranque rechazado, registro de caídas con pausa entre reintentos, reinicio por petición del panel y parada al retirar la configuración.
+- Interfaz comprobada con Chromium sin errores de consola contra el daemon de regtest.
+- Imagen Docker: este equipo no da acceso al socket de Docker a la sesión de desarrollo, así que se construyó en GitHub Actions con el workflow `image-check.yml` del PR de esta versión. Pasó en amd64 y arm64: construcción con las comprobaciones de Rust dentro de la imagen, `scripts/container-smoke.sh`, `scripts/lnd-smoke.py` y `scripts/verify-mostro-image.sh`.
+- Contexto de compilación de la imagen simulado sin Docker: con solo `Cargo.toml`, `Cargo.lock`, `api/` y `config/`, y Rust 1.94.0, pasan el formato, las pruebas, clippy y la compilación de release. `npm ci` y la compilación del frontend pasan desde los archivos versionados. El binario de release responde `{"mode":"release","version":"1.0.12"}` en `/api/health` cuando se compila con `MANAGER_VERSION=v1.0.12`.
+
+### No verificado
+
+- Penalización automática por vencimiento, vencimiento cuando falla quien publicó, modo mantenimiento, restauración de sesión, Cashu y Serbero. Su descripción procede del código de v0.19.2.
+- La app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
+- La actualización del nodo en producción de v0.19.0 a v0.19.2.
+
+## Reorganización del panel web (2026-10-05)
+
+El panel pasa de una sola pantalla larga a diez páginas en cinco grupos, con una dirección por página. No se añade ni se quita ningún endpoint. En el servidor cambian tres cosas: `/api/daemon/status` da a cada aviso un código estable (`notices`), informa del tiempo que lleva el daemon en ejecución (`running_for_secs`) y devuelve `null`, no cero, en los datos de LND que no ha podido leer; los avisos y las alertas hablan con el vocabulario del panel; y un respaldo manual conserva los mismos archivos que uno automático.
+
+### Cómo se probó
+
+Copias aisladas del panel en puertos locales, cada una con su propio directorio de configuración y de respaldos temporal, y sin las variables que las conectarían a LND, al daemon, a un webhook o a una identidad existente:
+
+- **Instalación vacía:** sin identidad ni reglas.
+- **Lista para activar:** identidad y reglas guardadas, con los eventos reales capturados del daemon de regtest (9 órdenes y 2 disputas resueltas) servidos por un relay local.
+- **Mercado abierto:** configuración activada, un anuncio reciente del nodo, ofertas publicadas, operaciones en curso y dos disputas abiertas, firmados con la clave desechable del nodo de regtest en un relay local. El proceso del daemon se simuló con su archivo de latido. LND se sustituyó por un servidor HTTPS local que responde a las tres consultas de solo lectura del panel con datos inventados: 3 canales activos y 1 inactivo.
+- **Respaldo automático activo:** la misma configuración con `BACKUP_PASSPHRASE` definida.
+
+### Qué se comprobó
+
+- Las diez páginas en las tres primeras copias, a 1440 px y a 390 px de ancho, sin errores en la consola del navegador. Ninguna página se desborda a lo ancho a 320, 360, 390, 640, 860, 861, 1050, 1051, 1280, 1440 ni 1920 px.
+- `scripts/playwright-smoke.cjs`, reescrito para la nueva estructura: 28 pasos sin errores de consola. Arranca su propio relay simulado y dos copias del panel en puertos efímeros, y recorre:
+  - La puesta en marcha completa desde una instalación vacía: clave inválida rechazada, identidad nueva que se muestra una sola vez y que el servidor no repite, reglas, plantilla, guardado, respaldo cifrado, conexión de apps, y activación y desactivación con sus confirmaciones.
+  - El libro de órdenes con sus filtros en la dirección, los enlaces desde cada cifra del resumen, el simulador con sus importes y la página de Lightning sin acceso a LND.
+  - Todas las páginas desde el menú, el enlace de salto, una dirección desconocida y una malformada.
+  - Con respuestas simuladas del servidor: los cinco estados del mercado, el destino de cada aviso según su código, una lectura fallida y la página de disputas al usar Atrás y Adelante.
+  - El uso desde un teléfono: recargar no cambia de página, nada se desborda y el menú se maneja con teclado.
+- La prueba de disputas falla si se retira la corrección que impide emparejar una disputa con la orden de otra, y vuelve a pasar al restaurarla.
+- Una configuración activada sin daemon que se anuncie no se presenta como mercado abierto: el panel dice «Sin confirmar». Un anuncio reciente sin Mostro activado aquí se presenta como «Anuncio vigente».
+- Con LND ilegible el panel no muestra saldos ni dice «0 canales». Con LND legible muestra canales, liquidez y la estimación de operaciones simultáneas, calculada con los canales activos.
+- `verify-backup` y `restore-backup`, ejecutados tal como los muestra la página de respaldos sobre un respaldo de prueba: la restauración dentro de la carpeta de respaldos crea `community.json` e `identity/` con permisos privados, y bajo una carpeta que no es privada el comando la rechaza con «El directorio padre debe ser privado (0700)».
+- Las hojas de estilo perdieron 199 selectores que ningún componente usaba. Se compararon 60 capturas de antes y después, las diez páginas en tres copias y a dos anchos: sin diferencias.
+- `./scripts/check.sh` completo: formato, `cargo test` (127 pruebas), clippy, las pruebas de Python (10, con la nueva que exige que el panel conozca todos los códigos de aviso del servidor), la compilación del frontend y el smoke del supervisor. Formato, clippy y pruebas se repitieron con Rust 1.94.0, la versión de la imagen de compilación.
+- Dos revisiones independientes antes de confirmar los cambios. Una leyó el código de la interfaz en busca de regresiones respecto al panel anterior. La otra contrastó cada afirmación de la interfaz y de la documentación con el código del servidor. Cada una encontró un defecto bloqueante: la guía de disputas podía mostrar, tras usar Atrás, el comando de resolución con la orden de otra disputa; y el comando de restauración documentado usaba un destino que el paquete de Umbrel rechaza. Los dos, los once hallazgos mayores y los menores se corrigieron, y los que se podían probar quedaron cubiertos por la prueba de navegador.
+
+### No verificado
+
+- El panel reorganizado contra el nodo en producción ni contra un daemon real en ejecución: el estado «mercado abierto» se reprodujo con eventos firmados y un latido de proceso simulado.
+- La imagen Docker con estos cambios. Este equipo no da acceso al socket de Docker a la sesión de desarrollo; la construye el workflow `image-check.yml` cuando la rama se sube y se abre su PR.
+- El modo de permisos de `/data` en una instalación real de Umbrel. Las instrucciones de restauración no dependen de él: usan la carpeta de respaldos, que el paquete crea privada.
+- Lectores de pantalla. Se comprobó el manejo con teclado del menú y de los diálogos, no una tecnología de apoyo real.
+- Navegadores distintos de Chromium.
+- Lo que el panel afirma sobre el comportamiento de `mostrod` y no se ejecutó aquí: el modo mantenimiento, la penalización automática por vencimiento y los comandos de `mostro-cli` de la guía de disputas.

@@ -1,12 +1,14 @@
 # Preparar una identidad existente
 
+> **Dos vías.** Desde la versión 1.0.6 el panel también crea o importa la identidad, en la página **Nodo Mostro**: muestra una clave nueva una sola vez, o acepta una `nsec` pegada en un diálogo. Es la vía que sigue [`DEPLOYMENT.md`](DEPLOYMENT.md). La vía por terminal de este documento es la única en la que la clave privada no pasa por el navegador: úsala si tu clave ya protege una comunidad en marcha.
+
 La importación se incorpora en preview.5. No está incluida en la imagen preview.4. No inicia un daemon ni aplica el borrador al mercado.
 
 Para una instancia nueva, comprobar primero que no queden pedidos, disputas, bonds o pagos pendientes de la instancia anterior. No borrar sus datos. Antes de arrancar, verificar también que ningún otro daemon utilice la misma identidad, incluyendo servicios systemd y Docker anidado.
 
 ## Importación local
 
-La clave se introduce exclusivamente en una terminal local interactiva con entrada oculta; nunca como argumento, variable de entorno, mensaje de chat o campo del panel. Se requiere el formato Nostr `nsec1…` y el `npub1…` esperado. No se acepta una clave pública como privada ni un par que no coincida. La implementación utiliza [Rust Nostr](https://docs.rs/nostr/0.44.8/nostr/) para validar y derivar las claves.
+En esta vía la clave se introduce en una terminal local interactiva con entrada oculta; nunca como argumento, variable de entorno o mensaje de chat, y sin pasar por el navegador. Se requiere el formato Nostr `nsec1…` y el `npub1…` esperado. No se acepta una clave pública como privada ni un par que no coincida. La implementación utiliza [Rust Nostr](https://docs.rs/nostr/0.44.8/nostr/) para validar y derivar las claves.
 
 Con Rust instalado, desde el repositorio:
 
@@ -44,6 +46,6 @@ sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-c
 
 El comando imprime la ruta exacta del archivo cifrado. Para verificarlo de nuevo dentro del contenedor, usa esa ruta como argumento de `verify-backup`, también con `sudo docker exec -it --user 1000:1000`. Copia luego el archivo `.age` fuera del servidor con `sudo docker cp` y guarda la frase por separado; una copia que permanece únicamente en el mismo disco no protege frente a su pérdida. Este archivo no es un respaldo completo de un mercado en operación.
 
-## Restauración aislada (desarrollo posterior a preview.8)
+## Restauración aislada
 
-El código en desarrollo añade `restore-backup <archivo.age> <directorio-nuevo>`. Descifra y valida el backup, luego materializa `community.json` y `identity/mostro.nsec` en un directorio **nuevo y privado**. Rechaza un destino existente y no toca la configuración activa. Una prueba con identidad sintética comprobó la revisión, el npub, los permisos y la negativa a sobrescribir archivos. No se debe ejecutar sobre `/data/config`; aplicar una restauración a una instancia Umbrel y respaldar la futura base de datos Mostro serán pasos separados.
+`restore-backup <archivo.age> <directorio-nuevo>` descifra y valida el backup, luego materializa `community.json` y `identity/mostro.nsec` en un directorio **nuevo y privado**. Rechaza un destino existente, exige que cuelgue de una carpeta privada (`0700`) y no toca la configuración activa. En Umbrel sirve `/data/backup/restaurado`; `/data` no es privada y el comando la rechaza. Una prueba con identidad sintética comprobó la revisión, el npub, los permisos y la negativa a sobrescribir archivos. No se debe ejecutar sobre `/data/config`; aplicar una restauración a una instancia Umbrel y respaldar la futura base de datos Mostro serán pasos separados.

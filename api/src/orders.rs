@@ -2,7 +2,7 @@ use axum::{Json, extract::State};
 use futures_util::{SinkExt, StreamExt};
 use nostr::{Event, FromBech32, PublicKey, Timestamp};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, watch};
@@ -13,6 +13,21 @@ use crate::{AppState, config::Configuration};
 
 pub const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_WS_FRAME_SIZE: usize = 128 * 1024; // 128 KB limit per message
+
+/// Public Nostr event kinds published by mostrod (mostro-core `prelude`).
+pub const ORDER_EVENT_KIND: u16 = 38383;
+pub const INFO_EVENT_KIND: u16 = 38385;
+pub const DISPUTE_EVENT_KIND: u16 = 38386;
+
+/// Upper bounds for the in-memory caches. Closed orders are evicted first.
+pub const MAX_CACHED_ORDERS: usize = 1000;
+pub const MAX_CACHED_TOMBSTONES: usize = 5000;
+pub const MAX_CACHED_DISPUTES: usize = 500;
+
+/// The node info event is republished every `publish_mostro_info_interval`
+/// (300 s in the pinned template). Two missed publications plus slack means
+/// the daemon is no longer announcing itself.
+pub const NODE_INFO_FRESH_SECS: u64 = 660;
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +61,35 @@ pub struct OrderSummary {
     pub premium: i64,
     pub created_at: u64,
     pub expires_at: Option<u64>,
+    /// Order creation time announced by the daemon (`published_at` tag). Unlike
+    /// `created_at`, it does not change when the addressable event is revised.
+    #[serde(default)]
+    pub published_at: Option<u64>,
+}
+
+/// Public state of a dispute as announced by the daemon in kind 38386.
+/// The event deliberately carries the dispute id only, never the order id.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct DisputeSummary {
+    pub id: String,
+    pub event_id: String,
+    pub status: String,
+    pub initiator: Option<String>,
+    pub published_at: Option<u64>,
+    pub updated_at: u64,
+}
+
+/// What the daemon itself announces in its kind 38385 instance-info event.
+/// This is the only version/limits source that proves a daemon is alive.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct NodeInfo {
+    pub event_id: String,
+    pub created_at: u64,
+    pub name: Option<String>,
+    pub mostro_version: Option<String>,
+    pub protocol_version: Option<String>,
+    /// Every tag of the event (first value; `y` keeps the instance name).
+    pub tags: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -56,6 +100,13 @@ pub struct OrdersSnapshot {
     pub source_npub: Option<String>,
     pub relays: Vec<RelayStatus>,
     pub orders: Vec<OrderSummary>,
+    #[serde(default)]
+    pub disputes: Vec<DisputeSummary>,
+    #[serde(default)]
+    pub node_info: Option<NodeInfo>,
+    /// Seconds since the daemon last announced itself, when known.
+    #[serde(default)]
+    pub node_info_age_secs: Option<u64>,
 }
 
 pub struct OrdersCache {
@@ -64,8 +115,10 @@ pub struct OrdersCache {
     pub last_update: u64,
     pub npub: Option<String>,
     pub relay_statuses: HashMap<String, RelayStatus>,
-    pub events: HashMap<String, Event>,      // keyed by uuid
-    pub closed_orders: HashMap<String, u64>, // keyed by uuid -> closed_created_at
+    pub events: HashMap<String, Event>,            // keyed by uuid
+    pub closed_orders: HashMap<String, u64>,       // keyed by uuid -> closed_created_at
+    pub disputes: HashMap<String, DisputeSummary>, // keyed by dispute uuid
+    pub node_info: Option<NodeInfo>,
     pub generation: u64,
 }
 
@@ -85,6 +138,8 @@ impl OrdersCache {
             relay_statuses: HashMap::new(),
             events: HashMap::new(),
             closed_orders: HashMap::new(),
+            disputes: HashMap::new(),
+            node_info: None,
             generation: 0,
         }
     }
@@ -97,10 +152,13 @@ impl OrdersCache {
             .filter_map(|e| parse_order_to_summary(e, now_secs))
             .collect();
         // Sort newest first
-        orders.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        orders.sort_by_key(|order| std::cmp::Reverse(order.created_at));
 
         let mut relays: Vec<RelayStatus> = self.relay_statuses.values().cloned().collect();
         relays.sort_by(|a, b| a.url.cmp(&b.url));
+
+        let mut disputes: Vec<DisputeSummary> = self.disputes.values().cloned().collect();
+        disputes.sort_by_key(|dispute| std::cmp::Reverse(dispute.updated_at));
 
         OrdersSnapshot {
             state: self.state,
@@ -109,7 +167,65 @@ impl OrdersCache {
             source_npub: self.npub.clone(),
             relays,
             orders,
+            disputes,
+            node_info_age_secs: self.node_info_age_secs(now_secs),
+            node_info: self.node_info.clone(),
         }
+    }
+
+    /// Age of the last info event the daemon published, in seconds.
+    pub fn node_info_age_secs(&self, now_secs: u64) -> Option<u64> {
+        self.node_info
+            .as_ref()
+            .map(|info| now_secs.saturating_sub(info.created_at))
+    }
+
+    /// Keeps the newest kind 38385 event. Returns true when it replaced the cache.
+    pub fn try_set_node_info(&mut self, info: NodeInfo, gen_id: u64) -> bool {
+        if gen_id != self.generation {
+            return false;
+        }
+        if self
+            .node_info
+            .as_ref()
+            .is_some_and(|current| current.created_at >= info.created_at)
+        {
+            return false;
+        }
+        self.node_info = Some(info);
+        self.last_update = Timestamp::now().as_secs();
+        true
+    }
+
+    /// Stores the newest revision of a dispute. Returns the previous status
+    /// (`None` when the dispute was unknown) if the revision was accepted.
+    pub fn try_insert_dispute(
+        &mut self,
+        dispute: DisputeSummary,
+        gen_id: u64,
+    ) -> Option<Option<String>> {
+        if gen_id != self.generation {
+            return None;
+        }
+        let previous = match self.disputes.get(&dispute.id) {
+            Some(existing) if existing.updated_at >= dispute.updated_at => return None,
+            Some(existing) => Some(existing.status.clone()),
+            None => None,
+        };
+        if previous.is_none() && self.disputes.len() >= MAX_CACHED_DISPUTES {
+            // Evict the stalest revision so a long-lived node keeps seeing new disputes.
+            if let Some(oldest) = self
+                .disputes
+                .values()
+                .min_by_key(|d| d.updated_at)
+                .map(|d| d.id.clone())
+            {
+                self.disputes.remove(&oldest);
+            }
+        }
+        self.disputes.insert(dispute.id.clone(), dispute);
+        self.last_update = Timestamp::now().as_secs();
+        Some(previous)
     }
 
     pub fn clear_for_new_config(&mut self, npub: Option<String>, relays: &[String], gen_id: u64) {
@@ -117,6 +233,8 @@ impl OrdersCache {
         self.npub = npub.clone();
         self.events.clear();
         self.closed_orders.clear();
+        self.disputes.clear();
+        self.node_info = None;
         self.relay_statuses.clear();
         self.last_update = Timestamp::now().as_secs();
 
@@ -241,17 +359,44 @@ impl OrdersCache {
 
         if should_insert {
             if is_closed {
+                if self.closed_orders.len() >= MAX_CACHED_TOMBSTONES
+                    && !self.closed_orders.contains_key(&uuid)
+                    && let Some(oldest) = self
+                        .closed_orders
+                        .iter()
+                        .min_by_key(|(_, closed_at)| **closed_at)
+                        .map(|(id, _)| id.clone())
+                {
+                    self.closed_orders.remove(&oldest);
+                }
                 self.closed_orders
                     .insert(uuid.clone(), event.created_at.as_secs());
             }
 
-            if self.events.len() < 1000 || self.events.contains_key(&uuid) {
+            if self.events.len() >= MAX_CACHED_ORDERS && !self.events.contains_key(&uuid) {
+                self.evict_one_order();
+            }
+            if self.events.len() < MAX_CACHED_ORDERS || self.events.contains_key(&uuid) {
                 self.events.insert(uuid, event);
                 self.last_update = Timestamp::now().as_secs();
                 return true;
             }
         }
         false
+    }
+
+    /// Makes room for a new order: the oldest closed order goes first. Open
+    /// orders are never evicted, so a full book of open orders still rejects.
+    fn evict_one_order(&mut self) {
+        let victim = self
+            .events
+            .iter()
+            .filter(|(id, _)| self.closed_orders.contains_key(*id))
+            .min_by_key(|(_, event)| event.created_at)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = victim {
+            self.events.remove(&id);
+        }
     }
 }
 
@@ -313,29 +458,47 @@ pub fn is_valid_uuid(s: &str) -> bool {
     true
 }
 
+/// Statuses mostrod can publish in the `s` tag of kind 38383 (v0.19.x,
+/// `create_status_tags` in upstream `src/nip33.rs`). v0.19.2 maps
+/// `completed-by-admin` but never assigns it.
+///
+/// The tag is coarse. `in-progress` is published when a sell order waits for
+/// the buyer's invoice or a buy order waits for the seller's payment. Later
+/// internal states (`active`, `fiat-sent`, `dispute`) publish nothing, so the
+/// last value stays; a sell order taken with the invoice attached never
+/// leaves `pending` until it closes. Disputes are announced in kind 38386.
+pub const PUBLIC_ORDER_STATUSES: [&str; 5] = [
+    "pending",
+    "in-progress",
+    "success",
+    "canceled",
+    "completed-by-admin",
+];
+
+/// A status is accepted when it is well formed. The monitor must not freeze an
+/// order on its last known revision because a newer daemon added a status.
 pub fn is_valid_status(status: &str) -> bool {
-    matches!(
-        status,
-        "pending"
-            | "waiting-buyer-invoice"
-            | "waiting_buyer_invoice"
-            | "waiting-payment"
-            | "waiting_payment"
-            | "settled-hold-invoice"
-            | "settled_hold_invoice"
-            | "canceled"
-            | "success"
-            | "dispute"
-            | "failed"
-            | "expired"
-            | "completed"
-    )
+    !status.is_empty()
+        && status.len() <= 40
+        && status
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
+/// Terminal statuses. `completed-by-admin` and `canceled` are what a solver
+/// resolution looks like on the wire; the rest are kept for older daemons.
 pub fn is_closed_status(status: &str) -> bool {
     matches!(
         status,
-        "canceled" | "success" | "completed" | "failed" | "expired"
+        "canceled"
+            | "success"
+            | "completed-by-admin"
+            | "canceled-by-admin"
+            | "cooperatively-canceled"
+            | "settled-by-admin"
+            | "completed"
+            | "failed"
+            | "expired"
     )
 }
 
@@ -370,6 +533,7 @@ pub fn parse_and_validate_order_event(
     let mut premium: i64 = 0;
     let mut expires_at = None;
     let mut expiration_nip40 = None;
+    let mut published_at = None;
     let mut has_y_mostro = false;
     let mut has_z_order = false;
 
@@ -435,6 +599,9 @@ pub fn parse_and_validate_order_event(
                 "expiration" => {
                     expiration_nip40 = s[1].parse::<u64>().ok();
                 }
+                "published_at" => {
+                    published_at = s[1].parse::<u64>().ok();
+                }
                 _ => {}
             }
         }
@@ -447,7 +614,7 @@ pub fn parse_and_validate_order_event(
     let id = id.ok_or("Falta tag d con UUID")?;
     let kind = kind.ok_or("Falta tag k (buy/sell)")?;
     let status = status.ok_or("Falta tag s con estado")?;
-    let fiat_code = fiat_code.unwrap_or_else(|| "EUR".to_string());
+    let fiat_code = fiat_code.ok_or("Falta tag f con una moneda de tres letras")?;
 
     // NIP-40 expiration check
     if let Some(exp) = expiration_nip40
@@ -480,9 +647,124 @@ pub fn parse_and_validate_order_event(
             premium,
             created_at: event.created_at.as_secs(),
             expires_at,
+            published_at,
         },
         is_closed,
     ))
+}
+
+/// Parses a kind 38386 dispute event signed by the node.
+pub fn parse_dispute_event(
+    event: &Event,
+    expected_pubkey: &PublicKey,
+    now_secs: u64,
+    max_future_drift_secs: u64,
+) -> Result<DisputeSummary, &'static str> {
+    event.verify().map_err(|_| "Firma criptográfica inválida")?;
+    if event.pubkey != *expected_pubkey {
+        return Err("Autor del evento no corresponde a la identidad esperada");
+    }
+    if event.kind.as_u16() != DISPUTE_EVENT_KIND {
+        return Err("Kind de evento no es 38386");
+    }
+    if event.created_at.as_secs() > now_secs.saturating_add(max_future_drift_secs) {
+        return Err("Timestamp del evento en el futuro fuera de tolerancia");
+    }
+
+    let mut id = None;
+    let mut status = None;
+    let mut initiator = None;
+    let mut published_at = None;
+    let mut has_y_mostro = false;
+    let mut has_z_dispute = false;
+    for tag in event.tags.iter() {
+        let s = tag.as_slice();
+        if s.len() < 2 {
+            continue;
+        }
+        match s[0].as_str() {
+            "y" if s[1] == "mostro" => has_y_mostro = true,
+            "z" if s[1] == "dispute" => has_z_dispute = true,
+            "d" if is_valid_uuid(&s[1]) => id = Some(s[1].clone()),
+            "s" => {
+                let st = s[1].to_lowercase();
+                if is_valid_status(&st) {
+                    status = Some(st);
+                }
+            }
+            "initiator" if matches!(s[1].as_str(), "buyer" | "seller") => {
+                initiator = Some(s[1].clone());
+            }
+            "published_at" => published_at = s[1].parse::<u64>().ok(),
+            "expiration" if s[1].parse::<u64>().is_ok_and(|exp| exp <= now_secs) => {
+                return Err("Evento expirado según NIP-40");
+            }
+            _ => {}
+        }
+    }
+    if !has_y_mostro || !has_z_dispute {
+        return Err("Faltan tags obligatorios y=mostro o z=dispute");
+    }
+    Ok(DisputeSummary {
+        id: id.ok_or("Falta tag d con UUID de disputa")?,
+        event_id: event.id.to_hex(),
+        status: status.ok_or("Falta tag s con estado de disputa")?,
+        initiator,
+        published_at,
+        updated_at: event.created_at.as_secs(),
+    })
+}
+
+/// A dispute is open until a solver resolves it (`settled`, `seller-refunded`)
+/// or the parties close it themselves (`released`).
+pub fn is_open_dispute_status(status: &str) -> bool {
+    matches!(status, "initiated" | "in-progress")
+}
+
+/// Parses the kind 38385 instance-info event signed by the node.
+pub fn parse_node_info_event(
+    event: &Event,
+    expected_pubkey: &PublicKey,
+    now_secs: u64,
+    max_future_drift_secs: u64,
+) -> Result<NodeInfo, &'static str> {
+    event.verify().map_err(|_| "Firma criptográfica inválida")?;
+    if event.pubkey != *expected_pubkey {
+        return Err("Autor del evento no corresponde a la identidad esperada");
+    }
+    if event.kind.as_u16() != INFO_EVENT_KIND {
+        return Err("Kind de evento no es 38385");
+    }
+    if event.created_at.as_secs() > now_secs.saturating_add(max_future_drift_secs) {
+        return Err("Timestamp del evento en el futuro fuera de tolerancia");
+    }
+
+    let mut tags = BTreeMap::new();
+    let mut name = None;
+    let mut is_info = false;
+    for tag in event.tags.iter() {
+        let s = tag.as_slice();
+        if s.len() < 2 || s[0].len() > 64 || s[1].len() > 512 || tags.len() >= 64 {
+            continue;
+        }
+        match s[0].as_str() {
+            "z" if s[1] == "info" => is_info = true,
+            "y" if s[1] == "mostro" => name = s.get(2).filter(|n| n.len() <= 256).cloned(),
+            _ => {}
+        }
+        tags.entry(s[0].clone()).or_insert_with(|| s[1].clone());
+    }
+    if !is_info {
+        return Err("Falta tag obligatorio z=info");
+    }
+    Ok(NodeInfo {
+        event_id: event.id.to_hex(),
+        created_at: event.created_at.as_secs(),
+        name,
+        mostro_version: tags.get("mostro_version").cloned(),
+        protocol_version: tags.get("protocol_version").cloned(),
+        tags,
+    })
 }
 
 fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> {
@@ -496,6 +778,7 @@ fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> 
     let mut premium: i64 = 0;
     let mut expires_at: Option<u64> = None;
     let mut expiration_nip40: Option<u64> = None;
+    let mut published_at: Option<u64> = None;
 
     for tag in event.tags.iter() {
         let s = tag.as_slice();
@@ -511,6 +794,7 @@ fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> 
                 "premium" => premium = s[1].parse().unwrap_or(0),
                 "expires_at" => expires_at = s[1].parse().ok(),
                 "expiration" => expiration_nip40 = s[1].parse().ok(),
+                "published_at" => published_at = s[1].parse().ok(),
                 _ => {}
             }
         }
@@ -534,7 +818,7 @@ fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> 
         event_id: event.id.to_hex(),
         kind: kind?,
         status,
-        fiat_code: fiat_code.unwrap_or_else(|| "EUR".to_string()),
+        fiat_code: fiat_code?,
         fiat_amount_range,
         amount_sats,
         amount_sats_str: amount_sats.to_string(),
@@ -542,6 +826,7 @@ fn parse_order_to_summary(event: &Event, now_secs: u64) -> Option<OrderSummary> 
         premium,
         created_at: event.created_at.as_secs(),
         expires_at,
+        published_at,
     })
 }
 
@@ -563,11 +848,9 @@ async fn run_relay_worker(
     let mut notified_down = false;
 
     loop {
-        {
-            let mut w = cache.write().await;
-            w.update_relay_status(&relay_url, MonitorState::Connecting, None, generation);
-        }
-
+        // The relay starts as "connecting" when the configuration is loaded. A
+        // retry keeps the last result: reporting "connecting" again on every
+        // attempt would hide an outage for as long as each attempt takes.
         let connect_fut = connect_async(&relay_url);
         let ws_res = tokio::time::timeout(timing.connect_timeout, connect_fut).await;
 
@@ -638,9 +921,10 @@ async fn run_relay_worker(
             w.update_relay_status(&relay_url, MonitorState::Syncing, None, generation);
         }
 
-        // Send REQ filter with hex author
+        // One subscription for everything the node publishes about itself:
+        // orders (38383), its instance info (38385) and disputes (38386).
         let req_msg = format!(
-            "[\"REQ\", \"mostro_monitor\", {{\"kinds\": [38383], \"authors\": [\"{}\"]}}]",
+            "[\"REQ\", \"mostro_monitor\", {{\"kinds\": [{ORDER_EVENT_KIND}, {INFO_EVENT_KIND}, {DISPUTE_EVENT_KIND}], \"authors\": [\"{}\"]}}]",
             pubkey.to_hex()
         );
 
@@ -688,31 +972,55 @@ async fn run_relay_worker(
                                 if arr.len() >= 3 && arr[0] == "EVENT" && arr[1] == "mostro_monitor" {
                                     if let Ok(event) = serde_json::from_value::<Event>(arr[2].clone()) {
                                         let now = Timestamp::now().as_secs();
-                                        if let Ok((summary, is_closed)) = parse_and_validate_order_event(
-                                            &event,
-                                            &pubkey,
-                                            now,
-                                            timing.max_future_drift_secs,
-                                        ) {
-                                            let is_dispute = summary.status == "dispute";
-                                            let order_id = summary.id.clone();
-                                            let fiat_code = summary.fiat_code.clone();
-                                            let amount_sats = summary.amount_sats;
-                                            let mut w = cache.write().await;
-                                            w.try_insert_event(event, summary.id, is_closed, generation);
-                                            if is_dispute
-                                                && let Some(ref hub) = notifications
-                                            {
-                                                hub.publish(crate::notifications::Notification::dispute_alert(
-                                                    &order_id,
-                                                    &format!("La orden {order_id} ha entrado en estado de disputa"),
-                                                    Some(serde_json::json!({
-                                                        "order_id": order_id,
-                                                        "fiat_code": fiat_code,
-                                                        "amount_sats": amount_sats,
-                                                    })),
-                                                )).await;
+                                        let drift = timing.max_future_drift_secs;
+                                        match event.kind.as_u16() {
+                                            ORDER_EVENT_KIND => {
+                                                if let Ok((summary, is_closed)) =
+                                                    parse_and_validate_order_event(&event, &pubkey, now, drift)
+                                                {
+                                                    let mut w = cache.write().await;
+                                                    w.try_insert_event(event, summary.id, is_closed, generation);
+                                                }
                                             }
+                                            INFO_EVENT_KIND => {
+                                                if let Ok(info) = parse_node_info_event(&event, &pubkey, now, drift) {
+                                                    let mut w = cache.write().await;
+                                                    w.try_set_node_info(info, generation);
+                                                }
+                                            }
+                                            DISPUTE_EVENT_KIND => {
+                                                if let Ok(dispute) = parse_dispute_event(&event, &pubkey, now, drift) {
+                                                    let dispute_id = dispute.id.clone();
+                                                    let initiator = dispute.initiator.clone();
+                                                    let is_open = is_open_dispute_status(&dispute.status);
+                                                    // Replays of old disputes at connect time must not alert again.
+                                                    let is_recent = eose_received
+                                                        || now.saturating_sub(dispute.updated_at) <= 3600;
+                                                    let inserted = {
+                                                        let mut w = cache.write().await;
+                                                        w.try_insert_dispute(dispute, generation)
+                                                    };
+                                                    if inserted == Some(None)
+                                                        && is_open
+                                                        && is_recent
+                                                        && let Some(ref hub) = notifications
+                                                    {
+                                                        let opened_by = match initiator.as_deref() {
+                                                            Some("buyer") => ", abierta por el comprador",
+                                                            Some("seller") => ", abierta por el vendedor",
+                                                            _ => "",
+                                                        };
+                                                        hub.publish(crate::notifications::Notification::dispute_alert(
+                                                            &format!("El nodo anuncia la disputa {dispute_id}{opened_by}. Necesita un mediador."),
+                                                            Some(serde_json::json!({
+                                                                "dispute_id": dispute_id,
+                                                                "initiator": initiator,
+                                                            })),
+                                                        )).await;
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 } else if arr.len() >= 2 && arr[0] == "EOSE" && arr[1] == "mostro_monitor" {

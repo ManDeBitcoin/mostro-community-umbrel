@@ -2,17 +2,14 @@
 //! Ensures Mostro daemon only starts when all cryptographic and network prerequisites are satisfied.
 use crate::{
     adapters::Integrations,
-    config::{BondApply, Configuration, render_settings},
+    config::render_settings,
     identity,
+    orders::{NODE_INFO_FRESH_SECS, NodeInfo},
     store::Document,
 };
-use futures_util::{SinkExt, StreamExt};
-use nostr::{EventBuilder, Kind, Tag, event::tag::TagKind};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    borrow::Cow,
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Write},
     os::unix::{
@@ -20,10 +17,8 @@ use std::{
         fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::protocol::Message;
 use url::Url;
 
 const CERT_PATH: &str = "/lnd/tls.cert";
@@ -39,49 +34,52 @@ pub enum DaemonState {
     ActiveRunning,
 }
 
-pub const MOSTRO_VERSION: &str = "0.19.0";
+/// mostrod release this package pins and ships (see `config/versions.json`).
+pub const MOSTRO_VERSION: &str = "0.19.2";
 pub const PROTOCOL_VERSION: u32 = 2;
 
-pub fn detect_mostrod_version() -> String {
+/// Where a reported daemon version comes from, most trustworthy first.
+pub const VERSION_SOURCE_ANNOUNCED: &str = "announced";
+pub const VERSION_SOURCE_BINARY: &str = "binary";
+pub const VERSION_SOURCE_PINNED: &str = "pinned";
+
+fn version_from_output(stdout: &[u8]) -> Option<String> {
+    // `mostrod --version` prints "mostro p2p <version>" after terminal control codes.
+    String::from_utf8_lossy(stdout)
+        .split_whitespace()
+        .last()
+        .filter(|v| v.len() <= 32 && v.bytes().next().is_some_and(|b| b.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+/// Version of the mostrod binary shipped next to this API, and how it was
+/// obtained. This describes the package, not the process that is running:
+/// in Umbrel the daemon lives in another container of the same image.
+pub fn packaged_mostrod_version() -> (String, &'static str) {
     for bin_path in ["/usr/local/bin/mostrod", "mostrod"] {
         if let Ok(output) = std::process::Command::new(bin_path)
             .env("TERM", "xterm")
             .arg("--version")
             .output()
             && output.status.success()
+            && let Some(version) = version_from_output(&output.stdout)
         {
-            let s = String::from_utf8_lossy(&output.stdout);
-            if let Some(v) = s.split_whitespace().last() {
-                return v.trim().to_string();
-            }
+            return (version, VERSION_SOURCE_BINARY);
         }
     }
-    if let Ok(entries) = fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            if let Ok(file_name) = entry.file_name().into_string()
-                && file_name.chars().all(|c| c.is_ascii_digit())
-            {
-                let comm_path = entry.path().join("comm");
-                if let Ok(comm) = fs::read_to_string(&comm_path)
-                    && comm.trim() == "mostrod"
-                {
-                    let exe_path = entry.path().join("exe");
-                    if let Ok(output) = std::process::Command::new(&exe_path)
-                        .env("TERM", "xterm")
-                        .arg("--version")
-                        .output()
-                        && output.status.success()
-                    {
-                        let s = String::from_utf8_lossy(&output.stdout);
-                        if let Some(v) = s.split_whitespace().last() {
-                            return v.trim().to_string();
-                        }
-                    }
-                }
-            }
-        }
-    }
-    MOSTRO_VERSION.to_string()
+    (MOSTRO_VERSION.to_string(), VERSION_SOURCE_PINNED)
+}
+
+pub fn detect_mostrod_version() -> String {
+    packaged_mostrod_version().0
+}
+
+/// Last unexpected exit of mostrod, recorded by the container entrypoint.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LastExit {
+    pub at_unix: u64,
+    pub code: i32,
+    pub uptime_secs: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,12 +91,87 @@ pub struct DaemonReport {
     pub active_revision: Option<u64>,
     pub active_settings_hash: Option<String>,
     pub active_settings_path: Option<String>,
-    pub lnd_channel_count: u64,
-    pub lnd_synced: bool,
+    /// `None` when the panel could not read LND: unknown is not zero.
+    pub lnd_channel_count: Option<u64>,
+    pub lnd_synced: Option<bool>,
     pub can_activate: bool,
+    /// What the operator should know, as plain sentences.
     pub warnings: Vec<String>,
+    /// The same warnings, each with a stable code, so that a client can decide
+    /// where to send the operator without parsing the sentence.
+    #[serde(default)]
+    pub notices: Vec<DaemonNotice>,
+    /// Seconds the current mostrod process has been running, when known.
+    #[serde(default)]
+    pub running_for_secs: Option<u64>,
+    /// Best known daemon version: the one the daemon announces on the relays
+    /// when that announcement is recent, otherwise the packaged binary's.
     pub mostro_version: String,
+    /// `announced`, `binary` or `pinned`: what `mostro_version` is based on.
+    #[serde(default)]
+    pub version_source: String,
+    /// Version of the mostrod binary shipped in this package.
+    #[serde(default)]
+    pub packaged_version: String,
     pub protocol_version: u32,
+    /// The daemon's own kind 38385 event, as last seen on the relays.
+    #[serde(default)]
+    pub announced: Option<NodeInfo>,
+    #[serde(default)]
+    pub announced_age_secs: Option<u64>,
+    /// True while the announcement is recent enough to prove a live daemon.
+    #[serde(default)]
+    pub announced_fresh: bool,
+    #[serde(default)]
+    pub last_exit: Option<LastExit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonNotice {
+    pub code: String,
+    pub text: String,
+}
+
+impl DaemonNotice {
+    fn new(code: &str, text: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            text: text.into(),
+        }
+    }
+}
+
+/// Every code `report` can emit. The panel maps each one to a page, and
+/// `scripts/tests` checks that it knows them all.
+pub const NOTICE_CODES: &[&str] = &[
+    "identity_missing",
+    "rules_missing",
+    "lnd_unconfigured",
+    "lnd_unreadable",
+    "lnd_no_channels",
+    "lnd_channels_unknown",
+    "lnd_not_synced",
+    "daemon_crash_loop",
+    "daemon_not_verified",
+    "announcement_stale",
+    "announcement_without_daemon",
+    "version_mismatch",
+    "rules_not_applied",
+    "routing_fee_zero",
+    "pow_first_contact_above_base",
+];
+
+/// `45 s`, `12 min`, `3 h`, `2 d`: an age in the unit a person would say it in.
+fn human_age(secs: u64) -> String {
+    if secs < 90 {
+        format!("{secs} s")
+    } else if secs < 5_400 {
+        format!("{} min", (secs + 30) / 60)
+    } else if secs < 172_800 {
+        format!("{} h", (secs + 1_800) / 3_600)
+    } else {
+        format!("{} d", (secs + 43_200) / 86_400)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,6 +188,10 @@ pub struct ActivationResult {
     pub settings_path: PathBuf,
     pub settings_sha256: String,
     pub activated_at_unix: u64,
+    /// False when the rendered settings were already active and the file
+    /// was left untouched.
+    #[serde(default)]
+    pub settings_changed: bool,
 }
 
 fn ensure_private_dir(path: &Path) -> Result<(), &'static str> {
@@ -130,20 +207,70 @@ fn ensure_private_dir(path: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Replaces `path` atomically: the daemon never reads a half-written file.
 fn write_private(path: &Path, contents: &[u8]) -> Result<(), &'static str> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("Ruta de configuración activa inválida")?;
+    let temp = path.with_file_name(format!(".{file_name}.tmp"));
+    let _ = fs::remove_file(&temp);
     let mut file = OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
-        .open(path)
+        .open(&temp)
         .map_err(|_| "No se pudo crear el archivo de configuración activa")?;
-    file.write_all(contents)
+    let written = file
+        .write_all(contents)
         .and_then(|()| file.sync_all())
-        .map_err(|_| "No se pudo escribir el archivo de configuración activa")
+        .and_then(|()| fs::rename(&temp, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&temp);
+        return Err("No se pudo escribir el archivo de configuración activa");
+    }
+    Ok(())
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn read_last_exit(active_dir: &Path) -> Option<LastExit> {
+    let text = fs::read_to_string(active_dir.join("mostro.last_exit")).ok()?;
+    let mut fields = text.split_whitespace();
+    Some(LastExit {
+        at_unix: fields.next()?.parse().ok()?,
+        code: fields.next()?.parse().ok()?,
+        uptime_secs: fields.next()?.parse().ok()?,
+    })
+}
+
+/// Seconds since the entrypoint started the current mostrod process.
+fn current_run_secs(active_dir: &Path) -> Option<u64> {
+    fs::metadata(active_dir.join("mostro.pid"))
+        .ok()?
+        .modified()
+        .ok()?
+        .elapsed()
+        .ok()
+        .map(|elapsed| elapsed.as_secs())
 }
 
 pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
+    report_with_node_info(root, integrations, None).await
+}
+
+/// `node_info` is the daemon's own kind 38385 event from the relay monitor.
+/// It is the only evidence that a daemon with this identity is really alive.
+pub async fn report_with_node_info(
+    root: &Path,
+    integrations: &Integrations,
+    node_info: Option<NodeInfo>,
+) -> DaemonReport {
     let npub = identity::inspect(root).unwrap_or(None);
     let identity_present = npub.is_some();
 
@@ -152,6 +279,14 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok());
     let draft_revision = draft_doc.as_ref().map(|d| d.revision);
+    let max_routing_fee_bps = draft_doc
+        .as_ref()
+        .and_then(|d| d.config.as_ref())
+        .map(|c| c.market.max_routing_fee_bps);
+    let first_contact_pow_above_base = draft_doc
+        .as_ref()
+        .and_then(|d| d.config.as_ref())
+        .is_some_and(|c| c.safety.pow_first_contact > c.safety.pow);
 
     let active_dir = root.join("active");
     let settings_file = active_dir.join("settings.toml");
@@ -178,30 +313,38 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
     let lnd_probe = integrations.lightning().await;
     let lnd_channel_count = lnd_probe
         .get("num_active_channels")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let lnd_synced = lnd_probe
-        .get("synced_to_chain")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .and_then(|v| v.as_u64());
+    let lnd_synced = lnd_probe.get("synced_to_chain").and_then(|v| v.as_bool());
 
-    let mut warnings = Vec::new();
+    let mut notices = Vec::new();
     if !identity_present {
-        warnings.push("Falta importar la clave privada Nostr (nsec) del bot.".into());
+        notices.push(DaemonNotice::new(
+            "identity_missing",
+            "Falta la identidad del nodo: crea o importa su clave privada Nostr (nsec).",
+        ));
     }
     if draft_revision.is_none() {
-        warnings.push("Falta configurar el borrador de reglas de la comunidad.".into());
+        notices.push(DaemonNotice::new(
+            "rules_missing",
+            "Faltan las reglas de la comunidad: aún no hay ninguna configuración guardada.",
+        ));
     }
-    if lnd_channel_count == 0 {
-        warnings.push("LND reporta 0 canales activos. Mostro requiere canales Lightning abiertos para crear y liquidar hold invoices.".into());
-    }
-    if !lnd_synced {
-        warnings.push("LND no está sincronizado con la cadena de bloques.".into());
-    }
+    notices.extend(lnd_notices(&lnd_probe));
+
+    let now = unix_now();
+    let last_exit = read_last_exit(&active_dir);
+    let run_secs = current_run_secs(&active_dir);
+    // A daemon that keeps dying right after it starts is not running, even
+    // though the entrypoint has just respawned it.
+    let crash_looping = last_exit.as_ref().is_some_and(|exit| {
+        now.saturating_sub(exit.at_unix) < 120
+            && exit.uptime_secs < 60
+            && run_secs.is_none_or(|secs| secs < 30)
+    });
 
     let can_activate = identity_present && draft_revision.is_some();
     let state = if active_settings_path.is_some() {
-        if is_mostrod_running(&active_dir) {
+        if is_mostrod_running(&active_dir) && !crash_looping {
             DaemonState::ActiveRunning
         } else {
             DaemonState::ActiveReady
@@ -212,15 +355,77 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
         DaemonState::Unconfigured
     };
 
-    if state == DaemonState::ActiveReady {
-        warnings.push("Configuración guardada, pero ejecución del daemon sin verificar. En Umbrel el daemon está en otro contenedor; guardar settings.toml no confirma su arranque ni la versión que recibe Mostrix.".into());
+    let announced_age_secs = node_info
+        .as_ref()
+        .map(|info| now.saturating_sub(info.created_at));
+    let announced_fresh = announced_age_secs.is_some_and(|age| age <= NODE_INFO_FRESH_SECS);
+    let announced_version = node_info
+        .as_ref()
+        .filter(|_| announced_fresh)
+        .and_then(|info| info.mostro_version.clone());
+    let (packaged_version, packaged_source) = packaged_mostrod_version();
+
+    if crash_looping && let Some(exit) = &last_exit {
+        notices.push(DaemonNotice::new(
+            "daemon_crash_loop",
+            format!(
+                "El daemon terminó con código {} a los {} de arrancar y se está reiniciando. Revisa los registros del contenedor mostro: suele deberse a LND, a los relays o a la configuración.",
+                exit.code,
+                human_age(exit.uptime_secs)
+            ),
+        ));
+    }
+    if state == DaemonState::ActiveReady && !crash_looping {
+        notices.push(DaemonNotice::new("daemon_not_verified", "Configuración guardada, pero ejecución del daemon sin verificar. En Umbrel el daemon está en otro contenedor; guardar settings.toml no confirma su arranque ni la versión que reciben los clientes."));
+    }
+    if state == DaemonState::ActiveRunning
+        && !announced_fresh
+        && run_secs.is_some_and(|secs| secs > NODE_INFO_FRESH_SECS)
+    {
+        notices.push(DaemonNotice::new("announcement_stale", "El daemon figura en ejecución, pero su evento de información (kind 38385) no aparece actualizado en los relays configurados. Los clientes no pueden confirmar que el nodo está activo: revisa los relays y los registros."));
+    }
+    if state != DaemonState::ActiveRunning
+        && announced_fresh
+        && let Some(age) = announced_age_secs
+    {
+        notices.push(DaemonNotice::new(
+            "announcement_without_daemon",
+            format!(
+                "El nodo anunció su información en los relays hace {}, pero este panel no ve el daemon en ejecución. Es normal durante unos minutos después de detenerlo. Si el anuncio se sigue renovando, otra instancia de Mostro usa esta misma clave: no actives una segunda.",
+                human_age(age)
+            ),
+        ));
+    }
+    if let Some(announced) = &announced_version
+        && state == DaemonState::ActiveRunning
+        && *announced != packaged_version
+    {
+        notices.push(DaemonNotice::new(
+            "version_mismatch",
+            format!(
+                "El daemon anuncia la versión {announced} y este paquete incluye la {packaged_version}. Reinicia la aplicación para aplicar la actualización o comprueba que no responda otra instancia."
+            ),
+        ));
     }
     if active_revision.is_some() && active_revision != draft_revision {
-        warnings.push("Hay cambios en el borrador que no están en la configuración activa.".into());
+        notices.push(DaemonNotice::new(
+            "rules_not_applied",
+            "Hay reglas guardadas que el nodo aún no tiene aplicadas.",
+        ));
+    }
+    if max_routing_fee_bps == Some(0) {
+        notices.push(DaemonNotice::new("routing_fee_zero", "La comisión máxima de enrutamiento es 0: Mostro solo podrá pagar a los compradores por rutas sin comisión y los pagos pueden quedar reintentándose. El valor por defecto de Mostro es 0,2 %."));
+    }
+    if first_contact_pow_above_base {
+        notices.push(DaemonNotice::new("pow_first_contact_above_base", "La prueba de trabajo de la primera conversación es mayor que la general: el daemon descarta sin respuesta las órdenes, tomas, valoraciones y acciones de mediación de los clientes que no la calculan. Comprueba que tus clientes leen pow_first_contact antes de activarla."));
     }
 
-    let mostro_version = detect_mostrod_version();
-    let protocol_version = PROTOCOL_VERSION;
+    let (mostro_version, version_source) = match announced_version {
+        Some(version) => (version, VERSION_SOURCE_ANNOUNCED),
+        None => (packaged_version.clone(), packaged_source),
+    };
+
+    let running_for_secs = run_secs.filter(|_| state == DaemonState::ActiveRunning);
 
     DaemonReport {
         state,
@@ -233,13 +438,77 @@ pub async fn report(root: &Path, integrations: &Integrations) -> DaemonReport {
         lnd_channel_count,
         lnd_synced,
         can_activate,
-        warnings,
+        warnings: notices.iter().map(|notice| notice.text.clone()).collect(),
+        notices,
+        running_for_secs,
         mostro_version,
-        protocol_version,
+        version_source: version_source.to_string(),
+        packaged_version,
+        protocol_version: PROTOCOL_VERSION,
+        announced: node_info,
+        announced_age_secs,
+        announced_fresh,
+        last_exit,
     }
 }
 
+/// What the read-only LND probe lets the panel say. A probe that could not
+/// read LND knows nothing about its channels: it must not report "0 channels".
+pub fn lnd_notices(probe: &serde_json::Value) -> Vec<DaemonNotice> {
+    use serde_json::Value;
+    match probe.get("status").and_then(Value::as_str) {
+        Some("online" | "warning") => {}
+        Some("unconfigured") => {
+            return vec![DaemonNotice::new(
+                "lnd_unconfigured",
+                "El panel no tiene acceso de lectura a LND: no puede comprobar los canales ni la sincronización.",
+            )];
+        }
+        _ => {
+            return vec![DaemonNotice::new(
+                "lnd_unreadable",
+                "El panel no pudo leer LND: no puede comprobar los canales ni la sincronización. Revisa la conexión, el certificado y los permisos.",
+            )];
+        }
+    }
+    let mut notices = Vec::new();
+    match probe.get("num_active_channels").and_then(Value::as_u64) {
+        Some(0) => notices.push(DaemonNotice::new("lnd_no_channels", "LND reporta 0 canales activos. Mostro requiere canales Lightning abiertos para crear y liquidar hold invoices.")),
+        Some(_) => {}
+        None => notices.push(DaemonNotice::new(
+            "lnd_channels_unknown",
+            "LND no informó de cuántos canales activos tiene.",
+        )),
+    }
+    if probe.get("synced_to_chain").and_then(Value::as_bool) != Some(true) {
+        notices.push(DaemonNotice::new(
+            "lnd_not_synced",
+            "LND no está sincronizado con la cadena de bloques.",
+        ));
+    }
+    notices
+}
+
+/// Explicit activation requested by the operator: writes the settings and
+/// (re)starts the daemon even when the settings did not change.
 pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, &'static str> {
+    apply_settings(root, lnd_grpc_origin, true)
+}
+
+/// Brings the active settings in line with the saved draft. The daemon is
+/// restarted only when the rendered `settings.toml` actually changes.
+pub fn sync_active_settings(
+    root: &Path,
+    lnd_grpc_origin: &str,
+) -> Result<ActivationResult, &'static str> {
+    apply_settings(root, lnd_grpc_origin, false)
+}
+
+fn apply_settings(
+    root: &Path,
+    lnd_grpc_origin: &str,
+    restart_when_unchanged: bool,
+) -> Result<ActivationResult, &'static str> {
     let origin = Url::parse(lnd_grpc_origin).map_err(|_| "Origen LND inválido")?;
     if origin.port().is_none() {
         return Err("El origen LND gRPC debe incluir un puerto explícito");
@@ -274,11 +543,13 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
 
     let settings_file = active_dir.join("settings.toml");
     let status_file = active_dir.join("status.json");
+    let now_unix = unix_now();
 
-    let now_unix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // A draft that renders the same settings (a payment label, the contact
+    // link) must not restart a daemon that may have trades in flight.
+    let settings_changed = fs::read(&settings_file)
+        .map(|current| current != settings.as_bytes())
+        .unwrap_or(true);
 
     let status = ActiveStatus {
         revision: document.revision,
@@ -287,7 +558,20 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
         activated_at_unix: now_unix,
     };
 
-    write_private(&settings_file, settings.as_bytes())?;
+    if settings_changed {
+        write_private(&settings_file, settings.as_bytes())?;
+    }
+    // Ask for the restart as soon as the new settings are on disk. If a later
+    // step failed first, the daemon would keep running the old settings while
+    // the next save found the file already up to date and never restarted it.
+    //
+    // The daemon publishes its own kind 0, 10002 and 38385 events when it
+    // starts. The panel never signs protocol events with the node key: an
+    // info event from here would advertise a node whether or not mostrod came up.
+    if settings_changed || restart_when_unchanged {
+        notify_standby(root);
+    }
+
     let status_bytes = serde_json::to_vec_pretty(&status)
         .map_err(|_| "No se pudo serializar el estado de activación")?;
     write_private(&status_file, &status_bytes)?;
@@ -296,17 +580,12 @@ pub fn activate(root: &Path, lnd_grpc_origin: &str) -> Result<ActivationResult, 
         .and_then(|file| file.sync_all())
         .map_err(|_| "No se pudo sincronizar el directorio activo")?;
 
-    notify_standby(root);
-
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(broadcast_instance_info(root.to_path_buf(), config.clone()));
-    }
-
     Ok(ActivationResult {
         revision: document.revision,
         settings_path: settings_file,
         settings_sha256,
         activated_at_unix: now_unix,
+        settings_changed,
     })
 }
 
@@ -323,11 +602,9 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
     }
     let _ = fs::remove_file(root.join(".standby_wake"));
     let _ = fs::remove_file(active_dir.join(".standby_wake"));
-    let _ = fs::remove_file(Path::new("/data/.standby_wake"));
-    let _ = fs::remove_file(Path::new("/data/config/.standby_wake"));
-    let _ = fs::remove_file(Path::new("/data/config/active/.standby_wake"));
     let _ = fs::remove_file(active_dir.join("mostro.pid"));
     let _ = fs::remove_file(active_dir.join("mostro.heartbeat"));
+    let _ = fs::remove_file(active_dir.join("mostro.last_exit"));
 
     notify_standby(root);
 
@@ -340,196 +617,13 @@ pub fn deactivate(root: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Asks the supervisor in the daemon container to (re)start mostrod. The
+/// request is a file inside CONFIG_DIR and nowhere else: in Umbrel that is the
+/// volume both containers share, and a test or a CLI run with another
+/// CONFIG_DIR can never reach a production daemon.
 fn notify_standby(root: &Path) {
     let _ = File::create(root.join(".standby_wake"));
     let _ = File::create(root.join("active").join(".standby_wake"));
-    let _ = File::create(Path::new("/data/.standby_wake"));
-    let _ = File::create(Path::new("/data/config/.standby_wake"));
-    let _ = File::create(Path::new("/data/config/active/.standby_wake"));
-}
-
-pub async fn broadcast_instance_info(root: PathBuf, config: Configuration) {
-    let Ok(Some(keys)) = identity::load_identity_keys(&root) else {
-        return;
-    };
-    let pubkey_hex = keys.public_key().to_hex();
-    let fee_str = format!("{}", config.market.fee_bps as f64 / 10000.0);
-    let bond_pct_str = format!("{}", config.safety.bond_bps as f64 / 10000.0);
-    let bond_apply_str = match config.safety.bond_apply_to {
-        BondApply::Make => "make",
-        BondApply::Take => "take",
-        BondApply::Both => "both",
-    };
-
-    let mut preserved_tags = Vec::new();
-    for relay in &config.nostr.relays {
-        let connect_fut = connect_async(relay);
-        if let Ok(Ok((mut ws, _))) = tokio::time::timeout(Duration::from_secs(2), connect_fut).await
-        {
-            let req = serde_json::json!(["REQ", "prev_info", {
-                "authors": [pubkey_hex],
-                "kinds": [38385],
-                "limit": 1
-            }])
-            .to_string();
-            if ws.send(Message::Text(req.into())).await.is_ok() {
-                let fetch_fut = async {
-                    while let Some(Ok(msg)) = ws.next().await {
-                        if let Message::Text(text) = msg
-                            && let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&text)
-                        {
-                            if arr.len() >= 3 && arr[0] == "EVENT" {
-                                if let Ok(ev) =
-                                    serde_json::from_value::<nostr::Event>(arr[2].clone())
-                                {
-                                    return Some(ev);
-                                }
-                            } else if arr.len() >= 2 && arr[0] == "EOSE" {
-                                break;
-                            }
-                        }
-                    }
-                    None
-                };
-                if let Ok(Some(prev_ev)) =
-                    tokio::time::timeout(Duration::from_millis(800), fetch_fut).await
-                {
-                    for tag in prev_ev.tags {
-                        let slice = tag.as_slice();
-                        if let Some(key) = slice.first()
-                            && (key.starts_with("lnd_") || key == "mostro_commit_hash")
-                        {
-                            preserved_tags.push(tag);
-                        }
-                    }
-                    let _ = ws.close(None).await;
-                    break;
-                }
-            }
-            let _ = ws.close(None).await;
-        }
-    }
-
-    let mut tags = vec![
-        Tag::identifier(&pubkey_hex),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("mostro_version")),
-            vec![detect_mostrod_version()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("max_order_amount")),
-            vec![config.market.max_trade_sats.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("min_order_amount")),
-            vec![config.market.min_trade_sats.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("expiration_hours")),
-            vec!["24".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("expiration_seconds")),
-            vec!["900".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("fiat_currencies_accepted")),
-            vec![config.market.fiat_currencies.join(",")],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("max_orders_per_response")),
-            vec!["10".to_string()],
-        ),
-        Tag::custom(TagKind::Custom(Cow::Borrowed("fee")), vec![fee_str]),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("pow")),
-            vec![config.safety.pow.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("pow_first_contact")),
-            vec![config.safety.pow_first_contact.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("protocol_version")),
-            vec!["2".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("hold_invoice_cltv_delta")),
-            vec!["144".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("y")),
-            vec!["mostro".to_string(), config.community.name.clone()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("z")),
-            vec!["info".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("invoice_expiration_window")),
-            vec!["3600".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("hold_invoice_expiration_window")),
-            vec!["300".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_enabled")),
-            vec![config.safety.bond_enabled.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_amount_pct")),
-            vec![bond_pct_str],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_base_amount_sats")),
-            vec![config.safety.base_bond_sats.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_apply_to")),
-            vec![bond_apply_str.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_slash_on_waiting_timeout")),
-            vec![config.safety.automatic_timeout_slash.to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_slash_node_share_pct")),
-            vec!["0.5".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("bond_payout_claim_window_days")),
-            vec!["15".to_string()],
-        ),
-        Tag::custom(
-            TagKind::Custom(Cow::Borrowed("maintenance_mode")),
-            vec!["false".to_string()],
-        ),
-    ];
-
-    tags.extend(preserved_tags);
-
-    let Ok(event) = EventBuilder::new(Kind::Custom(38385), "")
-        .tags(tags)
-        .sign_with_keys(&keys)
-    else {
-        return;
-    };
-
-    let msg = serde_json::json!(["EVENT", event]).to_string();
-
-    for relay in &config.nostr.relays {
-        let relay_url = relay.clone();
-        let msg = msg.clone();
-        tokio::spawn(async move {
-            if let Ok(Ok((mut ws, _))) =
-                tokio::time::timeout(Duration::from_secs(3), connect_async(&relay_url)).await
-            {
-                let _ = ws.send(Message::Text(msg.into())).await;
-                let _ = ws.close(None).await;
-            }
-        });
-    }
 }
 
 fn uses_settings_directory(cmdline: &[u8], settings_dir: &Path) -> bool {
@@ -538,23 +632,18 @@ fn uses_settings_directory(cmdline: &[u8], settings_dir: &Path) -> bool {
         .any(|pair| pair[0] == b"-d" && pair[1] == settings_dir.as_os_str().as_bytes())
 }
 
+/// The daemon is visible in this container, or the entrypoint that supervises
+/// it in the daemon container touched its heartbeat within the last 30 s. A
+/// pid file alone proves nothing: it survives a hard kill.
 fn is_mostrod_running(settings_dir: &Path) -> bool {
     if !mostrod_pids(settings_dir).is_empty() {
         return true;
     }
-    let pid_file = settings_dir.join("mostro.pid");
-    if pid_file.is_file() {
-        return true;
-    }
-    let hb_file = settings_dir.join("mostro.heartbeat");
-    if let Ok(meta) = fs::metadata(&hb_file)
-        && let Ok(modified) = meta.modified()
-        && let Ok(elapsed) = SystemTime::now().duration_since(modified)
-        && elapsed.as_secs() < 30
-    {
-        return true;
-    }
-    false
+    fs::metadata(settings_dir.join("mostro.heartbeat"))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_some_and(|elapsed| elapsed.as_secs() < 30)
 }
 
 fn mostrod_pids(settings_dir: &Path) -> Vec<u32> {

@@ -8,16 +8,19 @@ use qrcode::{QrCode, render::svg};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-// ── Community Card (Mostro App standard JSON) ──────────────────────────────────
+// ── Community Card (JSON v1 shared with the BitMaxis Mostro App) ───────────────
 
-/// Standard JSON v1 emitted by this node for Mostro App connections.
+/// Community card, schema version 1.
 ///
-/// All fields map 1-to-1 to the Mostro App community card specification:
-/// <https://github.com/MostroP2P/mostro>
+/// This is a convention between this Manager and the client apps that read it
+/// (see `docs/INTEGRACION-APPS.md`); it is not part of the Mostro protocol.
+/// The node's kind 38385 info event stays authoritative for fees, limits and
+/// bond policy: the card only bootstraps a client (pubkey, relays, currency,
+/// payment methods) and lets it check that the node operator issued it.
 ///
-/// The `signature` is a Schnorr signature over the SHA-256 of the
-/// canonical payload (UTF-8 JSON with all fields **except** `signature`,
-/// keys lexicographically sorted, no trailing whitespace).
+/// The consumer contract is the app's deserializer and verifier
+/// (`rust/src/api/community.rs`): `pubkey` and `signature` are always strings
+/// and the signature covers [`card_canonical_string`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityCard {
     /// Schema version — always 1 for this implementation.
@@ -25,169 +28,160 @@ pub struct CommunityCard {
     /// Human-readable community name.
     pub name: String,
     /// Node public key as 64-char lowercase hex.
-    pub pubkey: Option<String>,
-    /// Nostr relay URLs the node listens on.
+    pub pubkey: String,
+    /// Nostr relay URLs the node uses, normalised (no trailing slash).
     pub relays: Vec<String>,
     /// ISO-4217 primary trading currency (e.g. "COP", "USD").
     pub currency: String,
-    /// Accepted payment method labels (free-form strings shown in Mostro App).
+    /// Accepted payment method labels (free-form strings shown by the app).
     pub payment_methods: Vec<String>,
-    /// Operator fee in basis points (1 bps = 0.01 %).
+    /// Total Mostro fee of a trade in basis points (60 = 0.6 %). The daemon
+    /// charges half of it to the buyer and half to the seller.
     pub fee_bps: u16,
-    /// Bond/guarantee percentage required from traders (integer percent).
+    /// Anti-abuse bond as an integer percent, 0 when the bond is disabled.
+    /// Advisory: the exact policy is in the node's info event.
     pub bond_percent: u8,
     /// Operator website URL (empty string if not set).
     pub website: String,
-    /// Operator contact URL or nostr address (empty string if not set).
+    /// Operator contact URL (empty string if not set).
     pub contact: String,
-    /// Schnorr signature (128-char lowercase hex) over the canonical payload,
-    /// or `null` when the node identity has not been provisioned yet.
-    pub signature: Option<String>,
+    /// BIP-340 Schnorr signature (128 hex chars) by `pubkey` over the SHA-256
+    /// of [`card_canonical_string`].
+    pub signature: String,
 }
 
-/// Canonical JSON bytes used as the Schnorr signing payload.
-///
-/// All fields of `CommunityCard` **except** `signature` are included,
-/// serialised with keys in lexicographic order (as `serde_json` emits struct
-/// fields in declaration order — we rely on that order here).
-fn card_canonical_payload(card: &CommunityCard) -> Vec<u8> {
-    // Build a deterministic subset: exclude `signature`.
-    let payload = serde_json::json!({
-        "bond_percent": card.bond_percent,
-        "contact":      card.contact,
-        "currency":     card.currency,
-        "fee_bps":      card.fee_bps,
-        "name":         card.name,
-        "payment_methods": card.payment_methods,
-        "pubkey":       card.pubkey,
-        "relays":       card.relays,
-        "version":      card.version,
-        "website":      card.website,
-    });
-    // Compact JSON, no trailing newline — deterministic across platforms.
-    serde_json::to_vec(&payload).expect("infallible: Value is always serialisable")
+/// Relay URL as the app stores it before verifying: trimmed, no trailing slash.
+fn normalize_relay(relay: &str) -> String {
+    relay.trim().trim_end_matches('/').to_string()
 }
 
-/// Build a [`CommunityCard`] from the current store state and sign it with
-/// the node's Nostr identity key (Schnorr / BIP-340).
+/// Canonical signing string of a v1 card. It must stay byte-identical to
+/// `canonical_digest` in the app, which is the verifier:
 ///
-/// Returns the card with `signature = None` when the identity has not been
-/// provisioned yet (safe to serve — clients must reject unsigned cards if
-/// they require verified communities).
-pub fn get_community_card(root: &Path, store: &Store) -> CommunityCard {
-    let config = store.document.config.as_ref();
+/// `v=<version>&name=<name>&pubkey=<hex>&relays=<sorted, comma-joined>`
+/// `&currency=<UPPER>&payment_methods=<comma-joined, card order>`
+/// `&fee_bps=<n>&bond_percent=<n>&website=<url|empty>&contact=<url|empty>`
+///
+/// Fields are not escaped, so a v1 card is unambiguous only while names do not
+/// contain `&` and labels do not contain `,`. A future version must fix that
+/// on both sides at once; changing this string alone breaks every client.
+pub fn card_canonical_string(card: &CommunityCard) -> String {
+    let mut relays: Vec<String> = card.relays.iter().map(|r| normalize_relay(r)).collect();
+    relays.sort();
+    format!(
+        "v={}&name={}&pubkey={}&relays={}&currency={}&payment_methods={}&fee_bps={}&bond_percent={}&website={}&contact={}",
+        card.version,
+        card.name.trim(),
+        card.pubkey.trim().to_lowercase(),
+        relays.join(","),
+        card.currency.trim().to_uppercase(),
+        card.payment_methods.join(","),
+        card.fee_bps,
+        card.bond_percent,
+        card.website.trim(),
+        card.contact.trim(),
+    )
+}
 
-    let name = config.map(|c| c.community.name.clone()).unwrap_or_default();
+fn card_digest(card: &CommunityCard) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(card_canonical_string(card).as_bytes()).into()
+}
 
-    let relays: Vec<String> = config.map(|c| c.nostr.relays.clone()).unwrap_or_default();
+/// Build the signed [`CommunityCard`] of this node.
+///
+/// Returns `None` until the node has an identity and a saved configuration:
+/// a card without pubkey or signature cannot be parsed by the app, so it is
+/// not served at all. It is also withheld while the configuration contains
+/// separators that would make the signed string ambiguous.
+pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
+    let config = store.document.config.as_ref()?;
+    // A draft saved before this check existed may hold values that make the
+    // unescaped canonical string ambiguous. Such a card is not signed.
+    if config.card_is_ambiguous() {
+        return None;
+    }
+    let keys = identity::load_identity_keys(root).ok()??;
 
-    // Primary fiat currency: first in the list, or empty.
-    let currency = config
-        .and_then(|c| c.market.fiat_currencies.first().cloned())
-        .unwrap_or_default();
-
-    // Payment method labels (only active ones).
-    let payment_methods: Vec<String> = config
-        .map(|c| {
-            c.payment_methods
-                .iter()
-                .filter(|p| p.active)
-                .map(|p| p.label.clone())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let fee_bps = config.map(|c| c.market.fee_bps).unwrap_or(0);
-
-    // bond_percent: convert bond_bps (basis points) → integer percent (rounded).
-    let bond_percent = config
-        .map(|c| {
-            if c.safety.bond_enabled {
-                ((c.safety.bond_bps as u32 + 50) / 100) as u8
-            } else {
-                0
-            }
-        })
-        .unwrap_or(0);
-
-    let website = config
-        .map(|c| c.community.website.clone())
-        .unwrap_or_default();
-
-    let contact = config
-        .map(|c| c.community.contact.clone())
-        .unwrap_or_default();
-
-    // Resolve pubkey hex from the stored identity key.
-    let pubkey_hex: Option<String> = identity::inspect_public_key(root)
-        .ok()
-        .flatten()
-        .map(|pk| pk.to_hex());
+    // bond_percent: bond_bps (basis points) → integer percent, rounded.
+    let bond_percent = if config.safety.bond_enabled {
+        ((config.safety.bond_bps as u32 + 50) / 100) as u8
+    } else {
+        0
+    };
 
     let mut card = CommunityCard {
         version: 1,
-        name,
-        pubkey: pubkey_hex,
-        relays,
-        currency,
-        payment_methods,
-        fee_bps,
+        name: config.community.name.trim().to_string(),
+        pubkey: keys.public_key().to_hex(),
+        relays: config
+            .nostr
+            .relays
+            .iter()
+            .map(|r| normalize_relay(r))
+            .collect(),
+        // Primary fiat currency: first in the validated list.
+        currency: config.market.fiat_currencies.first()?.clone(),
+        // Only active payment methods.
+        payment_methods: config
+            .payment_methods
+            .iter()
+            .filter(|p| p.active)
+            .map(|p| p.label.clone())
+            .collect(),
+        fee_bps: config.market.fee_bps,
         bond_percent,
-        website,
-        contact,
-        signature: None,
+        website: config.community.website.trim().to_string(),
+        contact: config.community.contact.trim().to_string(),
+        signature: String::new(),
     };
-
-    // Sign with the identity key if available.
-    card.signature = sign_community_card(root, &card);
-
-    card
+    card.signature = sign_community_card(&keys, &card);
+    Some(card)
 }
 
-/// Produce a Schnorr signature (BIP-340) over the canonical card payload.
-///
-/// Returns `None` when the identity key is not available or signing fails.
-fn sign_community_card(root: &Path, card: &CommunityCard) -> Option<String> {
-    use nostr::Keys;
+/// BIP-340 Schnorr signature over the SHA-256 of the canonical string.
+fn sign_community_card(keys: &nostr::Keys, card: &CommunityCard) -> String {
     use nostr::secp256k1::{Message, SECP256K1};
-    use sha2::{Digest, Sha256};
 
-    let keys: Keys = identity::load_identity_keys(root).ok()??;
-    let payload = card_canonical_payload(card);
-
-    // SHA-256 of the canonical payload, then Schnorr-sign it.
-    let hash: [u8; 32] = Sha256::digest(&payload).into();
-    let msg = Message::from_digest(hash);
+    let msg = Message::from_digest(card_digest(card));
     let sig = SECP256K1.sign_schnorr(&msg, &keys.secret_key().keypair(SECP256K1));
-
-    Some(format!("{sig}"))
+    format!("{sig}")
 }
 
 /// Cryptographically verify the Schnorr signature of a [`CommunityCard`].
 pub fn verify_community_card(card: &CommunityCard) -> bool {
     use nostr::secp256k1::{Message, SECP256K1, XOnlyPublicKey, schnorr::Signature};
-    use sha2::{Digest, Sha256};
     use std::str::FromStr;
 
-    let Some(ref sig_hex) = card.signature else {
+    let Ok(sig) = Signature::from_str(card.signature.trim()) else {
         return false;
     };
-    let Some(ref pubkey_hex) = card.pubkey else {
+    let Ok(xonly) = XOnlyPublicKey::from_str(card.pubkey.trim()) else {
         return false;
     };
-
-    let Ok(sig) = Signature::from_str(sig_hex) else {
-        return false;
-    };
-    let Ok(xonly) = XOnlyPublicKey::from_str(pubkey_hex) else {
-        return false;
-    };
-
-    let payload = card_canonical_payload(card);
-    let hash: [u8; 32] = Sha256::digest(&payload).into();
-    let msg = Message::from_digest(hash);
-
+    let msg = Message::from_digest(card_digest(card));
     SECP256K1.verify_schnorr(&sig, &msg, &xonly).is_ok()
+}
+
+/// Deep link carrying the whole signed card: `mostro://community/<base64url>`,
+/// unpadded, as the app's `parse_community_payload` decodes it.
+pub fn card_deep_link(card: &CommunityCard) -> Option<String> {
+    let json = serde_json::to_vec(card).ok()?;
+    Some(format!("mostro://community/{}", base64url_no_pad(&json)))
+}
+
+fn base64url_no_pad(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..=chunk.len() {
+            out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -201,6 +195,9 @@ pub struct ConnectionInfo {
     pub qr_svg: Option<String>,
     pub qr_json_svg: Option<String>,
     pub json_uri: Option<String>,
+    /// `mostro://community/<base64url JSON>`: the signed card as a deep link.
+    pub card_uri: Option<String>,
+    pub qr_card_svg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card: Option<CommunityCard>,
     pub app_download_url: &'static str,
@@ -228,6 +225,8 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             qr_svg: None,
             qr_json_svg: None,
             json_uri: None,
+            card_uri: None,
+            qr_card_svg: None,
             card: None,
             app_download_url: "https://mostro.network",
             instructions: "Importa primero la clave de identidad Nostr de la comunidad.",
@@ -263,13 +262,16 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
     });
 
     let card = get_community_card(root, store);
-    let json_uri = serde_json::to_string(&card).ok();
+    let json_uri = card.as_ref().and_then(|c| serde_json::to_string(c).ok());
+    let card_uri = card.as_ref().and_then(card_deep_link);
 
-    let qr_json_svg = json_uri.as_ref().and_then(|uri| {
-        QrCode::new(uri.as_bytes())
+    let render_qr = |payload: &String| {
+        QrCode::new(payload.as_bytes())
             .ok()
             .map(|code| code.render::<svg::Color>().build())
-    });
+    };
+    let qr_json_svg = json_uri.as_ref().and_then(render_qr);
+    let qr_card_svg = card_uri.as_ref().and_then(render_qr);
 
     ConnectionInfo {
         status: "ready",
@@ -281,8 +283,10 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
         qr_svg,
         qr_json_svg,
         json_uri,
-        card: Some(card),
+        card_uri,
+        qr_card_svg,
+        card,
         app_download_url: "https://mostro.network",
-        instructions: "Usa la clave pública (npub o hex) o escanea el nprofile en Mostro App para conectarte a este nodo.",
+        instructions: "Escanea la tarjeta firmada de la comunidad o usa la clave pública (npub o hex) con los relays indicados. Comisiones, límites y garantía se leen del evento de información del nodo.",
     }
 }

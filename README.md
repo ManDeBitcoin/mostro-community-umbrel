@@ -15,7 +15,7 @@ Este repositorio también es una tienda comunitaria de una sola aplicación.
 
 ID estable de la aplicación: `mandebitcoin-mostro-manager`. Puerto del panel: `5173`, gestionado por `app_proxy`. No configurar un proxy público directo al contenedor. Datos exclusivos en `${APP_DATA_DIR}/data/config`.
 
-El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel y empaqueta el daemon oficial Mostro v0.19.0.
+El paquete está en [`mandebitcoin-mostro-manager/`](mandebitcoin-mostro-manager/); los archivos de la raíz son para desarrollo. Depende de la app Lightning de Umbrel y empaqueta el daemon oficial Mostro: v0.19.2 desde la versión 1.0.12 del Manager, v0.19.0 en la 1.0.11.
 
 ## Si ya tienes Mostro funcionando
 
@@ -25,9 +25,10 @@ Puedes conservar tu instalación. El Manager incluye su propio daemon Mostro, qu
 
 - Panel React en español y API Rust/Axum.
 - Configuración persistente de comunidad, mercado, seguridad, relays y métodos de pago, con validación y revisiones.
-- Activación y desactivación del daemon Mostro oficial v0.19.0 a partir de la configuración guardada.
-- Consulta de LND y panel de liquidez; monitor de órdenes públicas Nostr y simulador P2P.
-- Consola de mediación, notificaciones en vivo y respaldos cifrados.
+- Activación y desactivación del daemon Mostro oficial a partir de la configuración guardada.
+- Página de resumen con el estado del mercado, lo que requiere atención y la puesta en marcha guiada.
+- Consulta de LND y página de liquidez; libro de órdenes públicas Nostr y simulador de operaciones.
+- Consola de mediación de solo lectura (disputas del nodo y mensajes de protocolo), notificaciones en vivo y respaldos cifrados.
 
 El [roadmap](docs/roadmap.md) conserva el historial y los siguientes pasos.
 
@@ -59,6 +60,10 @@ El script de contenedor utiliza datos temporales; comprueba UI, CSP, guardado y 
 Las imágenes GHCR deben ser públicas para que Umbrel pueda descargarlas sin credenciales. La visibilidad del repositorio no convierte automáticamente sus paquetes en públicos.
 
 [Arquitectura](docs/architecture.md) · [Validación](docs/validation.md) · [Identidad visual y dirección de interfaz](docs/brand-and-ui-direction.md) · [Blueprint original](docs/reference/blueprint-v4.md)
+
+## Integrar una app con tu nodo
+
+[Guía técnica de integración de apps](docs/INTEGRACION-APPS.md): tarjeta de la comunidad, eventos del nodo, protocolo de mensajes, reglas para crear órdenes y diagnóstico de errores como «prima no válida».
 
 ## Documentación operativa
 

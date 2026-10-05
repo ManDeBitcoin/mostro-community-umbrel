@@ -2,7 +2,7 @@
 
 > **Versión:** 1.0.0 (Producción)  
 > **Compatibilidad:** Umbrel OS v0.5+ / UmbrelOS 1.x  
-> **Protocolo:** Mostro P2P v0.18.8 / Nostr NIP-04, NIP-44, NIP-59 / Lightning Network (LND)
+> **Protocolo:** Mostro v0.19.2, protocolo 2 (mensajes kind 14 con cifrado NIP-44) / Lightning Network (LND)
 
 ---
 
@@ -11,13 +11,13 @@
 **Mostro Community Manager** permite a cualquier operador con un nodo Umbrel desplegar y administrar una comunidad P2P de intercambio soberano de Bitcoin sin necesidad de programar, bifurcar software ni mantener clientes móviles propios.
 
 - **Compradores y Vendedores:** Utilizan la **Mostro App oficial** (disponible para Android, iOS y Web) conectándose directamente a tu nodo mediante la identidad pública (`npub` / `nprofile`) y los relays Nostr que configures.
-- **Motor de Mercado:** Ejecuta el daemon oficial de **Mostro** (v0.18.8) orquestado de forma aislada.
+- **Motor de Mercado:** Ejecuta el daemon oficial de **Mostro** (v0.19.2) orquestado de forma aislada.
 - **Canal Financiero:** Se conecta al nodo **LND** de tu Umbrel mediante permisos mínimos de solo lectura (`readonly.macaroon`) para la interfaz administrativa, y credenciales seguras para el daemon de pagos.
-- **Panel de Control:** Servido mediante una API en Rust de alto rendimiento y una interfaz web en React con soporte para monitor de órdenes, consola de mediación cifrada, gestión de liquidez Lightning, notificaciones SSE y copias de seguridad automáticas offsite.
+- **Panel de Control:** Servido mediante una API en Rust de alto rendimiento y una interfaz web en React con soporte para monitor de órdenes, consola de mediación cifrada, gestión de liquidez Lightning, alertas en vivo y respaldos cifrados.
 
 ```text
 USUARIOS (Mostro App)
-       │ (Nostr NIP-04/44/59)
+       │ (Nostr kind 14, NIP-44)
        ▼
    Relays Nostr
        │
@@ -29,9 +29,9 @@ USUARIOS (Mostro App)
 │  │    ├── Consola de mediación de disputas             │
 │  │    ├── Operaciones y gestión de liquidez LND        │
 │  │    ├── Transmisión de alertas en vivo (SSE)         │
-│  │    └── Backups cifrados automáticos (age)           │
+│  │    └── Respaldos cifrados (age)                     │
 │  │                                                     │
-│  ├── Daemon Mostro (v0.18.8) [Orquestación Atómica]    │
+│  ├── Daemon Mostro (v0.19.2) [Orquestación Atómica]    │
 │  │                                                     │
 │  ├── LND (Lightning Node)                              │
 │  └── Bitcoin Core Node                                 │
@@ -81,118 +81,161 @@ git clone https://github.com/ManDeBitcoin/mostro-community-umbrel.git getumbrel_
 
 Una vez completada la instalación, abre la aplicación **Mostro Community Manager** desde el escritorio de tu Umbrel.
 
-### Paso 1: Configurar la Identidad del Nodo (Nostr)
-El nodo Mostro se comunica con el mundo a través de un par de claves criptográficas Nostr (clave privada `nsec` y clave pública `npub`).
+El panel se organiza en cinco grupos, en el menú de la izquierda:
 
-1. Para generar o importar tu clave de forma hermética, accede a la consola del servidor:
-   ```bash
-   # Importar clave privada de forma interactiva (se oculta en pantalla y se valida checksum)
-   mostro-community-api import-identity
-   ```
-2. La clave se almacenará en `/data/config/identity/mostro.nsec` con permisos estrictos `0600` en un directorio `0700`.
-3. Deriva la clave pública para que el monitor opere sin tocar la clave privada:
-   ```bash
-   mostro-community-api derive-public-identity
-   ```
-4. En el panel web, pestaña **Conexión con Mostro App**, verás:
-   - Tu clave pública `npub`.
-   - Tu clave hexadecimal.
-   - El código QR interactivo y el enlace `nostr:nprofile` listo para compartir.
+| Grupo | Páginas | Para qué |
+| --- | --- | --- |
+| **Inicio** | Resumen | El estado del mercado y lo que requiere tu atención |
+| **Mercado** | Órdenes, Disputas | Lo que tu nodo anuncia: ofertas, operaciones y disputas |
+| **Nodo** | Nodo Mostro, Lightning, Conexión de apps | Encender y apagar el daemon, su identidad, la liquidez y los datos que una app necesita |
+| **Ajustes** | Configuración, Respaldos, Alertas | Las reglas de la comunidad, las copias cifradas y el registro de avisos |
+| **Herramientas** | Simulador | Ensayar una operación sin mover fondos |
 
-### Paso 2: Definir las Reglas de Mercado
-Accede a la pestaña **Configuración** en el menú lateral:
+En una instalación nueva, la página **Resumen** muestra la lista **Puesta en marcha**, con seis pasos en el mismo orden que esta guía. El botón principal lleva siempre al siguiente paso pendiente. La guía añade dos que no están en la lista: ensayar una operación y conectar las apps.
 
-1. **Identidad:** Asigna un nombre a tu comunidad (ej. *"Bitcoin Madrid P2P"*), idioma preferido y enlace web o canal de soporte.
-2. **Monedas y Límites:**
-   - Selecciona las monedas fiat en las que operará tu comunidad (ej. `EUR`, `USD`, etc.).
-   - Define el monto mínimo y máximo por orden en satoshis (ej. mínimo 10,000 sats; máximo 2,000,000 sats).
-   - Establece la comisión de la comunidad (en puntos base, ej. 0.60% = 60 bps).
-   - Define la comisión máxima tolerable de enrutamiento Lightning (`max_routing_fee_bps`, ej. 15 bps).
-3. **Seguridad y Garantías (Bonds):**
-   - Activa el depósito de garantía (bond) obligatorio para desincentivar cancelaciones maliciosas.
-   - Define el porcentaje de fianza (ej. 3.00%) y la fianza base mínima.
-4. **Relays Nostr:**
-   - Especifica entre 2 y 4 relays de alta velocidad (ej. `wss://relay.damus.io`, `wss://nos.lol`, `wss://relay.mostro.network`).
-5. **Métodos de Pago:**
-   - Agrega los métodos de pago aceptados por tu comunidad (ej. Transferencia SEPA Instant, Bizum, Efectivo en mano, Revolut).
-6. Haz clic en **Guardar configuración** en la parte inferior. Los cambios se guardarán de forma atómica en el almacenamiento local.
+### Paso 1: Crear la Identidad del Nodo
+El nodo Mostro firma sus órdenes y mensajes con un par de claves Nostr: la clave privada (`nsec`) y la pública (`npub`). La pública es lo que las apps reconocen como tu comunidad.
 
-### Paso 3: Preparación de Canales Lightning y Liquidez LND
-Dirígete a la pestaña **Operaciones LND** en el panel de navegación.
+1. Abre **Nodo Mostro**.
+2. Elige una de las dos opciones del panel **Identidad del nodo**:
+   - **Crear una identidad nueva.** El panel muestra la clave privada **una sola vez**. Cópiala en un gestor de contraseñas antes de continuar: no vuelve a mostrarse.
+   - **Tengo una clave nsec.** Pega una clave que ya uses para tu comunidad.
+3. La clave se guarda en `/data/config/identity/mostro.nsec` con permisos `0600`, dentro de un directorio `0700`.
 
-> **¡Regla de Oro de la Liquidez en Mostro!**  
-> Cuando un vendedor publica una oferta o acepta una orden de compra, el vendedor paga un **Hold Invoice** hacia tu nodo Mostro. Para que ese pago sea recibido con éxito, tu nodo **DEBE tener Liquidez Entrante (Inbound Liquidity)**. Si tu nodo solo tiene liquidez local (fondos salientes), las órdenes no podrán iniciarse.
+La importación también puede hacerse por terminal, sin pasar por el navegador. Está descrita en [`identity.md`](identity.md).
 
-#### Procedimiento para el Operador:
-1. **Verificar Canales Existentes:**
-   - Observa la barra de proporción de liquidez en la pestaña **Operaciones LND**.
-   - Comprueba que el campo *Liquidez Entrante (Inbound / Remota)* cuente con saldo suficiente (recomendado: al menos 500,000 a 1,500,000 sats).
-2. **Obtener Canales Entrantes (Inbound) con Alby Hub:**
-   - Abre la app **Alby Hub** en tu Umbrel.
-   - Ve a la sección **Canales** y selecciona **Comprar canal entrante** / **Solicitar Inbound**.
-   - Selecciona un proveedor de confianza (Alby LSP, Olympic, LNBig o Voltage).
-   - Define el tamaño del canal (ej. 1,000,000 sats) y confirma la transacción.
-3. **Abrir Canales Salientes (Outbound):**
-   - Abre 1 o 2 canales hacia nodos de enrutamiento reconocidos (**ACINQ**, **Kraken**, **Bitfinex**, **River**) para garantizar que Mostro pueda liquidar los pagos a los compradores cuando se confirme la transferencia fiat.
-4. Una vez confirmados los canales en la cadena (3 confirmaciones), el panel mostrará el estado **"Suficiente ✓"** en verde.
+### Paso 2: Definir las Reglas de la Comunidad
+Abre **Configuración**. La página tiene cinco secciones y un índice para saltar de una a otra:
 
-### Paso 4: Validación Previa con el Simulador P2P
-Antes de abrir el mercado a usuarios reales:
-1. Entra en la pestaña **Simulador P2P**.
-2. Selecciona los escenarios de prueba:
-   - *Intercambio Exitoso (Happy Path)*: Valida los cálculos matemáticos de fianzas y comisiones.
-   - *Disputa con Resolución al Comprador*: Simula el flujo de arbitraje ante impago o conflicto.
-   - *Cancelación por Vendedor*: Verifica la anulación de Hold Invoices sin penalizaciones.
-3. Haz clic en **Ejecutar Simulación** y comprueba los flujos paso a paso.
+1. **Identidad:** nombre de la comunidad, idioma, sitio web y contacto.
+2. **Mercado:**
+   - Las monedas fiat en las que opera tu comunidad.
+   - El importe mínimo y máximo por operación, en sats.
+   - La comisión total por operación. Mostro cobra la mitad a cada parte.
+   - El aporte al desarrollo de Mostro y la comisión máxima de enrutamiento. Con 0 % de enrutamiento solo salen pagos por rutas gratuitas.
+3. **Seguridad:**
+   - La garantía: los sats que cada parte retiene mientras dura la operación. Define el porcentaje, el mínimo y quién la paga.
+   - La prueba de trabajo. Si la de la primera conversación supera a la general, las apps que no la calculan no reciben respuesta: el panel lo avisa.
+4. **Nostr:** entre 2 y 4 relays rápidos, por ejemplo `wss://relay.mostro.network`, `wss://relay.damus.io` y `wss://nos.lol`. Una app solo ve tu nodo si comparte al menos un relay con él.
+5. **Métodos de pago:** los que acepta tu comunidad.
 
-### Paso 5: Activación del Demonio Mostro
-1. Regresa al **Panel General**.
-2. En la tarjeta **Orquestación del Demonio Mostro**, verifica que las advertencias previas estén resueltas (identidad presente, canales activos, configuración guardada).
-3. Haz clic en **Activar Configuración de Mercado**.
-4. El sistema generará atómicamente el archivo `active/settings.toml` (0600) y el servicio Mostro comenzará a operar en segundo plano.
+Las **plantillas de comisiones y garantía**, al principio de la página, fijan de una vez varias reglas. Cada tarjeta dice todo lo que cambia: la comisión, el aporte al desarrollo, la comisión máxima de enrutamiento, la garantía con su mínimo y quién la paga, y la penalización automática por vencimiento. Nada se guarda hasta pulsar **Guardar configuración**.
+
+Con Mostro aún sin activar, guardar deja las reglas listas. Con Mostro activado, guardar aplica las reglas al nodo y el daemon se reinicia solo si cambia lo que lee.
+
+### Paso 3: Guardar un Respaldo Cifrado
+Abre **Respaldos**, escribe una frase de cifrado de al menos 16 caracteres y pulsa **Crear respaldo**. El archivo contiene la identidad del nodo y las reglas guardadas, cifradas con `age`. Sin la frase no se puede abrir: guárdala aparte, y copia el archivo fuera del equipo.
+
+Hazlo antes de abrir el mercado. Sin una copia de la identidad, perder el equipo es perder la comunidad.
+
+### Paso 4: Preparar los Canales Lightning
+Abre **Lightning**. La página muestra el estado de tu nodo LND, la liquidez y cada canal.
+
+> **Las dos direcciones de la liquidez.** En cada operación el vendedor paga un depósito a tu nodo: esos sats **entran**, y para recibirlos hace falta **liquidez entrante**. Cuando la operación termina, tu nodo paga al comprador: esos sats **salen**, y para enviarlos hace falta **liquidez saliente** y una ruta hasta su monedero. Con solo saldo de tu lado, los depósitos de los vendedores no llegan.
+
+1. **Mira lo que hay.** La página indica la capacidad total, la liquidez saliente y entrante, y cuántas operaciones del importe máximo caben a la vez según la liquidez entrante de los canales activos. Es una estimación: no tiene en cuenta cómo se reparte el saldo entre canales, ni las garantías, las comisiones o las reservas de cada canal.
+2. **Consigue liquidez entrante.** Es la que suele faltar en un nodo nuevo. Puedes comprar un canal entrante a un proveedor de liquidez o en un mercado como Amboss Magma, o pedir a otro nodo que abra un canal hacia el tuyo. El canal tiene que abrirse en el nodo LND de tu Umbrel, que es el que usa Mostro: una app con su propio nodo Lightning no sirve para esto. Como referencia, ten varias veces el importe de tu operación máxima: cada operación en curso ocupa su importe hasta que se cierra, y las garantías ocupan el suyo.
+3. **Abre canales salientes** hacia dos o tres nodos grandes y estables, para que el pago al comprador encuentre ruta.
+4. Un canal nuevo tarda unas confirmaciones en quedar activo. Espera a que la página muestre canales activos y la cadena sincronizada.
+
+Si el panel no puede leer LND, lo dice y no muestra saldos: un cero en pantalla siempre es un cero leído del nodo. El botón **Ejemplo** enseña la página con datos de demostración.
+
+### Paso 5: Ensayar una Operación (Opcional)
+Abre **Simulador**, elige un caso y un importe, y pulsa **Simular**:
+
+- *Operación completada*: una venta de principio a fin, con sus garantías, su depósito y sus comisiones.
+- *Disputa resuelta a favor del comprador* y *Disputa resuelta con devolución al vendedor*.
+- *Cancelación por el vendedor antes de la toma*.
+
+El simulador usa las reglas guardadas y la secuencia de mensajes de Mostro v0.19.2. No mueve fondos ni publica en los relays.
+
+### Paso 6: Activar Mostro
+1. Abre **Nodo Mostro**. El panel **Avisos del nodo** lista lo que falte por resolver.
+2. Pulsa **Activar Mostro** y confirma.
+3. El sistema escribe `active/settings.toml` (`0600`) con las reglas guardadas y el daemon arranca.
+4. El daemon publica su información en los relays al arrancar y cada cinco minutos. Cuando el panel la recibe, **Resumen** pasa a decir **Tu mercado está abierto**. Ese anuncio es lo mismo que comprueban las apps.
+
+El panel solo dice que el mercado está abierto cuando se cumplen las dos cosas: Mostro está activado aquí con su daemon en ejecución, y el nodo se ha anunciado en los relays en los últimos once minutos. En los demás casos lo dice así:
+
+| Lo que ve el panel | Lo que muestra |
+| --- | --- |
+| El daemon acaba de arrancar y aún no se ha anunciado | **Arrancando** |
+| El daemon lleva más de once minutos en marcha sin anunciarse, o la configuración está activa y el daemon no se ve en ejecución | **Sin confirmar** |
+| El nodo se anuncia, pero Mostro no está activado en este equipo | **Anuncio vigente** |
+| El nodo anuncia el modo mantenimiento | **En mantenimiento** |
+
+**Anuncio vigente** es lo normal durante unos minutos después de desactivar Mostro: las apps pueden seguir viendo el nodo como activo hasta que caduque su último anuncio, aunque nadie les responde. Si el anuncio se sigue renovando, otra instancia de Mostro usa la misma clave: no actives una segunda.
+
+**Desactivar Mostro**, en la misma página, detiene el daemon. El nodo deja de atender a las apps, también en las operaciones en curso, hasta que lo actives de nuevo. La confirmación avisa de las órdenes que figuran «En curso» y de las disputas abiertas según los relays, y de lo que el panel no puede ver: una orden «Publicada» puede estar ya tomada, y el panel puede no estar al día con los relays. Revisa los mensajes de las órdenes recientes antes de desactivar.
+
+### Paso 7: Conectar las Apps
+Abre **Conexión de apps**. Ahí están el código QR, el enlace de la tarjeta firmada de la comunidad, la clave pública del nodo y sus relays. Es todo lo que una app necesita. La tarjeta lleva la comisión y el porcentaje de garantía como referencia; los valores vigentes y los límites los lee la app del propio nodo. Si cambias la comisión o la garantía, vuelve a compartir la tarjeta.
+
+Quien desarrolla una app tiene la referencia completa en [`INTEGRACION-APPS.md`](INTEGRACION-APPS.md).
 
 ---
 
 ## 5. Operaciones y Mantenimiento Diario
 
-### Monitor de Órdenes Públicas
-- En la pestaña **Órdenes públicas**, consulta en tiempo real todas las ofertas de compra y venta anunciadas por tu comunidad en Nostr (Kind 38383).
-- Filtra por tipo (compra/venta) o por estado (pendientes, en disputa, finalizadas).
-- Si alguna orden entra en estado `dispute`, aparecerá un botón directo **Mediar** para abrir la consola de arbitraje.
+### Resumen
+La página de inicio responde a tres preguntas:
 
-### Consola de Mediación de Disputas
-- Cuando dos usuarios no se ponen de acuerdo sobre el pago fiat, la orden entra en disputa.
-- La pestaña **Mediación** se conecta a los relays Nostr y descifra en memoria los mensajes de las partes (NIP-04, NIP-44 y GiftWrap NIP-59).
-- El operador revisa los mensajes y los comprobantes aportados por las partes.
-- Acciones asistidas de resolución:
-  - **Liberar Fondos al Comprador (`adm-settle`):** Si el comprador demuestra fehacientemente que realizó el pago fiat y el vendedor no liberó los sats.
-  - **Reembolsar al Vendedor (`adm-refund`):** Si el comprador no pagó y expiró el tiempo de espera.
+- **¿Está abierto el mercado?** El estado y las reglas que el nodo anuncia a las apps.
+- **¿Qué requiere mi atención?** Disputas abiertas, avisos del nodo, relays que no responden, respaldos que fallan y cambios sin guardar. Cada aviso lleva a la página donde se resuelve.
+- **¿Qué actividad hay?** Ofertas publicadas, operaciones en curso, completadas, canceladas y disputas abiertas. Cada cifra de órdenes abre el libro con ese filtro, y la de disputas abre la página **Disputas**.
 
-### Alertas y Notificaciones (SSE)
-- La aplicación mantiene una conexión permanente vía Server-Sent Events (`/api/notifications/sse`).
-- Recibirás alertas inmediatas ante:
-  - Desconexión o degradación de relays Nostr.
-  - Apertura de nuevas disputas que requieran arbitraje.
-  - Fallos de enrutamiento o canales agotados.
-  - Ejecución periódica de respaldos.
+Debajo, **Servicios** muestra de qué depende el mercado: el daemon Mostro, Lightning y los relays.
 
-### Copias de Seguridad Automáticas Offsite
-1. En la tarjeta de respaldos del **Panel General**, ingresa una frase de cifrado segura (mínimo 16 caracteres).
-2. El sistema cifra automáticamente el estado del nodo con **age** y conserva copias en `/data/backup`.
-3. Política de retención: Se mantienen los **7 respaldos más recientes**, eliminando automáticamente los más antiguos.
-4. **Copia remota (Offsite):** Se recomienda programar un comando `scp` o rsync hacia un almacenamiento externo o NAS:
+### Órdenes
+- La página **Órdenes** muestra las ofertas y operaciones que tu nodo anuncia en Nostr (kind 38383). Es de solo lectura: el panel no toma órdenes ni mueve fondos.
+- Filtra por estado (publicadas, en curso, completadas, canceladas) y por tipo (compra o venta).
+- El estado público es menos detallado que el real. Una orden tomada suele figurar como «En curso» hasta que se cierra, pero una venta tomada con la factura ya adjunta sigue como «Publicada». El daemon no publica las disputas en el evento de la orden: las anuncia aparte, y el panel las muestra en un aviso y en la página **Disputas**.
+- El botón **Mensajes** abre los mensajes de protocolo de una orden.
+
+### Disputas
+- Cuando dos usuarios no se ponen de acuerdo sobre el pago fiat, una de las partes abre una disputa y el nodo la anuncia en un evento propio (kind 38386).
+- La página **Disputas** lista esas disputas y, para cada orden, los mensajes de protocolo entre los usuarios y el daemon (kind 14, NIP-44), descifrados en memoria con la identidad del nodo.
+- El panel **no** puede leer el chat entre comprador y vendedor ni el del mediador con las partes, y **no** resuelve disputas: es de solo lectura.
+- La disputa la resuelve un mediador registrado en el nodo desde un cliente de mediación (Mostrix o `mostro-cli`). La clave del propio nodo es administradora por defecto:
+  - `mostro-cli admtakedispute -d <id-de-la-disputa>` para tomarla.
+  - `mostro-cli admsettle -o <id-de-la-orden>` si el comprador demostró el pago: el nodo le paga.
+  - `mostro-cli admcancel -o <id-de-la-orden>` si el pago no existió: los sats vuelven al vendedor.
+  - `mostro-cli admaddsolver -n <npub>` para registrar una clave de mediador distinta de la del nodo.
+
+### Alertas
+- La página **Alertas** guarda las 50 más recientes mientras la aplicación está en marcha. Llegan al momento por Server-Sent Events (`/api/notifications/sse`), sin recargar.
+- El panel registra una alerta cuando:
+  - Un relay se desconecta o no responde.
+  - El nodo anuncia una disputa nueva.
+  - Un respaldo automático termina, bien o con error, o uno manual termina bien. Un respaldo manual que falla muestra el error en su propia página.
+  - Se crea o se importa la identidad del nodo.
+  - Unas reglas guardadas no llegan a aplicarse al nodo.
+- Cada alerta enlaza con la página donde se atiende. El menú marca las graves que aún no has visto.
+
+### Respaldos
+1. **A mano.** En **Respaldos**, escribe la frase de cifrado y pulsa **Crear respaldo**. El archivo se descifra de inmediato con la misma frase para comprobarlo antes de darlo por bueno.
+2. **Automático.** Se activa cuando el servicio arranca con la frase en la variable de entorno `BACKUP_PASSPHRASE`, y repite la copia cada 24 horas. El paquete de Umbrel no define esa variable, así que en Umbrel los respaldos son manuales.
+3. **Cuántos se conservan.** Los 7 más recientes. Cada respaldo nuevo, manual o automático, borra de esa carpeta los que sobran: copia fuera los que quieras guardar más tiempo.
+4. Los archivos quedan en `/data/backup` dentro del contenedor. Para sacar uno del equipo:
    ```bash
-   scp -P 22 umbrel@umbrel.local:/data/backup/*.age /tu/almacenamiento/seguro/
+   sudo docker cp mandebitcoin-mostro-manager_web_1:/data/backup/<archivo.age> .
    ```
+   Una copia que solo vive en el mismo disco no protege frente a su pérdida.
 
-### Restauración ante Desastres (Disaster Recovery)
-Si necesitas reinstalar tu servidor o migrar a un nuevo hardware:
-1. Copia tu archivo de respaldo `.age` al nuevo servidor.
-2. Ejecuta el comando de restauración:
+> **Qué no incluye el respaldo.** La base de datos del daemon (`/data/config/active/mostro.db`) guarda las operaciones abiertas, las disputas y las garantías, y **no** forma parte de estos respaldos. Restaurar un respaldo en otro equipo recupera la identidad y la configuración, no las operaciones en curso. Antes de migrar o reinstalar, espera a que no queden operaciones activas o copia esa base de datos con el daemon detenido. El saldo y los canales dependen del respaldo de LND, que gestiona la app Lightning de Umbrel.
+
+### Restauración
+La restauración no se hace desde el panel. Se ejecuta por SSH, dentro del contenedor de la aplicación, y siempre sobre una carpeta nueva para no pisar una instalación en uso. Los dos comandos piden la frase en la terminal.
+
+1. Comprueba que el archivo se abre con tu frase:
    ```bash
-   mostro-community-api restore-backup /ruta/al/backup-revX.age /nuevo/directorio/config
+   sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-community-api verify-backup /data/backup/<archivo.age>
    ```
-3. Introduce la frase de paso original para restaurar la identidad y la configuración íntegra.
+2. Restaura en una carpeta que aún no exista. Tiene que colgar de una carpeta privada (`0700`), como la de respaldos; el comando rechaza cualquier otro destino:
+   ```bash
+   sudo docker exec -it --user 1000:1000 mandebitcoin-mostro-manager_web_1 mostro-community-api restore-backup /data/backup/<archivo.age> /data/backup/restaurado
+   ```
+3. La carpeta restaurada contiene `community.json` y `identity/mostro.nsec`, sin cifrar. Úsala y bórrala. Aplicarla a una instalación es un paso manual: el comando no toca la configuración en uso. Para una instalación nueva, la clave restaurada se importa como en el paso 1 y las reglas se vuelven a guardar en **Configuración**.
 
 ---
 

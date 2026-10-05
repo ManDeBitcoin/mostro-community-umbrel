@@ -1,0 +1,17 @@
+--- a/lib/features/simple_mode/widgets/simple_sell_confirm_sheet.dart
++++ b/lib/features/simple_mode/widgets/simple_sell_confirm_sheet.dart
+@@ -58,9 +58,11 @@
+         fiatCode: widget.fiatCode,
+         paymentMethod: widget.paymentMethod,
+         premium: widget.premium,
+-        amountSats: widget.estimatedSats != null
+-            ? BigInt.from(widget.estimatedSats!)
+-            : null,
++        // El modo simple publica siempre a precio de mercado: el nodo fija
++        // los sats al tomar la orden y aplica la prima. Sats fijos con prima
++        // se rechazan con cant-do invalid_parameters. `estimatedSats` es
++        // solo para mostrar.
++        amountSats: null,
+       );
+ 
+       final order = await rust_orders.createOrder(params: params);

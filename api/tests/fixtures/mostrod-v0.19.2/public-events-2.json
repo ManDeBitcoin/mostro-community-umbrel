@@ -1,0 +1,2335 @@
+{
+ "_comment": "Public events published by the official mostrod v0.19.2 binary (commit e041963) on an isolated regtest network on 2026-10-04, driven by settings.toml rendered by this Manager. node_pubkey is the node without bond (same throwaway identity as public-events.json); bonded_node_pubkey is a second throwaway node with the anti-abuse bond enabled for both sides and first-contact proof of work 8. reputation_trade and rated_maker_canceled were published by the bonded node for a maker in reputation mode (identity key plus trade keys): their pending revisions carry a rating tag with `since`. Do not edit: signatures are verified by the tests.",
+ "node_pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+ "bonded_node_pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+ "orders": {
+  "inline_invoice_take": [
+   {
+    "id": "a053105b391c450e8a4b0219f4dc1e1109905d69b72326d07d4bf6cd68e2dd26",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130933,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "bc404264-3e9d-4605-9ada-85b16e44a700"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:bc404264-3e9d-4605-9ada-85b16e44a700?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130933"
+     ],
+     [
+      "expires_at",
+      "1791217333"
+     ],
+     [
+      "expiration",
+      "1791217333"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "cc7a41d3f26ab4e47cf478020153eb2d3ee96daf6f772b7179563e83270f044b0d7c7e166c97cc67aa330de83ba09f5c948db4ab38b3ea99c8224e739fe6eeb9"
+   },
+   {
+    "id": "16687eea2c0d4ed92aea663f60b12a9f610bdd546c44131097be25f4dfb4ea6d",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130937,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "bc404264-3e9d-4605-9ada-85b16e44a700"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "success"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130933"
+     ],
+     [
+      "expires_at",
+      "1791217333"
+     ],
+     [
+      "expiration",
+      "1793722937"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "551b99ff9b2e8b74b07fb5e1eb120bf7671c367a76f54a2a9491ee15c6de9f02a45dc4580302ae97369af524eba1fc4a94d9f7941c264fc5964b5994e619f023"
+   }
+  ],
+  "range_taken": [
+   {
+    "id": "23a304a611b333709ad5c2a3978443c6a315cbe3f09577fc1399f9432311a893",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130951,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "206c3485-210c-4950-b0e7-e40ac5f5e07d"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "20",
+      "60"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "2"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:206c3485-210c-4950-b0e7-e40ac5f5e07d?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130951"
+     ],
+     [
+      "expires_at",
+      "1791217351"
+     ],
+     [
+      "expiration",
+      "1791217351"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "5cfeaf2b98d2d84dfd64f0a868829a507815fbefd9729978c11be0b8d90ee8b74bfdc1e26b7c0ed4023d4197674837edfb1baed9b841ea18cf05e17be564102a"
+   },
+   {
+    "id": "7e93c13034e1fa0ad0a7d83f91021f52b5a4574948be3d88ae4b2af53f0f972e",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130952,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "206c3485-210c-4950-b0e7-e40ac5f5e07d"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "34480"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "2"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130951"
+     ],
+     [
+      "expires_at",
+      "1791217351"
+     ],
+     [
+      "expiration",
+      "1793722952"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "e22c0f5f64fbc942a6be8502cdf4196707cb54d6735e74975757b50752e939b4da1518b72ce68db50ee301b1ed596508c33ecfbb0f1153f24ffc9923da337e06"
+   },
+   {
+    "id": "39363a8da9b16e38949871d3d8b321a6b0b7fbf8dd1709116aa269e2065c9014",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130955,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "206c3485-210c-4950-b0e7-e40ac5f5e07d"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "success"
+     ],
+     [
+      "amt",
+      "34480"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "2"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130951"
+     ],
+     [
+      "expires_at",
+      "1791217351"
+     ],
+     [
+      "expiration",
+      "1793722955"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "4c1f370bb6d49ec696357d3ac769d63c76c3c493345b22fde574c9643eb4cd4931c279841b79ee7e3fe8125874c93c74e1c89a9ace947338eee2027a45068685"
+   }
+  ],
+  "buy_taken": [
+   {
+    "id": "1a19c15f8b5b245f3adb417e85dce7297680c0a1fac60320af5cafd16ea2d833",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130958,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "531dda85-7867-48c3-93b9-7254fb58e30f"
+     ],
+     [
+      "k",
+      "buy"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:531dda85-7867-48c3-93b9-7254fb58e30f?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130958"
+     ],
+     [
+      "expires_at",
+      "1791217358"
+     ],
+     [
+      "expiration",
+      "1791217358"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "9c615444316d058f4498083a2e26e45a747618d553a643385dbcf514f82b883f61549a4a8ca007e8a89dfac0487e42a751a253fd9ed6b5bc9e5e13c0e31f9f71"
+   },
+   {
+    "id": "1fd11f3f512cc31be7cda6221df2f5538c00b34e5b38ada2c4ecfa56ef7e3b29",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130959,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "531dda85-7867-48c3-93b9-7254fb58e30f"
+     ],
+     [
+      "k",
+      "buy"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130958"
+     ],
+     [
+      "expires_at",
+      "1791217358"
+     ],
+     [
+      "expiration",
+      "1793722958"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "1bf407c73645fb9b691849fb661d0d81a5b308e445931e02f19397338d542ed0c349b20f2e39a2c3c8d38567f11244d49b3bb22b62fd579e45aea5a6af464fe9"
+   },
+   {
+    "id": "cbdc30f9f256b845cbf19c18dd63096a64429e7af52e650a1ad30f5956b4dd67",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130963,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "531dda85-7867-48c3-93b9-7254fb58e30f"
+     ],
+     [
+      "k",
+      "buy"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "success"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130958"
+     ],
+     [
+      "expires_at",
+      "1791217358"
+     ],
+     [
+      "expiration",
+      "1793722963"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "9b2c4d724c06c25e3fb47a262bedf26240e8c9624ee59960466df2949adaeffac564d1515c2d308f45a027b259c7bb646ae3c20476b3b4995a0cb9a814b3248d"
+   }
+  ],
+  "admin_canceled": [
+   {
+    "id": "7d19c2190ab69151b5dd27770f6a1bfdb41d943e7f29af5f0e9d44d3c97cd4b0",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130990,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130990"
+     ],
+     [
+      "expires_at",
+      "1791217390"
+     ],
+     [
+      "expiration",
+      "1791217390"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "6ebfd74970fac6da162e64fb4a9305f1eb3639a64d3ee754d9f2668e791a4b4b42bcf3b2ca99ec4c1bcdd77b796ecc86e36011b9885d2d0f5b1272015a6a99c9"
+   },
+   {
+    "id": "e4fc631328ff759a6e338ce625b0b5bf594204c388a13fe38370eea1cf5ec13e",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130991,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130990"
+     ],
+     [
+      "expires_at",
+      "1791217390"
+     ],
+     [
+      "expiration",
+      "1793722991"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "3b3991faba593cbe43b4b02bf85458e02e8b2f6104fee0578526877bc48539225e18f4980beab441f5c7186716a567f136f08e5e08a3599fc446e231b3ea5fa3"
+   },
+   {
+    "id": "a09e21bf982b43f20cc0edbac1c56a7f0e0846ede61ccce3ae7d6c16ff2c8e1f",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130995,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "deb9ccdf-4f5c-43a3-9988-0dc630bb8c5f"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "canceled"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130990"
+     ],
+     [
+      "expires_at",
+      "1791217390"
+     ],
+     [
+      "expiration",
+      "1793722995"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "8b7c36f2455c656831d6df4b78e05b635dfc0617fcb4fe721e531eb4486ec7995dd32043ae92f0608d5b44aed9c805758737edc9c76818d8b5fd768d721d259f"
+   }
+  ],
+  "cooperative_cancel": [
+   {
+    "id": "8162aa0b2a8af05c6d7c54ca98c833f3607d9cf78eee0834e37b263ab1031081",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130998,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "d429c866-aae5-4e1e-adef-bd926dadaf46"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:d429c866-aae5-4e1e-adef-bd926dadaf46?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130998"
+     ],
+     [
+      "expires_at",
+      "1791217398"
+     ],
+     [
+      "expiration",
+      "1791217398"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "68ae8cf65cfeb8eab528d70833436acd708f072ce29ef3f743b41440f2fe4e19c21a94a089159a6f56d5f52b3675283ce3eada508c2abfd746689f2649ab64bf"
+   },
+   {
+    "id": "96673d37873fdc2a364eac3ac7a83361f1994aedc944eb05dc605bf4511dd428",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130999,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "d429c866-aae5-4e1e-adef-bd926dadaf46"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130998"
+     ],
+     [
+      "expires_at",
+      "1791217398"
+     ],
+     [
+      "expiration",
+      "1793722998"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "1c706125163981a07729a527d9caa9f53f41de3dcaee963a74c92d0e8ee9b407f0875c22d02418938ed32eca695e55bf8bcb92d9ca7efbf8601ee59c060947b9"
+   },
+   {
+    "id": "b73d3e25e43adf8c3a7309bc3ac19773316bfb217aad752d8d006a8e009aa994",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791131001,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "d429c866-aae5-4e1e-adef-bd926dadaf46"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "canceled"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791130998"
+     ],
+     [
+      "expires_at",
+      "1791217398"
+     ],
+     [
+      "expiration",
+      "1793723001"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "570cfa591652d75be0220fe4bb043ed52d2f1795313630e68d82e78529974ad953f744cf772edf021e6919a3119a025df74591ad902ecdc19436d0bb06981986"
+   }
+  ],
+  "taker_walked_away": [
+   {
+    "id": "d87a4788d8d8cb75b8a43adfc171fcb577b5e7c0e7515220ebc69d1eb021913e",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791131013,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "b231d85e-e789-4e0f-97b4-93976be15d19"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:b231d85e-e789-4e0f-97b4-93976be15d19?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131013"
+     ],
+     [
+      "expires_at",
+      "1791217413"
+     ],
+     [
+      "expiration",
+      "1791217413"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "3bb90645f650a71bbcb6573adf96e2161d0841bd89a524b66c6a72d90f88a8845658e515c89a4855a013214402323b5648c30f8b938be322531309a630012842"
+   },
+   {
+    "id": "9e6cad6048d54d63bfb8341ac370a46ff1b3a9e36f8a5d08570dc62ab48aa383",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791131014,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "b231d85e-e789-4e0f-97b4-93976be15d19"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35184"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131013"
+     ],
+     [
+      "expires_at",
+      "1791217413"
+     ],
+     [
+      "expiration",
+      "1793723013"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "804bb40b83d57dd24144afdde6babd0c06fbe4ae80d71ac2ad51ab0034772112a638c4e2ada759b784422007b3d47baa9e54977f922963966038377942778e54"
+   },
+   {
+    "id": "a98c5490d303fea8b356c07785a93ce600887b24b8857c67cd01ea327be5f9b6",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791131015,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "b231d85e-e789-4e0f-97b4-93976be15d19"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:b231d85e-e789-4e0f-97b4-93976be15d19?relays=ws://127.0.0.1:39777&mostro=30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131013"
+     ],
+     [
+      "expires_at",
+      "1791217413"
+     ],
+     [
+      "expiration",
+      "1791217413"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "6d51c9c7d8f1ae16de702dbb49187a142b7f7fb1476847b07e1c7e82e4c57f04c7b9f74754bf4f79f5e60129a3646df8aa305f25ddf5a627838c172c87fcf0ff"
+   },
+   {
+    "id": "4e73638d4db30551c4eabac92f6df9c8d32fb19fe6eef577d807b637021e030c",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791131016,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "b231d85e-e789-4e0f-97b4-93976be15d19"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "canceled"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131013"
+     ],
+     [
+      "expires_at",
+      "1791217413"
+     ],
+     [
+      "expiration",
+      "1793723016"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "0cf73806b76b6758b10bce62dd6fb7b6b58f5e4810c7a4e3698e7c5d3c444011a660ac185b96b296229cc1ac84cf6cba8b3e26cbe31c721f0b1caeb85c97889c"
+   }
+  ],
+  "bonded_trade": [
+   {
+    "id": "f63ccc7d7aafd7f073f05cb79843d83437f4e40737a017019f39aa0d3812f1c1",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131172,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "6e07c373-b827-465b-8c77-af4b59fe8cfa"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:6e07c373-b827-465b-8c77-af4b59fe8cfa?relays=ws://127.0.0.1:39777&mostro=10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131170"
+     ],
+     [
+      "expires_at",
+      "1791217570"
+     ],
+     [
+      "expiration",
+      "1791217570"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "bb413e34c24f213d5bd8e30e1186bed2fe445b530ed56b2619bd515506dfffd41fe2af57429d3948ef524a7c94970e2c9a79ab9d3bb67da557565b99bfa7d30b"
+   },
+   {
+    "id": "f121a968f61f33ec3078bb078a4f1f61b85378426b7988f0c0a69042c2962d0c",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131181,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "6e07c373-b827-465b-8c77-af4b59fe8cfa"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35186"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131170"
+     ],
+     [
+      "expires_at",
+      "1791217570"
+     ],
+     [
+      "expiration",
+      "1793723181"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "1ba2a341cd5dbd25212128168501ea72ac6687d4e2347794c12b71e5dcc5ca7a748a822136f82605b422619eeac3fb0449a856d603310d3ebfef106164f380ec"
+   },
+   {
+    "id": "a41d6a195cea731b6fa2c0205aec2acdedfa5f2687cb387869c70dc967f03e72",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131185,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "6e07c373-b827-465b-8c77-af4b59fe8cfa"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "success"
+     ],
+     [
+      "amt",
+      "35186"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791131170"
+     ],
+     [
+      "expires_at",
+      "1791217570"
+     ],
+     [
+      "expiration",
+      "1793723185"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "0bb8b864458a6c5fba46730b011f42ec93f74343d987c90f015d1e7d2d0c66ae724f1c551bb98251e1adbc8ae56e66e8c8f9ae7a51a781b539da646366f45400"
+   }
+  ],
+  "reputation_trade": [
+   {
+    "id": "198a8a753b80ecb5cf3102c4dcb8393a4d39c0e83ba422960c8c5772d0663301",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791132017,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "14fd6884-a025-4165-9571-1fa5c773f22c"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"since\":1791072000,\"total_rating\":0.0,\"total_reviews\":0}]"
+     ],
+     [
+      "source",
+      "mostro:14fd6884-a025-4165-9571-1fa5c773f22c?relays=ws://127.0.0.1:39777&mostro=10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791132016"
+     ],
+     [
+      "expires_at",
+      "1791218416"
+     ],
+     [
+      "expiration",
+      "1791218416"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "ec812d4a0e051bbaeca7277a063cc8b6d88c1e143161918bd37b408b6c9ed997164232da999ef509dac28fadf652291c3772300dd98cb56a6bceb1b4fbf36a85"
+   },
+   {
+    "id": "48a1a32c29cc80d0cb415839d395fb061e8b6a5cc4c10f29287ac8509f455be2",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791132018,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "14fd6884-a025-4165-9571-1fa5c773f22c"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "amt",
+      "35169"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791132016"
+     ],
+     [
+      "expires_at",
+      "1791218416"
+     ],
+     [
+      "expiration",
+      "1793724017"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "4a4cfab4e32bd0518301628801c7ae29b8060c86effff05cbb3ac74ec0c9162842d5621a978199b7dc83f3b1dcf9605cdfcf9e2e4e51fc069b4c9b4c591f447d"
+   },
+   {
+    "id": "ffc505bb9e83be0cff7209916e0aa99182334f532d0bbf4623955e76d729d465",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791132020,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "14fd6884-a025-4165-9571-1fa5c773f22c"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "success"
+     ],
+     [
+      "amt",
+      "35169"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791132016"
+     ],
+     [
+      "expires_at",
+      "1791218416"
+     ],
+     [
+      "expiration",
+      "1793724020"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "fbdc01e1ac4eae0adfc7f8916e66c07b5c4ec565581d69162f545ec0fb5ec4fbbbc1e27c0f05daf52231464be27366943ee253a0aeba3df5570dbdfbea89aafd"
+   }
+  ],
+  "rated_maker_canceled": [
+   {
+    "id": "a8424ca63dc1ee2831bf9a95bde2a3e38c5e81019492bd5a2a2779c2f68c5c5e",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791132168,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "deba3f86-d109-43e4-b8e2-5ae1ead1e7d3"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "pending"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "rating",
+      "[\"rating\",{\"days\":0,\"since\":1791072000,\"total_rating\":2.5,\"total_reviews\":1}]"
+     ],
+     [
+      "source",
+      "mostro:deba3f86-d109-43e4-b8e2-5ae1ead1e7d3?relays=ws://127.0.0.1:39777&mostro=10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791132168"
+     ],
+     [
+      "expires_at",
+      "1791218568"
+     ],
+     [
+      "expiration",
+      "1791218568"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "3b7cf7a4f6537da9e04ed9905ffc1cee68bf8bc74ea102b925665575431a039a8776ff6d095c669fe74e154546e8590384a391856363c55e18d55c7d6ce27559"
+   },
+   {
+    "id": "48e147d79b81a746cb3bfb7c4a8baf801fec1c6a0245a5435b8bc495a6db3be2",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791132170,
+    "kind": 38383,
+    "tags": [
+     [
+      "d",
+      "deba3f86-d109-43e4-b8e2-5ae1ead1e7d3"
+     ],
+     [
+      "k",
+      "sell"
+     ],
+     [
+      "f",
+      "USD"
+     ],
+     [
+      "s",
+      "canceled"
+     ],
+     [
+      "amt",
+      "0"
+     ],
+     [
+      "fa",
+      "30"
+     ],
+     [
+      "pm",
+      "Transferencia bancaria"
+     ],
+     [
+      "premium",
+      "0"
+     ],
+     [
+      "network",
+      "regtest"
+     ],
+     [
+      "layer",
+      "lightning"
+     ],
+     [
+      "published_at",
+      "1791132168"
+     ],
+     [
+      "expires_at",
+      "1791218568"
+     ],
+     [
+      "expiration",
+      "1793724170"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "order"
+     ]
+    ],
+    "content": "",
+    "sig": "c5655e61e5b616838d88cfd64470a1a62ec53b459e2cfc8cdfdb626455e02e255c187ee832fb15a6adfc12d2295e80902def1077d3e506fce58ad49b2236da88"
+   }
+  ]
+ },
+ "disputes": {
+  "seller_refunded": [
+   {
+    "id": "74b8fbcfdb33bb6d32afc6654e854284182e06b9910b760c8453ca01e5334e92",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130993,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "1b84909d-bbf5-405a-ae1e-3e2beafa5458"
+     ],
+     [
+      "expiration",
+      "1798906993"
+     ],
+     [
+      "s",
+      "initiated"
+     ],
+     [
+      "initiator",
+      "seller"
+     ],
+     [
+      "published_at",
+      "1791130993"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "a13f1c601dc1e7e08ebb9e6a3e3f8b59d3e31af8243c20596c8e8c2b914fcbb46998eaf70083bc47d359d1095c59097d10754693327f84f247b460874a878eab"
+   },
+   {
+    "id": "91e00d7a101dd06f4adf06d7ea4878e0366ac0e28615d354c56d44ee8e272323",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130994,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "1b84909d-bbf5-405a-ae1e-3e2beafa5458"
+     ],
+     [
+      "expiration",
+      "1798906994"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "initiator",
+      "seller"
+     ],
+     [
+      "published_at",
+      "1791130993"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "2df21ce630e204a0270aeee224acb3b9d3f8b94c08eeb9617d1c5f6d91903cfe7433d040ce55eb705848d5beafbce413bd6fc1b46a07c2cc089ab552355195b3"
+   },
+   {
+    "id": "fef712f724dca71d6195e5fc2078553e5ade0ae6c4e422549ef074a23ad17a5f",
+    "pubkey": "30b0b9ab6043de1b6ceeff85e1c0e9dc5302d9ffce71eda6aa38a3a992ca5e33",
+    "created_at": 1791130995,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "1b84909d-bbf5-405a-ae1e-3e2beafa5458"
+     ],
+     [
+      "expiration",
+      "1798906995"
+     ],
+     [
+      "s",
+      "seller-refunded"
+     ],
+     [
+      "initiator",
+      "seller"
+     ],
+     [
+      "published_at",
+      "1791130993"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "85a0d95a956974b51bc59afa52dcc1d1ec41ae5e87df1a1b649090d190b7c3fcf6928bc99aac4fbfb957275ad39b908482c225ab7b0ab15113098e6816135b16"
+   }
+  ],
+  "settled_on_bonded_node": [
+   {
+    "id": "2d5b810559686d0e17c5f1387953678c840ca3f0fd695db0346095db953cbfd3",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131205,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "dc8db6c6-24c7-4306-bf19-38c7004a0cca"
+     ],
+     [
+      "expiration",
+      "1798907205"
+     ],
+     [
+      "s",
+      "initiated"
+     ],
+     [
+      "initiator",
+      "buyer"
+     ],
+     [
+      "published_at",
+      "1791131205"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "07cc43aa90d69ddd8bcd8a581ceaa4a0f250c8bd9b2f40a70ad0d4410b3dd47f246aef67cea052d5eb39f8f7f1f8804a5a65a8c1e1ba0f46d2f76256173d5dff"
+   },
+   {
+    "id": "14f4c2fd29f9551ac7951677af3058da8ad9aafca94a57310c3a865cde7a4916",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131212,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "dc8db6c6-24c7-4306-bf19-38c7004a0cca"
+     ],
+     [
+      "expiration",
+      "1798907212"
+     ],
+     [
+      "s",
+      "in-progress"
+     ],
+     [
+      "initiator",
+      "buyer"
+     ],
+     [
+      "published_at",
+      "1791131205"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "1f4951e2dd773fe5d66c3cc960ba067b5636753c283122d11863348edc4b1ccfe8718d89ff0322472a5b4f0a29b22f8a2fc4afd97b6fbb04aa1783e3a2204cd7"
+   },
+   {
+    "id": "106f98d2d42077ccc29e75992cdc9dd340317667dac14c1f6c3095ddb9b90ea2",
+    "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+    "created_at": 1791131213,
+    "kind": 38386,
+    "tags": [
+     [
+      "d",
+      "dc8db6c6-24c7-4306-bf19-38c7004a0cca"
+     ],
+     [
+      "expiration",
+      "1798907213"
+     ],
+     [
+      "s",
+      "settled"
+     ],
+     [
+      "initiator",
+      "buyer"
+     ],
+     [
+      "published_at",
+      "1791131205"
+     ],
+     [
+      "y",
+      "mostro",
+      "BitMaxis - Regtest Bond"
+     ],
+     [
+      "z",
+      "dispute"
+     ]
+    ],
+    "content": "",
+    "sig": "0d47fd27e6d219b478cb90402c11e7d0d09ef2be48695862e35860ae98f2b32e9ef299b6346c71f50e03dd1413ec87f8c3b2e9cb2f7ef4272e44df9d04377e0c"
+   }
+  ]
+ },
+ "bonded_info": {
+  "id": "db949b4bc46db1fc9af005571a41509963804c37a3e005f0acf3a8b962ca6131",
+  "pubkey": "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448",
+  "created_at": 1791131112,
+  "kind": 38385,
+  "tags": [
+   [
+    "d",
+    "10809b8d661b47a48aff57353106149e00cb7e1fbb46c229337467c7eb4f6448"
+   ],
+   [
+    "mostro_version",
+    "0.19.2"
+   ],
+   [
+    "mostro_commit_hash",
+    "e041963fcdc8f8d0be6149edd2e49136df3b87d3"
+   ],
+   [
+    "max_order_amount",
+    "1000000"
+   ],
+   [
+    "min_order_amount",
+    "1000"
+   ],
+   [
+    "expiration_hours",
+    "24"
+   ],
+   [
+    "expiration_seconds",
+    "900"
+   ],
+   [
+    "fiat_currencies_accepted",
+    "USD"
+   ],
+   [
+    "max_orders_per_response",
+    "10"
+   ],
+   [
+    "fee",
+    "0.006"
+   ],
+   [
+    "pow",
+    "0"
+   ],
+   [
+    "pow_first_contact",
+    "8"
+   ],
+   [
+    "protocol_version",
+    "2"
+   ],
+   [
+    "hold_invoice_cltv_delta",
+    "144"
+   ],
+   [
+    "lnd_version",
+    "0.21.3-beta commit=v0.21.3-beta"
+   ],
+   [
+    "lnd_node_pubkey",
+    "0246575b256583c058ba257083609f9ac9b9139b27757f312007611f5c2ff11f01"
+   ],
+   [
+    "lnd_commit_hash",
+    "572b561bf05f03dfe6135110970c4d858c3482dc"
+   ],
+   [
+    "lnd_node_alias",
+    "lnd"
+   ],
+   [
+    "lnd_chains",
+    "bitcoin"
+   ],
+   [
+    "lnd_networks",
+    "regtest"
+   ],
+   [
+    "lnd_uris",
+    ""
+   ],
+   [
+    "y",
+    "mostro",
+    "BitMaxis - Regtest Bond"
+   ],
+   [
+    "z",
+    "info"
+   ],
+   [
+    "invoice_expiration_window",
+    "3600"
+   ],
+   [
+    "hold_invoice_expiration_window",
+    "300"
+   ],
+   [
+    "bond_enabled",
+    "true"
+   ],
+   [
+    "bond_amount_pct",
+    "0.03"
+   ],
+   [
+    "bond_base_amount_sats",
+    "1000"
+   ],
+   [
+    "bond_apply_to",
+    "both"
+   ],
+   [
+    "bond_slash_on_waiting_timeout",
+    "false"
+   ],
+   [
+    "bond_slash_node_share_pct",
+    "0.5"
+   ],
+   [
+    "bond_payout_claim_window_days",
+    "15"
+   ],
+   [
+    "maintenance_mode",
+    "false"
+   ]
+  ],
+  "content": "",
+  "sig": "6d8a05bab61570f25b0c37a2b72dbc8586e3927d15b2b9cf0eb7448e5398b9dba1e572d1a670ebff981410d79da5b0b188494667acacbd3a88d35de666831943"
+ }
+}

@@ -58,8 +58,7 @@ async fn test_notifications_broadcast_and_sse_stream() {
     .await;
 
     hub.publish(Notification::dispute_alert(
-        "d3b07384-d113-4001-a111-a8e0f1112222",
-        "Disputa iniciada por comprador",
+        "El nodo anuncia la disputa d3b07384-d113-4001-a111-a8e0f1112222, abierta por el comprador",
         Some(serde_json::json!({"amount_sats": 50000})),
     ))
     .await;
@@ -80,7 +79,8 @@ async fn test_notifications_broadcast_and_sse_stream() {
     let n2 = rx.recv().await.unwrap();
     assert_eq!(n2.category, "dispute");
     assert_eq!(n2.level, "warning");
-    assert!(n2.title.contains("d3b07384"));
+    assert_eq!(n2.title, "Disputa abierta");
+    assert!(n2.message.contains("d3b07384"));
 
     let n3 = rx.recv().await.unwrap();
     assert_eq!(n3.category, "backup");
@@ -188,94 +188,47 @@ async fn test_dispute_notification_emitted_by_order_monitor() {
                         {
                             let sub_id = arr[1].as_str().unwrap_or("sub");
                             let now = Timestamp::now().as_secs();
-                            let tags = vec![
+                            // What mostrod publishes when a dispute opens: a
+                            // kind 38386 event that names the dispute, never
+                            // the order. Orders never carry `s=dispute`.
+                            let tag = |name: &'static str, values: Vec<String>| {
                                 Tag::custom(
                                     nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "d",
+                                        name,
                                     )),
-                                    vec!["d3b07384-d113-4001-a111-a8e0f1113333".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "k",
-                                    )),
-                                    vec!["sell".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "s",
-                                    )),
-                                    vec!["dispute".to_string()], // DISPUTE STATUS!
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "f",
-                                    )),
-                                    vec!["EUR".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "amt",
-                                    )),
-                                    vec!["500000".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "fa",
-                                    )),
-                                    vec!["200".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "pm",
-                                    )),
-                                    vec!["sepa".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "premium",
-                                    )),
-                                    vec!["0".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "y",
-                                    )),
-                                    vec!["mostro".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "z",
-                                    )),
-                                    vec!["order".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "network",
-                                    )),
-                                    vec!["mainnet".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "layer",
-                                    )),
-                                    vec!["lightning".to_string()],
-                                ),
-                                Tag::custom(
-                                    nostr::event::tag::TagKind::Custom(std::borrow::Cow::Borrowed(
-                                        "expiration",
-                                    )),
-                                    vec![(now + 3600).to_string()],
-                                ),
-                            ];
-                            let event = EventBuilder::new(Kind::from(38383), "")
-                                .tags(tags)
-                                .sign_with_keys(&keys_clone)
-                                .unwrap();
+                                    values,
+                                )
+                            };
+                            let dispute_event = |id: &str, opened_at: u64| {
+                                EventBuilder::new(Kind::from(38386), "")
+                                    .tags(vec![
+                                        tag("d", vec![id.to_string()]),
+                                        tag("expiration", vec![(now + 3600).to_string()]),
+                                        tag("s", vec!["initiated".into()]),
+                                        tag("initiator", vec!["buyer".into()]),
+                                        tag("published_at", vec![opened_at.to_string()]),
+                                        tag("y", vec!["mostro".into(), "Comunidad".into()]),
+                                        tag("z", vec!["dispute".into()]),
+                                    ])
+                                    .custom_created_at(Timestamp::from(opened_at))
+                                    .sign_with_keys(&keys_clone)
+                                    .unwrap()
+                            };
+                            // A dispute opened hours ago, replayed from the
+                            // relay's history: it is listed but must not alert.
+                            let old =
+                                dispute_event("d3b07384-d113-4001-a111-a8e0f1110000", now - 7200);
+                            let old_msg = serde_json::json!(["EVENT", sub_id, old]).to_string();
+                            let _ = ws.send(Message::Text(old_msg.into())).await;
+                            let event = dispute_event("d3b07384-d113-4001-a111-a8e0f1113333", now);
                             let event_msg = serde_json::json!(["EVENT", sub_id, event]).to_string();
                             let eose_msg = serde_json::json!(["EOSE", sub_id]).to_string();
-                            let _ = ws.send(Message::Text(event_msg.into())).await;
+                            let _ = ws.send(Message::Text(event_msg.clone().into())).await;
                             let _ = ws.send(Message::Text(eose_msg.into())).await;
+                            // The same event again, as a second relay or a
+                            // reconnect would deliver it.
+                            let _ = ws.send(Message::Text(event_msg.clone().into())).await;
+                            let _ = ws.send(Message::Text(event_msg.into())).await;
                         }
                     }
                     Message::Ping(p) => {
@@ -307,7 +260,7 @@ async fn test_dispute_notification_emitted_by_order_monitor() {
     };
 
     let worker = tokio::spawn(monitor_worker_with_notifications(
-        cache,
+        cache.clone(),
         config_rx,
         timing,
         Some(hub.clone()),
@@ -320,7 +273,26 @@ async fn test_dispute_notification_emitted_by_order_monitor() {
 
     assert_eq!(notif.category, "dispute");
     assert_eq!(notif.level, "warning");
-    assert!(notif.title.contains("d3b07384-d113-4001-a111-a8e0f1113333"));
+    assert_eq!(notif.title, "Disputa abierta");
+    assert!(
+        notif
+            .message
+            .contains("d3b07384-d113-4001-a111-a8e0f1113333, abierta por el comprador")
+    );
+    assert_eq!(
+        notif.details.as_ref().unwrap()["dispute_id"],
+        "d3b07384-d113-4001-a111-a8e0f1113333"
+    );
+    assert_eq!(notif.details.as_ref().unwrap()["initiator"], "buyer");
+
+    // The relay delivered the recent dispute three times and an old one once:
+    // exactly one alert, for the recent one, and both disputes are listed.
+    let again = tokio::time::timeout(Duration::from_millis(700), rx.recv()).await;
+    assert!(
+        again.is_err(),
+        "a dispute alert was repeated or sent for an old dispute"
+    );
+    assert_eq!(cache.read().await.to_snapshot().disputes.len(), 2);
 
     worker.abort();
     relay_handle.abort();

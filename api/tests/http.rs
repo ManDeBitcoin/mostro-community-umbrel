@@ -368,11 +368,45 @@ async fn daemon_activation_flow_and_dashboard_status() {
     assert_eq!(body["mostro"]["configured_revision"], 1);
     assert!(body["mostro"].get("version").is_none());
 
+    // The explicit activation asked the supervisor to start the daemon.
+    let wake = dir.path().join(".standby_wake");
+    let status_path = dir.path().join("active").join("status.json");
+    let active_revision = || -> serde_json::Value {
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&status_path).unwrap()).unwrap()
+            ["revision"]
+            .clone()
+    };
+    assert!(wake.exists());
+    std::fs::remove_file(&wake).unwrap();
+
+    // A draft that renders the same settings.toml (a payment-method label) is
+    // recorded as active without restarting a daemon that may have trades in
+    // flight.
+    let mut relabelled = config();
+    relabelled["payment_methods"][0]["label"] = serde_json::json!("Transferencia SEPA");
+    let res = app
+        .clone()
+        .oneshot(save(1, true, "http://localhost:5173", relabelled))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(active_revision(), 2);
+    assert!(
+        !wake.exists(),
+        "an unchanged settings.toml restarted the daemon"
+    );
+
+    // A draft that changes settings.toml is applied and restarts it.
     let mut updated_config = config();
     updated_config["market"]["fee_bps"] = serde_json::json!(75);
     let res = app
         .clone()
-        .oneshot(save(1, true, "http://localhost:5173", updated_config))
+        .oneshot(save(
+            2,
+            true,
+            "http://localhost:5173",
+            updated_config.clone(),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -380,13 +414,43 @@ async fn daemon_activation_flow_and_dashboard_status() {
     let active_settings =
         std::fs::read_to_string(dir.path().join("active").join("settings.toml")).unwrap();
     assert!(active_settings.contains("fee = 0.0075"));
+    assert_eq!(active_revision(), 3);
+    assert!(wake.exists());
 
-    let status_json: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(dir.path().join("active").join("status.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(status_json["revision"], 2);
-    assert!(dir.path().join(".standby_wake").exists());
+    // Without the activation record the LND origin of the running daemon is
+    // unknown: the draft is saved but not applied, and the operator is told.
+    std::fs::remove_file(&wake).unwrap();
+    std::fs::remove_file(&status_path).unwrap();
+    updated_config["market"]["fee_bps"] = serde_json::json!(90);
+    let res = app
+        .clone()
+        .oneshot(save(3, true, "http://localhost:5173", updated_config))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(!wake.exists());
+    let unchanged =
+        std::fs::read_to_string(dir.path().join("active").join("settings.toml")).unwrap();
+    assert!(unchanged.contains("fee = 0.0075"));
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/notifications")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let notifications: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(
+        notifications
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["level"] == "critical" && n["title"] == "Activación incompleta")
+    );
 
     // 8. POST /api/daemon/stop deactivates daemon
     let res = app
@@ -991,21 +1055,101 @@ async fn test_community_presets_and_identity_endpoints() {
 
 #[tokio::test]
 async fn community_card_endpoint_contract() {
-    let (_dir, app) = setup();
+    let (dir, app) = setup();
+    let get_card = |app: axum::Router| async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/community/card")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        (status, body)
+    };
+
+    // Without identity or saved configuration there is nothing to sign. A
+    // half card (null pubkey or signature) would not even parse in the app.
+    let (status, body) = get_card(app.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("identidad"));
 
     let response = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/community/card")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(save(0, true, "http://localhost:5173", config()))
         .await
         .unwrap();
-
     assert_eq!(response.status(), StatusCode::OK);
+    let (status, _) = get_card(app.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    use nostr::{Keys, SecretKey, ToBech32};
+    let keys = Keys::new(SecretKey::from_slice(&[21; 32]).unwrap());
+    mostro_community_api::identity::import(
+        dir.path(),
+        &keys.secret_key().to_bech32().unwrap(),
+        &keys.public_key().to_bech32().unwrap(),
+    )
+    .unwrap();
+
+    let (status, body) = get_card(app.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["pubkey"].is_string());
+    assert!(body["signature"].is_string());
     let card: mostro_community_api::connection::CommunityCard =
-        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        serde_json::from_value(body).unwrap();
     assert_eq!(card.version, 1);
+    assert_eq!(card.pubkey, keys.public_key().to_hex());
+    assert_eq!(card.currency, "EUR");
+    assert!(mostro_community_api::connection::verify_community_card(
+        &card
+    ));
+}
+
+#[tokio::test]
+async fn saving_rejects_a_dev_fee_mostrod_would_refuse() {
+    let (_dir, app) = setup();
+    let mut low = config();
+    low["market"]["dev_fee_bps"] = 500.into();
+    let response = app
+        .clone()
+        .oneshot(save(0, true, "http://localhost:5173", low))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(body["error"].as_str().unwrap().contains("10 %"));
+
+    let mut minimum = config();
+    minimum["market"]["dev_fee_bps"] = 1000.into();
+    let response = app
+        .oneshot(save(0, true, "http://localhost:5173", minimum))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn disputes_endpoint_requires_protection() {
+    let (_dir, app) = setup();
+    let request = |protected: bool| {
+        let mut builder = Request::builder().uri("/api/disputes");
+        if protected {
+            builder = builder.header("x-requested-with", "mostro-community");
+        }
+        builder.body(Body::empty()).unwrap()
+    };
+    let response = app.clone().oneshot(request(false)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = app.oneshot(request(true)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body, serde_json::json!([]));
 }
