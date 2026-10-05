@@ -2,7 +2,7 @@
 //! Only public data (npub, hex pubkey, relays, nprofile) is returned.
 //! Secret keys, macaroons, and financial state are strictly excluded.
 
-use crate::{identity, store::Store};
+use crate::{config::Configuration, identity, store::Store};
 use nostr::{PublicKey, RelayUrl, ToBech32, nips::nip19::Nip19Profile};
 use qrcode::{QrCode, render::svg};
 use serde::{Deserialize, Serialize};
@@ -88,64 +88,98 @@ fn card_digest(card: &CommunityCard) -> [u8; 32] {
     Sha256::digest(card_canonical_string(card).as_bytes()).into()
 }
 
-/// Why this node has no community card to serve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why this node has no card to hand out.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum CardUnavailable {
-    /// The node has no identity, or it could not be read.
+    /// No configuration has been saved yet.
+    NoRules,
+    /// The saved configuration holds a separator the v1 signature cannot tell
+    /// apart from its own ([`Configuration::card_is_ambiguous`]).
+    ///
+    /// [`Configuration::card_is_ambiguous`]: crate::config::Configuration::card_is_ambiguous
+    Ambiguous,
+    /// The node has no private key to sign with.
     NoIdentity,
-    /// No rules have been saved yet.
-    NoConfiguration,
-    /// The saved rules hold a separator the signed string cannot carry. The
-    /// value is the rule they break, as the operator reads it.
-    Ambiguous(&'static str),
+    /// The private key is there but could not be read safely.
+    IdentityUnreadable,
 }
 
 impl CardUnavailable {
-    /// The reason in the operator's words, for the panel and the API.
-    pub fn message(&self) -> String {
+    /// The reason as a stable code, the same word the JSON form uses.
+    pub fn code(self) -> &'static str {
         match self {
+            Self::NoRules => "no_rules",
+            Self::Ambiguous => "ambiguous",
+            Self::NoIdentity => "no_identity",
+            Self::IdentityUnreadable => "identity_unreadable",
+        }
+    }
+
+    /// The reason as a sentence for the operator.
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::NoRules => {
+                "Aún no hay reglas guardadas: la tarjeta se genera a partir de la configuración de la comunidad."
+            }
+            Self::Ambiguous => {
+                "La configuración guardada contiene «&» en el nombre, la web o el contacto, o «&» o «,» en un relay o en un método de pago activo. Con esos caracteres la tarjeta firmada no sería inequívoca: corrígelos en Configuración y guarda."
+            }
             Self::NoIdentity => {
-                "La tarjeta se firma con la clave privada del nodo y el panel no la tiene: crea o importa la identidad"
-                    .into()
+                "El nodo no tiene identidad: sin su clave privada no se puede firmar la tarjeta."
             }
-            Self::NoConfiguration => {
-                "La tarjeta necesita reglas guardadas: guarda la configuración de la comunidad"
-                    .into()
+            Self::IdentityUnreadable => {
+                "No se pudo leer la clave privada del nodo: revisa los permisos de la carpeta de identidad."
             }
-            Self::Ambiguous(rule) => format!(
-                "La tarjeta no se genera con la configuración guardada. {rule}. Corrige ese valor en Configuración y guarda de nuevo"
+        }
+    }
+
+    /// The same sentence, naming the field to change when the saved
+    /// configuration is at hand and is what stands in the way.
+    pub fn text_for(self, config: Option<&Configuration>) -> String {
+        match (self, config.and_then(Configuration::card_ambiguity)) {
+            (Self::Ambiguous, Some(rule)) => format!(
+                "La tarjeta no se genera con la configuración guardada. {rule}. Corrige ese valor en Configuración y guarda de nuevo."
             ),
+            _ => self.text().to_string(),
         }
     }
 }
 
-/// Build the signed [`CommunityCard`] of this node, or `None` when there is
-/// none to serve. [`community_card`] also says why.
-pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
-    community_card(root, store).ok()
-}
-
 /// Build the signed [`CommunityCard`] of this node.
 ///
-/// There is none until the node has an identity and a saved configuration:
+/// Returns `None` until the node has an identity and a saved configuration:
 /// a card without pubkey or signature cannot be parsed by the app, so it is
 /// not served at all. It is also withheld while the configuration contains
 /// separators that would make the signed string ambiguous.
-pub fn community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardUnavailable> {
-    let keys = identity::load_identity_keys(root)
-        .ok()
-        .flatten()
-        .ok_or(CardUnavailable::NoIdentity)?;
+pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
+    issue_community_card(root, store).ok()
+}
+
+/// [`get_community_card`], saying why when there is no card.
+pub fn issue_community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardUnavailable> {
+    issue_card_with_keys(root, store).map(|(card, _)| card)
+}
+
+/// The card together with the keys that signed it, for the one caller that
+/// signs something else with them: the event that carries the card.
+pub(crate) fn issue_card_with_keys(
+    root: &Path,
+    store: &Store,
+) -> Result<(CommunityCard, nostr::Keys), CardUnavailable> {
     let config = store
         .document
         .config
         .as_ref()
-        .ok_or(CardUnavailable::NoConfiguration)?;
+        .ok_or(CardUnavailable::NoRules)?;
     // A draft saved before this check existed may hold values that make the
     // unescaped canonical string ambiguous. Such a card is not signed.
-    if let Some(rule) = config.card_ambiguity() {
-        return Err(CardUnavailable::Ambiguous(rule));
+    if config.card_is_ambiguous() {
+        return Err(CardUnavailable::Ambiguous);
     }
+    let keys = identity::load_identity_keys(root)
+        .map_err(|_| CardUnavailable::IdentityUnreadable)?
+        .ok_or(CardUnavailable::NoIdentity)?;
 
     // bond_percent: bond_bps (basis points) → integer percent, rounded.
     let bond_percent = if config.safety.bond_enabled {
@@ -169,7 +203,7 @@ pub fn community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardU
             .market
             .fiat_currencies
             .first()
-            .ok_or(CardUnavailable::NoConfiguration)?
+            .ok_or(CardUnavailable::NoRules)?
             .clone(),
         // Only active payment methods.
         payment_methods: config
@@ -185,7 +219,18 @@ pub fn community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardU
         signature: String::new(),
     };
     card.signature = sign_community_card(&keys, &card);
-    Ok(card)
+    Ok((card, keys))
+}
+
+/// Whether two cards say the same. The signature is left out: BIP-340 signing
+/// takes fresh randomness, so two cards issued for the same configuration
+/// differ in it and in nothing else.
+pub fn same_card_content(a: &CommunityCard, b: &CommunityCard) -> bool {
+    let unsigned = |card: &CommunityCard| CommunityCard {
+        signature: String::new(),
+        ..card.clone()
+    };
+    unsigned(a) == unsigned(b)
 }
 
 /// BIP-340 Schnorr signature over the SHA-256 of the canonical string.
@@ -314,9 +359,12 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             .map(|code| code.render::<svg::Color>().build())
     });
 
-    let card_result = community_card(root, store);
-    let card_unavailable = card_result.as_ref().err().map(CardUnavailable::message);
-    let card = card_result.ok();
+    let issued = issue_community_card(root, store);
+    let card_unavailable = issued
+        .as_ref()
+        .err()
+        .map(|reason| reason.text_for(store.document.config.as_ref()));
+    let card = issued.ok();
     let json_uri = card.as_ref().and_then(|c| serde_json::to_string(c).ok());
     let card_uri = card.as_ref().and_then(card_deep_link);
 

@@ -1087,9 +1087,10 @@ async fn community_card_endpoint_contract() {
 
     // Without identity or saved configuration there is nothing to sign. A
     // half card (null pubkey or signature) would not even parse in the app.
+    // The answer says which of the two is missing.
     let (status, body) = get_card(app.clone()).await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body["error"].as_str().unwrap().contains("identidad"));
+    assert!(body["error"].as_str().unwrap().contains("reglas guardadas"));
 
     let response = app
         .clone()
@@ -1097,8 +1098,9 @@ async fn community_card_endpoint_contract() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let (status, _) = get_card(app.clone()).await;
+    let (status, body) = get_card(app.clone()).await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("identidad"));
 
     use nostr::{Keys, SecretKey, ToBech32};
     let keys = Keys::new(SecretKey::from_slice(&[21; 32]).unwrap());
@@ -1163,7 +1165,7 @@ async fn community_card_endpoint_says_why_there_is_no_card() {
     import_identity(dir.path());
     let (status, reason) = get_card(app_for(dir.path())).await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(reason.contains("necesita reglas guardadas"), "{reason}");
+    assert!(reason.contains("Aún no hay reglas guardadas"), "{reason}");
     assert!(!reason.contains("identidad"), "{reason}");
 
     // An identity and rules as v1.0.11 accepted them.
@@ -1184,7 +1186,7 @@ async fn community_card_endpoint_says_why_there_is_no_card() {
         "{reason}"
     );
     assert!(!reason.contains("identidad"), "{reason}");
-    assert!(!reason.contains("necesita reglas"), "{reason}");
+    assert!(!reason.contains("no hay reglas"), "{reason}");
 
     // The connection data gives the panel the same reason.
     let response = app

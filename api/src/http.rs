@@ -1,6 +1,7 @@
 use crate::{
     adapters::Integrations,
     backup::{self, AutoBackupState},
+    card_publication::{CardPublication, PublicationView},
     chat::{self, SharedChatCache},
     config::Configuration,
     connection, daemon, identity,
@@ -104,6 +105,9 @@ pub struct AppState {
     pub notifications: Arc<NotificationHub>,
     pub backup_state: Arc<tokio::sync::RwLock<AutoBackupState>>,
     pub rate_limiter: Arc<RateLimiter>,
+    /// The worker that publishes the community card runs apart
+    /// (`card_publication::CardPublisher`); this is how it is told to look again.
+    pub card_publication: CardPublication,
 }
 
 impl AppState {
@@ -123,6 +127,7 @@ impl AppState {
             notifications: Arc::new(NotificationHub::default()),
             backup_state: Arc::new(tokio::sync::RwLock::new(AutoBackupState::default())),
             rate_limiter: Arc::new(RateLimiter::default()),
+            card_publication: CardPublication::default(),
         }
     }
 }
@@ -133,6 +138,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/dashboard", get(dashboard))
         .route("/api/community", get(community).merge(put(save_community)))
         .route("/api/community/card", get(community_card_handler))
+        .route(
+            "/api/community/card/publication",
+            get(card_publication_handler).put(card_publication_switch_handler),
+        )
         .route("/api/community/presets", get(community_presets_handler))
         .route("/api/identity/generate", post(identity_generate_handler))
         .route("/api/identity/import", post(identity_import_handler))
@@ -278,9 +287,82 @@ async fn community_card_handler(
         )
     })?;
     let root = store.root().to_path_buf();
-    connection::community_card(&root, &store)
+    connection::issue_community_card(&root, &store)
         .map(Json)
-        .map_err(|why| error(StatusCode::CONFLICT, &why.message()))
+        .map_err(|reason| {
+            error(
+                StatusCode::CONFLICT,
+                &reason.text_for(store.document.config.as_ref()),
+            )
+        })
+}
+
+/// The switch as saved, and what the publisher last did with it.
+async fn card_publication_view(state: &AppState) -> Result<Json<PublicationView>, Error> {
+    let enabled = state
+        .store
+        .lock()
+        .map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?
+        .document
+        .publish_card;
+    Ok(Json(state.card_publication.view(enabled).await))
+}
+
+async fn card_publication_handler(
+    State(state): State<AppState>,
+) -> Result<Json<PublicationView>, Error> {
+    card_publication_view(&state).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CardPublicationRequest {
+    enabled: bool,
+}
+
+/// Turns the publication of the community card on or off. The answer comes
+/// back at once; the relays are dealt with by the worker, and its result is
+/// read from the same address.
+async fn card_publication_switch_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CardPublicationRequest>,
+) -> Result<Json<PublicationView>, Error> {
+    verify_protection(&headers)?;
+    let saved = {
+        let mut store = state.store.lock().map_err(|_| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Almacenamiento no disponible",
+            )
+        })?;
+        if store.document.config.is_none() {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "Guarda primero las reglas de la comunidad: la tarjeta se genera a partir de ellas",
+            ));
+        }
+        if store.document.publish_card == request.enabled {
+            Ok(())
+        } else {
+            store.set_publish_card(request.enabled).map(|_| ())
+        }
+    };
+    // The publisher follows what the store holds now, whatever the write
+    // reported: a failure after the file was replaced leaves the new value.
+    state.card_publication.request();
+    saved.map_err(|_| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "No se pudo guardar la configuración",
+        )
+    })?;
+    card_publication_view(&state).await
 }
 
 async fn community_presets_handler() -> Json<Vec<crate::config::RegionalPreset>> {
@@ -317,8 +399,10 @@ async fn identity_generate_handler(
         false
     };
 
-    let (nsec, npub) = identity::generate_with_overwrite(&root, overwrite)
-        .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
+    let generated = identity::generate_with_overwrite(&root, overwrite);
+    // Also when it failed: an overwrite may have removed the key the card was signed with.
+    state.card_publication.request();
+    let (nsec, npub) = generated.map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
 
     let config_opt = state
         .store
@@ -374,8 +458,10 @@ async fn identity_import_handler(
         .to_path_buf();
 
     let overwrite = payload.overwrite.unwrap_or(false);
-    let npub = identity::import_nsec_with_overwrite(&root, &payload.nsec, overwrite)
-        .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
+    let imported = identity::import_nsec_with_overwrite(&root, &payload.nsec, overwrite);
+    // Also when it failed: an overwrite may have removed the key the card was signed with.
+    state.card_publication.request();
+    let npub = imported.map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
 
     let config_opt = state
         .store
@@ -729,6 +815,10 @@ async fn save_community(
         });
         (save_res, root)
     };
+
+    // The card may have changed with the rules: the publisher decides. It is
+    // asked even after a failed save, which can leave the new rules in place.
+    state.card_publication.request();
 
     if result.is_ok() {
         let npub = identity::read_public_key(&root).ok().flatten();

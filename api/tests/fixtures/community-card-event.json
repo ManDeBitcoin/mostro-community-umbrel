@@ -1,0 +1,38 @@
+{
+  "card_event": {
+    "content": "{\"version\":1,\"name\":\"Comunidad de prueba\",\"pubkey\":\"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa\",\"relays\":[\"wss://relay.example.com\",\"wss://relay2.example.com\"],\"currency\":\"USD\",\"payment_methods\":[\"Transferencia bancaria\",\"Efectivo\"],\"fee_bps\":60,\"bond_percent\":3,\"website\":\"https://comunidad.example\",\"contact\":\"https://t.me/comunidad_de_prueba\",\"signature\":\"c329cf46e95e2560a6f39b3a7a567ad1b65f122dd40f08e42389b5f542fd21666e3fd1a4de8df43c5bf00eeab3aa1c3b7249ea483218b496f9ca2ca89b23478f\"}",
+    "created_at": 1790000000,
+    "id": "bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1",
+    "kind": 30078,
+    "pubkey": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+    "sig": "fa3a4cfebe0e597ef79cd112bb176cb266596d7ffb82bc31a5ab8589f9e26ff0ca9905d9a3f3a62eba2644dec103e851e1a3303370ac034c1ca14480571587c9",
+    "tags": [
+      [
+        "d",
+        "mostro-community-card"
+      ]
+    ]
+  },
+  "deletion_event": {
+    "content": "",
+    "created_at": 1790086400,
+    "id": "dbae75fa05b2a956de0e7c4ae477a609aa3c9fd42c9f0f58d960b456a166d94b",
+    "kind": 5,
+    "pubkey": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+    "sig": "efd8eafc0a7e4c5dc12620aa7697cfedb6bf0306ef0821e6054a87e58f490c115d71e45e1255192e7e12b57345e95059b022ecf9794c40d9f8210a5bb987a4cd",
+    "tags": [
+      [
+        "a",
+        "30078:4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa:mostro-community-card"
+      ],
+      [
+        "e",
+        "bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1"
+      ],
+      [
+        "k",
+        "30078"
+      ]
+    ]
+  }
+}

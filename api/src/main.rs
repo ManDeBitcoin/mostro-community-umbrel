@@ -267,6 +267,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         notifications.clone(),
     ));
 
+    // Publicación de la tarjeta de la comunidad en los relays. Con el
+    // interruptor apagado, que es como nace, no se conecta a ningún relay.
+    let card_publication = mostro_community_api::card_publication::CardPublication::default();
+    tokio::spawn(
+        mostro_community_api::card_publication::CardPublisher::new(
+            store.clone(),
+            card_publication.clone(),
+            Some(notifications.clone()),
+            mostro_community_api::card_publication::PublisherTiming::default(),
+        )
+        .run(),
+    );
+
     let state = AppState {
         store,
         integrations: Integrations::from_env(),
@@ -276,6 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         notifications,
         backup_state,
         rate_limiter,
+        card_publication,
     };
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     let local_addr = listener.local_addr()?;
@@ -428,6 +442,17 @@ async fn run_mock_relay(bind_addr: &str) -> Result<(), Box<dyn std::error::Error
                                 let eose_msg = serde_json::json!(["EOSE", sub_id]).to_string();
                                 let _ = ws.send(Message::Text(event_msg.into())).await;
                                 let _ = ws.send(Message::Text(eose_msg.into())).await;
+                            } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text)
+                                && let Some(arr) = val.as_array()
+                                && arr.len() >= 2
+                                && arr[0] == "EVENT"
+                                && let Some(id) = arr[1].get("id").and_then(|id| id.as_str())
+                            {
+                                // Takes whatever is published, keeps nothing and
+                                // says what it was, for whoever drives the test.
+                                println!("MOCK_RELAY_EVENT {}", arr[1]);
+                                let ok_msg = serde_json::json!(["OK", id, true, ""]).to_string();
+                                let _ = ws.send(Message::Text(ok_msg.into())).await;
                             }
                         }
                         Message::Ping(payload) => {

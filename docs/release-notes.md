@@ -1,5 +1,14 @@
 # Mostro Community Manager v1.0.13
 
+- Nuevo en **Conexión de apps**: el panel puede publicar la tarjeta firmada de la comunidad en los relays del nodo. Una app preparada para ello encuentra sola los métodos de pago, la moneda, la web y el contacto, sin código ni enlace.
+- La opción nace apagada y pide confirmación al encenderla: deja esos datos a la vista de cualquiera que consulte los relays, ligados a la clave del nodo. El panel lo explica antes de publicar nada.
+- Actualizar no publica nada. Mientras no enciendas el interruptor, el panel sigue sin enviar ningún evento a los relays.
+- La tarjeta se envía al encender el interruptor, al guardar un cambio que la afecta, al arrancar y cada 6 horas. Mientras no cambia se reenvía el mismo evento, con la misma fecha, para que las apps la lean como «última modificación».
+- El panel muestra la respuesta de cada relay y solo da la tarjeta por publicada donde el relay confirma que la aceptó. Si un relay la rechaza o no responde, lo reintenta solo, lo indica en el resumen y registra una alerta.
+- Si el nodo no tiene identidad, no hay reglas guardadas o la configuración contiene caracteres que la tarjeta no admite, no se publica nada y el panel dice el motivo.
+- Al apagar el interruptor, el panel deja de enviar la tarjeta y pide a los relays que la borren. Es una petición: un relay puede no atenderla y una app que ya la leyó la conserva.
+- La tarjeta publicada es un evento kind 30078 con `d = mostro-community-card`, distinto del evento de cotizaciones del daemon. No indica si el nodo está en marcha, y las apps no deben tomar de ella la comisión ni la garantía. El formato, las comprobaciones que debe hacer una app y un vector de prueba están en `docs/INTEGRACION-APPS.md`, sección 3.3.
+- El interruptor se guarda con la configuración y entra en los respaldos. No cambia la revisión de las reglas ni reinicia el daemon.
 - Después de actualizar o de reiniciar, el panel ya no da el mercado por abierto ni avisa de que «el daemon anuncia otra versión» por el anuncio que dejó en los relays el daemon anterior. Muestra «Arrancando» hasta que el daemon nuevo se anuncia. El campo `market_started` de `/api/dashboard` sigue la misma regla.
 - El primer guardado después de actualizar ya no reinicia el daemon cuando la descripción o la web de la comunidad están vacías. El panel compara lo que el daemon leería de su configuración, no el texto del archivo.
 - Regla de la tarjeta firmada de la comunidad: el nombre, la web y el contacto no pueden contener «&», y los relays y los métodos de pago activos no pueden contener «&» ni «,». El panel rechaza el guardado y dice qué campo hay que cambiar. Si tus reglas, guardadas con una versión anterior, ya los contienen, la tarjeta no se genera hasta que los cambies y guardes. La página «Conexión de apps» y `GET /api/community/card` dan ahora ese motivo; antes respondían que faltaba la identidad o la configuración.

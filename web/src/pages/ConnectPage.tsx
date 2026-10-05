@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PanelData } from '../hooks/usePanelData';
+import type { CardPublication, CardRelayReport, ConnectionInfo } from '../types';
 import type { Navigate } from '../lib/navigation';
 import { copyToClipboard } from '../lib/api';
-import { Icon } from '../components/ui';
-import { CopyField, EmptyState, LinkButton, PageHeader, Panel } from '../components/layout';
+import { formatAge, formatDateTime, formatWhen } from '../lib/format';
+import { Icon, Toggle } from '../components/ui';
+import { type Tone, Badge, Callout, CopyField, EmptyState, LinkButton, PageHeader, Panel } from '../components/layout';
 
 type QrFormat = 'card' | 'uri' | 'json';
 
@@ -14,6 +16,164 @@ const FORMATS: { id: QrFormat; label: string; caption: string }[] = [
   { id: 'uri', label: 'Identidad', caption: 'La clave pública y los relays (nprofile). La app no recibe moneda ni métodos de pago.' },
   { id: 'json', label: 'JSON', caption: 'La misma tarjeta firmada, como texto JSON para copiar y pegar.' },
 ];
+
+const RELAY_OUTCOME: Record<CardRelayReport['outcome'], { tone: Tone; card: string; deletion: string }> = {
+  accepted: { tone: 'good', card: 'La tiene', deletion: 'Borrado aceptado' },
+  rejected: { tone: 'bad', card: 'La rechazó', deletion: 'Rechazó el borrado' },
+  no_answer: { tone: 'warn', card: 'Sin respuesta', deletion: 'Sin respuesta' },
+  unreachable: { tone: 'warn', card: 'Sin conexión', deletion: 'Sin conexión' },
+  pending: { tone: 'neutral', card: 'Pendiente', deletion: 'Pendiente' },
+};
+
+/** What the publication of the card is doing, in a title, a sentence and a tone. */
+function publicationSummary(publication: CardPublication): { tone: Tone; title: string; detail: string } | null {
+  const total = publication.relays.length;
+  const accepted = publication.relays.filter((relay) => relay.outcome === 'accepted').length;
+  const resend = publication.resend_every_secs > 0 ? ` El panel la vuelve a enviar igual cada ${formatAge(publication.resend_every_secs)}, y publica una nueva cuando guardas un cambio que la afecta.` : '';
+  const retry = publication.next_attempt_at ? ` Lo vuelve a intentar solo, ${formatWhenAhead(publication.next_attempt_at)}.` : ' Lo vuelve a intentar solo.';
+  switch (publication.state) {
+    case 'published':
+      return { tone: 'good', title: total === 1 ? 'Publicada en el relay del nodo' : `Publicada en los ${total} relays del nodo`, detail: `La tarjeta cambió por última vez el ${formatDateTime(publication.card_changed_at)}: es la fecha que ven las apps.${resend}` };
+    case 'partial':
+      return { tone: 'warn', title: `Publicada en ${accepted} de ${total} relays`, detail: `Una app que solo use los demás no la encontrará.${retry}` };
+    case 'failed':
+      return { tone: 'bad', title: 'La tarjeta no está publicada', detail: publication.reason_text || `Ningún relay la aceptó.${retry}` };
+    case 'blocked':
+      return { tone: 'warn', title: 'No se publica nada', detail: publication.reason_text || 'El nodo no puede emitir la tarjeta.' };
+    case 'withdrawing':
+      return publication.reason_text
+        ? { tone: 'warn', title: 'La tarjeta aún no se ha podido retirar', detail: publication.reason_text }
+        : { tone: 'info', title: 'Retirando la tarjeta', detail: `El panel ya no la envía y ha pedido a los relays que la borren. Aún no lo han aceptado todos.${retry}` };
+    case 'withdrawn':
+      return { tone: 'neutral', title: `Tarjeta retirada el ${formatDateTime(publication.withdrawn_at)}`, detail: 'Los relays que la recibieron aceptaron la petición de borrado. Una app que ya la hubiera leído la conserva.' };
+    case 'withdrawal_incomplete':
+      return { tone: 'warn', title: 'La tarjeta no se pudo retirar de todos los relays', detail: 'El panel dejó de insistir tras una semana. Los relays de abajo pueden conservar una copia. Si vuelves a publicarla y a retirarla, el panel lo pide de nuevo.' };
+    default:
+      return publication.reason_text ? { tone: 'warn', title: 'La tarjeta no se pudo retirar', detail: publication.reason_text } : null;
+  }
+}
+
+/** `dentro de 4 min`, for a moment the server gave as a unix timestamp. */
+const formatWhenAhead = (unixSecs: number) => {
+  const ahead = Math.round(unixSecs - Date.now() / 1000);
+  return ahead <= 5 ? 'enseguida' : `dentro de ${formatAge(ahead)}`;
+};
+
+/** The switch that puts the community card on the node's relays, and what the relays answered. */
+function PublishCardPanel({ data, connection, navigate }: { data: PanelData; connection: ConnectionInfo | null; navigate: Navigate }) {
+  const publication = data.cardPublication;
+  const { refreshCardPublication, setCardPublicationSwitch } = data;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  // The server answers a change at once and talks to the relays afterwards.
+  const working = publication?.working ?? false;
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => void refreshCardPublication(), 1500);
+    return () => clearInterval(timer);
+  }, [working, refreshCardPublication]);
+
+  const change = async (enabled: boolean, ask: boolean) => {
+    if (ask) {
+      const card = connection?.card;
+      const relays = card?.relays.length ?? connection?.relays.length ?? 0;
+      const question = enabled
+        ? `¿Publicar la tarjeta de la comunidad en ${relays === 1 ? 'el relay' : `los ${relays} relays`} del nodo?\n\nQuedarán a la vista de cualquiera, firmados con la clave del nodo: el nombre, la moneda, ${card ? (card.payment_methods.length === 1 ? 'el método de pago' : `los ${card.payment_methods.length} métodos de pago`) : 'los métodos de pago'}, la web y el contacto.\n\nPodrás retirarla después, pero quien ya la haya leído puede conservarla.`
+        : '¿Dejar de publicar la tarjeta?\n\nEl panel dejará de enviarla y pedirá a los relays que la borren. Un relay puede no hacerlo, y las apps que ya la leyeron la conservan.';
+      if (!window.confirm(question)) return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await setCardPublicationSwitch(enabled);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar la publicación de la tarjeta.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summary = publication && !working ? publicationSummary(publication) : null;
+  const withdrawing = publication ? !publication.enabled : false;
+  const canRetry = publication && !working && ['partial', 'failed', 'withdrawing'].includes(publication.state);
+  const fix = publication?.state === 'blocked' ? (publication.reason === 'no_identity' || publication.reason === 'identity_unreadable' ? (['node', 'Ir al nodo'] as const) : (['config', 'Abrir configuración'] as const)) : null;
+
+  return (
+    <Panel
+      id="connect-publish"
+      title="Publicar la tarjeta en los relays"
+      description="Opcional. Con la tarjeta publicada, una app encuentra sola los métodos de pago y el contacto de tu comunidad, sin código ni enlace."
+      aside={publication ? <Badge tone={working ? 'info' : publication.enabled ? (publication.state === 'published' ? 'good' : 'warn') : 'neutral'}>{working ? 'Actualizando…' : publication.enabled ? (publication.state === 'published' ? 'Publicada' : 'Activada') : 'Desactivada'}</Badge> : undefined}
+    >
+      {!publication ? (
+        <p className="panel-note">{data.settled ? 'El panel no ha podido leer si la tarjeta se publica. Lo vuelve a intentar solo.' : 'Consultando…'}</p>
+      ) : (
+        <>
+          <Toggle
+            checked={publication.enabled}
+            disabled={busy}
+            onChange={(value) => void change(value, true)}
+            label="Publicar la tarjeta de la comunidad"
+            note={publication.enabled ? 'El panel la envía a los relays del nodo y la mantiene al día.' : 'Apagado, la tarjeta solo sale de aquí cuando tú compartes el código o el enlace.'}
+          />
+          <ul className="publish-facts">
+            <li>
+              <strong>Qué queda a la vista.</strong> El nombre de la comunidad, la moneda, los métodos de pago activos, la web y el contacto, con la comisión y la garantía como referencia. Cualquiera que consulte los relays puede leerlo, copiarlo y saber que es de este nodo, porque va firmado con su clave.
+            </li>
+            <li>
+              <strong>Qué no cambia.</strong> No dice si el nodo está en marcha ni fija sus reglas: eso lo anuncia el propio nodo, y es lo que las apps aplican.
+            </li>
+            <li>
+              <strong>Si lo apagas.</strong> El panel deja de enviarla y pide a los relays que la borren. Es una petición: un relay puede no atenderla, y una app que ya la leyó la conserva.
+            </li>
+          </ul>
+          {error && <p className="form-message error" role="alert">{error}</p>}
+          {working && <Callout tone="info" title="Hablando con los relays…">Cada relay tiene unos segundos para responder.</Callout>}
+          {summary && (
+            <Callout
+              tone={summary.tone}
+              title={summary.title}
+              action={
+                fix ? (
+                  <LinkButton onClick={() => navigate(fix[0])}>{fix[1]}</LinkButton>
+                ) : canRetry ? (
+                  <button type="button" className="button button-secondary" disabled={busy} onClick={() => void change(publication.enabled, false)}>
+                    Reintentar ahora
+                  </button>
+                ) : undefined
+              }
+            >
+              {summary.detail}
+            </Callout>
+          )}
+          {!working && publication.enabled && (publication.former_relays?.length ?? 0) > 0 && (
+            <p className="panel-note">
+              Ya no están en tu configuración y pueden conservar una versión anterior de la tarjeta: {publication.former_relays?.join(', ')}. El panel no les envía las nuevas; si apagas la publicación, les pide también que la borren.
+            </p>
+          )}
+          {!working && publication.relays.length > 0 && (
+            <ul className="publish-relays" aria-label={withdrawing ? 'Respuesta de cada relay a la petición de borrado' : 'Respuesta de cada relay a la tarjeta'}>
+              {publication.relays.map((relay) => {
+                const outcome = RELAY_OUTCOME[relay.outcome] ?? RELAY_OUTCOME.no_answer;
+                return (
+                  <li key={relay.url}>
+                    <code>{relay.url}</code>
+                    <Badge tone={outcome.tone}>{withdrawing ? outcome.deletion : outcome.card}</Badge>
+                    <small>
+                      {relay.detail ? `${relay.detail} · ` : ''}
+                      {formatWhen(relay.at)}
+                    </small>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
+    </Panel>
+  );
+}
 
 export function ConnectPage({ data, navigate }: { data: PanelData; navigate: Navigate }) {
   const { connection, settled } = data;
@@ -76,7 +236,7 @@ export function ConnectPage({ data, navigate }: { data: PanelData; navigate: Nav
                 ) : (
                   // With a link and no code, the link is too long for one. Without either, the server
                   // says why there is no card: missing rules and rules it cannot carry are fixed differently.
-                  <span className="empty-hint">{link ? `Es demasiado largo para un código QR. Cópialo del campo «${linkLabel}».` : connection.card_unavailable ? `${connection.card_unavailable}.` : 'El panel no ha recibido la tarjeta de su servidor.'}</span>
+                  <span className="empty-hint">{link ? `Es demasiado largo para un código QR. Cópialo del campo «${linkLabel}».` : connection.card_unavailable || 'El panel no ha recibido la tarjeta de su servidor.'}</span>
                 )}
               </div>
               <span className="qr-hint-caption">{format.caption}</span>
@@ -103,6 +263,8 @@ export function ConnectPage({ data, navigate }: { data: PanelData; navigate: Nav
         </Panel>
       )}
 
+      <PublishCardPanel data={data} connection={connection} navigate={navigate} />
+
       <Panel id="connect-how" title="Cómo se conecta una app" description="El panel no habla con las apps. Todo pasa por los relays de Nostr.">
         <ol className="step-list">
           <li>
@@ -111,7 +273,7 @@ export function ConnectPage({ data, navigate }: { data: PanelData; navigate: Nav
           </li>
           <li>
             <strong>Lee en los relays lo que el nodo anuncia.</strong>
-            <span>Versión, comisión, límites, monedas y garantía. Puedes ver lo mismo en la página del nodo.</span>
+            <span>Versión, comisión, límites, monedas y garantía. Puedes ver lo mismo en la página del nodo. Si publicas la tarjeta, la app lee ahí también los métodos de pago y el contacto.</span>
           </li>
           <li>
             <strong>Publica y toma órdenes con mensajes cifrados al nodo.</strong>

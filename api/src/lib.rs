@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod backup;
+pub mod card_publication;
 pub mod chat;
 pub mod config;
 pub mod connection;
