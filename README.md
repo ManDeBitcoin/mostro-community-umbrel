@@ -29,6 +29,7 @@ Puedes conservar tu instalación. El Manager incluye su propio daemon Mostro, qu
 - Página de resumen con el estado del mercado, lo que requiere atención y la puesta en marcha guiada.
 - Consulta de LND y página de liquidez; libro de órdenes públicas Nostr y simulador de operaciones.
 - Consola de mediación de solo lectura (disputas del nodo y mensajes de protocolo), notificaciones en vivo y respaldos cifrados.
+- Tarjeta firmada de la comunidad para conectar apps, con publicación opcional en los relays del nodo.
 
 El [roadmap](docs/roadmap.md) conserva el historial y los siguientes pasos.
 

@@ -57,6 +57,34 @@ export type ConnectionInfo = {
   app_download_url: string;
   instructions: string;
 };
+export type CardRelayReport = {
+  url: string;
+  /** What the relay did with the event: only `accepted` means it has it. */
+  outcome: 'accepted' | 'rejected' | 'no_answer' | 'unreachable' | 'pending';
+  /** The relay's own words, or the connection error. */
+  detail?: string | null;
+  at: number;
+};
+/** The community card as an event on the node's relays, and what the relays answered. */
+export type CardPublication = {
+  /** The switch as saved. */
+  enabled: boolean;
+  /** The server has not acted on the last change yet: the rest is about the previous one. */
+  working: boolean;
+  state: 'off' | 'blocked' | 'published' | 'partial' | 'failed' | 'withdrawing' | 'withdrawn' | 'withdrawal_incomplete';
+  reason?: string | null;
+  reason_text?: string | null;
+  event_id?: string | null;
+  /** `created_at` of the event: when the card last changed. */
+  card_changed_at?: number | null;
+  withdrawn_at?: number | null;
+  relays: CardRelayReport[];
+  /** Relays out of the configuration that may still hold an earlier revision. */
+  former_relays?: string[];
+  last_attempt_at?: number | null;
+  next_attempt_at?: number | null;
+  resend_every_secs: number;
+};
 export type DaemonReport = {
   state: 'unconfigured' | 'configured_standby' | 'active_ready' | 'active_running';
   identity_present: boolean;

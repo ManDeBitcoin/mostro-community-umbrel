@@ -26,6 +26,7 @@ USUARIOS (Mostro App)
 │ UMBREL DEL OPERADOR                                    │
 │  ├── Mostro Community Manager (Web + API Axum)         │
 │  │    ├── Monitor de órdenes (Kind 38383)              │
+│  │    ├── Tarjeta de la comunidad en los relays (opc.) │
 │  │    ├── Consola de mediación de disputas             │
 │  │    ├── Operaciones y gestión de liquidez LND        │
 │  │    ├── Transmisión de alertas en vivo (SSE)         │
@@ -171,6 +172,27 @@ El panel solo dice que el mercado está abierto cuando se cumplen las dos cosas:
 ### Paso 7: Conectar las Apps
 Abre **Conexión de apps**. Ahí están el código QR, el enlace de la tarjeta firmada de la comunidad, la clave pública del nodo y sus relays. Es todo lo que una app necesita. La tarjeta lleva la comisión y el porcentaje de garantía como referencia; los valores vigentes y los límites los lee la app del propio nodo. Si cambias la comisión o la garantía, vuelve a compartir la tarjeta.
 
+#### Publicar la tarjeta en los relays (opcional)
+
+En la misma página, **Publicar la tarjeta en los relays** tiene un interruptor que nace apagado. Apagado, la tarjeta solo sale del panel cuando tú compartes el código o el enlace.
+
+Al encenderlo, el panel publica la tarjeta firmada en los relays de tu nodo. Las apps preparadas para ello la encuentran solas y muestran tus métodos de pago y tu contacto sin que nadie escanee nada.
+
+- **Qué queda público.** El nombre de la comunidad, la moneda principal, los métodos de pago activos, la web y el contacto, con la comisión y el porcentaje de garantía como referencia. Cualquiera que consulte esos relays puede leerlo, copiarlo y saber que es de tu nodo, porque va firmado con su clave. No actives la opción si no quieres eso. La descripción de la comunidad, los límites y los métodos desactivados no forman parte de la tarjeta.
+- **Qué no hace.** No anuncia que el nodo esté en marcha ni cambia sus reglas. Eso lo publica el propio daemon, y es lo que las apps aplican.
+- **Cuándo se envía.** Al encender el interruptor, cada vez que guardas un cambio que afecta a la tarjeta, al arrancar la aplicación y cada 6 horas. Mientras la tarjeta no cambia se reenvía el mismo evento, con la misma fecha: las apps la leen como «última modificación».
+- **Qué te muestra el panel.** La respuesta de cada relay. La tarjeta solo figura como publicada en un relay cuando ese relay confirma que la aceptó. Si alguno la rechaza o no responde, lo ves ahí con el motivo que dio el relay, el panel lo reintenta solo y deja un aviso en **Resumen** y una alerta. Si ninguno la acepta, el panel dice que no está publicada.
+- **Cuándo no se publica nada.** Si el nodo no tiene identidad, si aún no hay reglas guardadas o si la configuración contiene caracteres que la tarjeta no admite. El panel dice cuál es el motivo y dónde se corrige.
+- **Si lo apagas.** El panel deja de enviarla y pide a los relays que la borren (una petición de borrado de Nostr, firmada por el nodo, que solo nombra la tarjeta). Lo repite durante una semana a los relays que no la acepten. Es una petición: un relay puede no atenderla, y una app que ya leyó la tarjeta la conserva. Lo que se publicó no se puede dar por borrado.
+
+El interruptor se guarda con la configuración y entra en los respaldos. No cambia el número de revisión de las reglas ni reinicia el daemon. Otras cosas que conviene saber:
+
+- Los relays que exigen autenticación para escribir rechazan la tarjeta: el panel no se autentica ante ellos.
+- Si quitas un relay de la configuración, la copia que tenía se queda allí. El panel te lo indica en esa misma página y, cuando apagues la publicación, le pide también a ese relay que la borre.
+- Si copias a otra instalación un `community.json` guardado con el interruptor encendido, esa instalación publica la tarjeta al arrancar.
+- Con el interruptor encendido, una versión del Manager anterior a la 1.0.13 no abre la configuración. Apágalo antes si alguna vez tienes que volver a una versión anterior.
+- La tarjeta la firma la clave del nodo. Si sustituyes la identidad del nodo con la tarjeta publicada, la de la clave anterior queda en los relays y este panel ya no puede pedir que se borre: apaga la publicación antes de cambiar de identidad. El panel no ofrece ese cambio; solo es posible desde su API.
+
 Quien desarrolla una app tiene la referencia completa en [`INTEGRACION-APPS.md`](INTEGRACION-APPS.md).
 
 ---
@@ -210,6 +232,7 @@ Debajo, **Servicios** muestra de qué depende el mercado: el daemon Mostro, Ligh
   - Un respaldo automático termina, bien o con error, o uno manual termina bien. Un respaldo manual que falla muestra el error en su propia página.
   - Se crea o se importa la identidad del nodo.
   - Unas reglas guardadas no llegan a aplicarse al nodo.
+  - Con la publicación de la tarjeta activada, algún relay no la acepta en dos intentos seguidos.
 - Cada alerta enlaza con la página donde se atiende. El menú marca las graves que aún no has visto.
 
 ### Respaldos
@@ -246,3 +269,4 @@ La restauración no se hace desde el panel. Se ejecuta por SSH, dentro del conte
 - **Protección Anti-CSRF:** Todos los endpoints de mutación y lectura sensible exigen la cabecera `X-Requested-With: mostro-community` y validación estricta de origen.
 - **Seguridad en Contenedores:** Los servicios en Docker Compose operan con `read_only: true`, `cap_drop: [ALL]`, `tmpfs: [/tmp]` y red interna segregada `manager_private`.
 - **Cero Gasto Accidental:** Todas las funciones de monitoreo y simulación son de solo lectura o dry-run en memoria.
+- **Lo único que el panel publica:** la tarjeta de la comunidad, y solo con su interruptor encendido (paso 7). Es el único evento que el panel firma con la clave del nodo. No es un mensaje del protocolo Mostro y no mueve fondos. El resto de lo que tu nodo anuncia lo publica el daemon.

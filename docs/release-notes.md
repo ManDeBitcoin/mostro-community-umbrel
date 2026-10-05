@@ -1,3 +1,16 @@
+# Mostro Community Manager v1.0.13
+
+- Nuevo en **Conexión de apps**: el panel puede publicar la tarjeta firmada de la comunidad en los relays del nodo. Una app preparada para ello encuentra sola los métodos de pago, la moneda, la web y el contacto, sin código ni enlace.
+- La opción nace apagada y pide confirmación al encenderla: deja esos datos a la vista de cualquiera que consulte los relays, ligados a la clave del nodo. El panel lo explica antes de publicar nada.
+- Actualizar no publica nada. Mientras no enciendas el interruptor, el panel sigue sin enviar ningún evento a los relays.
+- La tarjeta se envía al encender el interruptor, al guardar un cambio que la afecta, al arrancar y cada 6 horas. Mientras no cambia se reenvía el mismo evento, con la misma fecha, para que las apps la lean como «última modificación».
+- El panel muestra la respuesta de cada relay y solo da la tarjeta por publicada donde el relay confirma que la aceptó. Si un relay la rechaza o no responde, lo reintenta solo, lo indica en el resumen y registra una alerta.
+- Si el nodo no tiene identidad, no hay reglas guardadas o la configuración contiene caracteres que la tarjeta no admite, no se publica nada y el panel dice el motivo.
+- Al apagar el interruptor, el panel deja de enviar la tarjeta y pide a los relays que la borren. Es una petición: un relay puede no atenderla y una app que ya la leyó la conserva.
+- La tarjeta publicada es un evento kind 30078 con `d = mostro-community-card`, distinto del evento de cotizaciones del daemon. No indica si el nodo está en marcha, y las apps no deben tomar de ella la comisión ni la garantía. El formato, las comprobaciones que debe hacer una app y un vector de prueba están en `docs/INTEGRACION-APPS.md`, sección 3.3.
+- El interruptor se guarda con la configuración y entra en los respaldos. No cambia la revisión de las reglas ni reinicia el daemon.
+- `GET /api/community/card` dice ahora por qué no hay tarjeta cuando no puede emitirla.
+
 # Mostro Community Manager v1.0.12
 
 - El panel se reorganiza en cinco grupos: Inicio, Mercado, Nodo, Ajustes y Herramientas. Cada página tiene su propia dirección, así que recargar no pierde el sitio y el botón de retroceso funciona.

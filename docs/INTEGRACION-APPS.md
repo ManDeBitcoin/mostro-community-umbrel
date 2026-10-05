@@ -28,7 +28,7 @@ Operador ──(navegador, sesión de Umbrel)──► Manager ── settings.t
 
 El Manager genera la configuración del daemon, lo arranca y lo supervisa. No participa en las operaciones ni reenvía mensajes. Sus rutas HTTP (`/api/…`) pasan por `app_proxy` de Umbrel y exigen la sesión del operador, de modo que una app móvil no puede consultarlas.
 
-La tarjeta de la comunidad llega a la app fuera de banda: QR, enlace o texto pegado.
+La tarjeta de la comunidad llega a la app fuera de banda: QR, enlace o texto pegado. Desde la v1.0.13, si el operador lo activa, el Manager la publica además en los relays del nodo, firmada con la clave del nodo (sección 3.3). Es el único evento que publica el Manager: todos los demás son del daemon.
 
 ## 3. Descubrir el nodo
 
@@ -90,6 +90,8 @@ digest: d6a36f0d46513507fe07c551a4cf6763065abf6019d11b5ff1b7231966456ef6
 | JSON | el objeto de arriba | La tarjeta firmada completa |
 | nprofile | `mostro://community/nprofile1…` | Solo clave pública y relays |
 
+Hay una cuarta vía, que no pasa por las manos del usuario: el evento de la sección 3.3 lleva esta misma tarjeta en su `content`, byte a byte como la entrega el formato JSON. Solo existe si el operador activó la publicación.
+
 El analizador de la app (`parse_community_payload`) acepta más entradas que esas tres. El prefijo puede ser `mostro://community/`, `https://mostro.network/c/`, `http://mostro.network/c/` o ninguno. Detrás puede venir el JSON, el JSON en base64url, con relleno o sin él, o en base64 estándar, un `nprofile1…` o un `npub1…`. Estos dos últimos admiten además `nostr:` delante. Un `nprofile` o un `npub` no llevan datos de la comunidad ni firma: no sirven para comprobar quién emitió la tarjeta.
 
 **Límites del esquema v1.** Los campos no se escapan: un `&` en el nombre, la web o el contacto, o una `,` en un relay o en una etiqueta de pago, harían que una misma firma valiera para dos tarjetas distintas. El Manager no deja guardar esos valores ni firma una tarjeta que los contenga. Admitirlos exige una versión 2 con escape, implementada a la vez en el Manager y en la app. `bond_percent` no expresa el mínimo en sats ni a qué parte se aplica: para eso está el evento de información.
@@ -150,12 +152,65 @@ Con la garantía activada y prueba de trabajo de primer contacto, otro nodo v0.1
 | 0 | Nombre, descripción y web de la instancia |
 | 10002 | Lista de relays del nodo (un tag `r` por relay conectado). No es fiable como lista completa: solo incluye los relays conectados al publicar |
 | 30078, `d = "mostro-rates"` | Cotizaciones BTC/fiat que usa el nodo, `{"BTC":{"USD":84706.4,…}}`, con expiración de 10 minutos |
+| 30078, `d = "mostro-community-card"` | Tarjeta de la comunidad. No la publica el daemon sino el Manager, y solo si el operador lo activa. Ver más abajo |
 | 38384 | Valoración acumulada de un usuario tras recibir una valoración: tags `total_reviews`, `total_rating`, `last_rating`, `min_rate`, `max_rate`, `since` y `days`. El nodo las publica en lotes, cada hora por defecto, y con `d` igual a la clave de operación de quien valoró, no a la identidad valorada. Para mostrar reputación usa el tag `rating` de la orden y el payload `peer` |
 | 8383 | Auditoría del aporte al desarrollo de Mostro, solo en mainnet |
 
 Para estimar sats en pantalla usa la cotización del propio nodo (kind 30078) y no un proveedor distinto: es el precio con el que el daemon fijará la operación.
 
-El Manager, hasta la v1.0.12, no publica la tarjeta de la comunidad en los relays: solo la entrega fuera de banda (sección 3.1). La app BitMaxis busca desde el 2026-10-05 un evento kind 30078 firmado por el nodo, con `d = "mostro-community-card"` y la tarjeta v1 como contenido. Es una convención propuesta entre esa app y el Manager, todavía sin implementar en el Manager. Que ese evento no exista es el caso normal y no indica ningún fallo del nodo.
+**Tarjeta de la comunidad en los relays.** Desde la v1.0.13 el Manager puede publicar la tarjeta de la sección 3.1 como evento, para que una app lea los métodos de pago y el contacto sin que el usuario escanee nada. Es una convención entre el Manager y las apps que la leen, como la propia tarjeta: no forma parte del protocolo Mostro. Lo decide el operador con un interruptor que nace apagado, porque deja a la vista de cualquiera los métodos de pago, la web y el contacto, ligados a la clave del nodo. Hasta la v1.0.12 el Manager solo la entregaba fuera de banda.
+
+| | |
+| --- | --- |
+| Kind | 30078, direccionable (NIP-78) |
+| Autor | La clave del nodo |
+| Tags | Solo `["d","mostro-community-card"]`. No lleva `expiration` |
+| `content` | La tarjeta v1 tal como la entrega el Manager: JSON compacto, con su `signature` |
+| `created_at` | Cuándo cambió la tarjeta por última vez |
+
+Filtro: `{"kinds":[30078],"authors":["<pubkey del nodo>"],"#d":["mostro-community-card"]}`.
+
+El nodo publica sus cotizaciones con el mismo kind y la misma clave, en `d = "mostro-rates"`. Son dos direcciones distintas. Pide siempre con `#d` y, al recibir, no leas un evento como si fuera el otro.
+
+El Manager envía el evento al arrancar, al guardar un cambio que altera la tarjeta y cada 6 horas. El envío periódico es el mismo evento firmado, con el mismo `id` y el mismo `created_at`: la fecha solo avanza cuando cambia el contenido de la tarjeta, así que una app puede mostrarla como «última modificación». Dos salvedades. Un cambio de comisión o de garantía también cambia la tarjeta, porque lleva `fee_bps` y `bond_percent`. Y si el operador retira la tarjeta y la vuelve a publicar, o cambia la identidad del nodo, el evento es nuevo y lleva la fecha de ese momento.
+
+Reglas para la app:
+
+1. **Comprueba el evento antes de abrirlo** (regla 11): firma válida, `kind = 30078`, `pubkey` igual a la clave del nodo y un tag `d` igual a `mostro-community-card`. Un relay puede devolver algo distinto de lo que se le pidió.
+2. **Comprueba la tarjeta que lleva dentro.** `content` es un objeto JSON con `version = 1`, su `pubkey` es el autor del evento y su propia firma verifica como en la sección 3.1. Descarta un evento del nodo que envuelva la tarjeta de otra clave o una tarjeta alterada. La firma del evento no sustituye a la de la tarjeta ni al revés.
+3. **Gana el `created_at` más reciente** entre los eventos que pasan los puntos 1 y 2, no entre todos los recibidos: un evento posterior sin una tarjeta válida no tapa al bueno. Escucha a todos los relays antes de elegir, porque uno puede conservar una revisión antigua. No sustituyas una tarjeta guardada por otra con un `created_at` menor.
+4. **Que no haya evento es lo normal**, no un error. El operador puede no haberlo activado o haberlo retirado, o el relay puede no tenerlo. Tampoco dice nada de si el nodo está en marcha: el evento no caduca ni se renueva como señal de vida. La vigencia del nodo sale solo del kind 38385 (sección 3.2).
+5. **No tomes de la tarjeta la comisión ni la garantía.** `fee_bps` y `bond_percent` son orientativos y pueden llevar meses publicados. Lo que se aplica es `fee` y los tags `bond_*` del evento de información. De la tarjeta se usan el nombre, la moneda principal, los métodos de pago, la web y el contacto.
+
+**Retirada.** Si el operador apaga el interruptor, el Manager deja de enviar el evento y manda a los relays que pudieron recibirlo una petición de borrado NIP-09: un evento kind 5 firmado por el nodo, con los tags `["a","30078:<pubkey>:mostro-community-card"]`, `["e","<id del último evento>"]` y `["k","30078"]`. No nombra ninguna otra dirección. Es una petición: un relay puede no atenderla, y el Manager la repite durante una semana a los relays que no la aceptan. Si el operador publica de nuevo, el evento lleva un `created_at` posterior al de esa petición. Una app no necesita tratar el kind 5: tras una retirada deja de encontrar el evento (punto 4) y decide qué hace con la tarjeta que ya tenía. La app BitMaxis, leída en su commit `1167506f`, conserva la última tarjeta válida.
+
+Límites de esta versión:
+
+- El Manager publica en los relays de su configuración. Si el operador quita uno, la revisión que ese relay tenía se queda allí hasta la siguiente retirada, que también se le envía. Por eso el punto 3 pide elegir entre todos los relays y no quedarse con el primero que responde.
+- Si el operador cambia la identidad del nodo, la tarjeta firmada con la clave anterior sigue en los relays: solo esa clave podría pedir su borrado. Una app que opera con la clave nueva no la lee, porque el autor no coincide (punto 1).
+- El Manager no se autentica ante los relays (NIP-42). Un relay que lo exija para escribir rechaza el evento, y el panel se lo muestra al operador como rechazado.
+- El Manager solo da por publicada la tarjeta en un relay cuando este responde `OK` con `true` para ese evento.
+
+Vector de prueba, firmado con una clave sintética (`api/tests/fixtures/community-card-event.json`, campo `card_event`):
+
+```json
+{"id":"bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1","pubkey":"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa","created_at":1790000000,"kind":30078,"tags":[["d","mostro-community-card"]],"content":"{\"version\":1,\"name\":\"Comunidad de prueba\",\"pubkey\":\"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa\",\"relays\":[\"wss://relay.example.com\",\"wss://relay2.example.com\"],\"currency\":\"USD\",\"payment_methods\":[\"Transferencia bancaria\",\"Efectivo\"],\"fee_bps\":60,\"bond_percent\":3,\"website\":\"https://comunidad.example\",\"contact\":\"https://t.me/comunidad_de_prueba\",\"signature\":\"c329cf46e95e2560a6f39b3a7a567ad1b65f122dd40f08e42389b5f542fd21666e3fd1a4de8df43c5bf00eeab3aa1c3b7249ea483218b496f9ca2ca89b23478f\"}","sig":"fa3a4cfebe0e597ef79cd112bb176cb266596d7ffb82bc31a5ab8589f9e26ff0ca9905d9a3f3a62eba2644dec103e851e1a3303370ac034c1ca14480571587c9"}
+```
+
+Sobre ese evento: la firma y el `id` verifican, la clave del nodo es `4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa`, y la tarjeta de `content` verifica con esta cadena y este digest (sección 3.1):
+
+```text
+cadena: v=1&name=Comunidad de prueba&pubkey=4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa&relays=wss://relay.example.com,wss://relay2.example.com&currency=USD&payment_methods=Transferencia bancaria,Efectivo&fee_bps=60&bond_percent=3&website=https://comunidad.example&contact=https://t.me/comunidad_de_prueba
+digest: 076610bd0d6cd04e9f1b96f908b7bacfefd17b8400ab5e96bf4e7979431b4ee8
+```
+
+El mismo archivo trae en `deletion_event` la petición de borrado que corresponde a ese evento:
+
+```json
+{"id":"dbae75fa05b2a956de0e7c4ae477a609aa3c9fd42c9f0f58d960b456a166d94b","pubkey":"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa","created_at":1790086400,"kind":5,"tags":[["a","30078:4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa:mostro-community-card"],["e","bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1"],["k","30078"]],"content":"","sig":"efd8eafc0a7e4c5dc12620aa7697cfedb6bf0306ef0821e6054a87e58f490c115d71e45e1255192e7e12b57345e95059b022ecf9794c40d9f8210a5bb987a4cd"}
+```
+
+Casos que una app debe rechazar con ese vector, todos cubiertos en `api/tests/card_publication.rs`: el mismo `content` en un evento del nodo con `d = "mostro-rates"` o con otro kind, el mismo `content` en un evento firmado por otra clave, y un evento del nodo con `d` correcto cuya tarjeta lleva un método de pago añadido después de firmarla.
 
 ## 4. Libro de órdenes (kind 38383)
 
@@ -642,6 +697,7 @@ Si falta el evento de información, la app no debe inventar valores. Debe decir 
 | La orden se publica y nadie la ve | La app y el nodo no comparten relay | Tarjeta y kind 10002 |
 | La app muestra garantía y el nodo no la exige | Valor fijo en la app en lugar de `bond_enabled` | Sección 3.2 |
 | La app muestra otra versión u otros límites | Lee un evento de información antiguo o de otra clave | Comparar `pubkey` y `created_at` |
+| La app no encuentra la tarjeta en los relays | El operador no activó la publicación o la retiró, ningún relay la aceptó, o la app pide sin `#d` y recibe `mostro-rates` | Página **Conexión de apps** del Manager y sección 3.3 |
 | La tarjeta no verifica | Cadena canónica distinta, relay con barra final sin normalizar, o relay con el esquema en mayúsculas en una app anterior a `64ae7c91` | Sección 3.1 |
 | El pago al comprador no sale | Sin ruta dentro de `max_routing_fee`, o sin liquidez saliente en el nodo | Página Lightning del Manager |
 
@@ -677,11 +733,13 @@ En un segundo nodo con garantía del 3 % para ambas partes y `pow_first_contact 
 
 En ambos nodos, el monitor de órdenes, el de disputas y la consola de mensajes del Manager leyeron esos mismos eventos, y la tarjeta del Manager se verificó con una copia del verificador de la app (`k256`).
 
-Las capturas del anexo D no cubren todo lo que esta lista da por ejecutado. Faltan al menos el evento kind 30078, los rechazos de `new-order` de la sección 6.2, los mensajes de la venta con prima +5 %, el rechazo por orden inexistente, los mensajes descartados sin respuesta en el primer nodo, el rechazo de un `trade_index` repetido y el evento kind 38384. Para esos casos, quien no tenga un nodo de pruebas solo puede comprobarlos en el código de v0.19.2.
+Las capturas del anexo D no cubren todo lo que esta lista da por ejecutado. Faltan al menos el evento kind 30078 de cotizaciones (`mostro-rates`), los rechazos de `new-order` de la sección 6.2, los mensajes de la venta con prima +5 %, el rechazo por orden inexistente, los mensajes descartados sin respuesta en el primer nodo, el rechazo de un `trade_index` repetido y el evento kind 38384. Para esos casos, quien no tenga un nodo de pruebas solo puede comprobarlos en el código de v0.19.2.
 
 Leído en el código y no ejecutado: la penalización automática por vencimiento (`bond_slash_on_waiting_timeout = true`), el vencimiento cuando falla quien publicó, el modo mantenimiento, la restauración de sesión, Cashu y Serbero. También se leyó, sin ejecutarlo, en el código de nostr-sdk 0.45.2 cuándo verifica la firma de un evento recibido y cuándo lo compara con el filtro de su suscripción (sección 3.2). No se probó con un relay que entregue eventos fuera del filtro o con el contenido alterado.
 
 El 5 de octubre de 2026 la guía se contrastó de nuevo con el código de mostrod v0.19.2, mostro-core 0.16.0 y nostr-sdk 0.45.2, a raíz del informe de la sesión que mantiene la app BitMaxis. De ahí salen la regla 11, las precisiones de la sección 9 y las notas sobre qué conservan las capturas. Fue una revisión de lectura, sin ejecuciones nuevas.
+
+El mismo 5 de octubre se implementó en el Manager la publicación de la tarjeta (sección 3.3). Ejecutado: las pruebas de `api/tests/card_publication.rs` contra relays simulados en `127.0.0.1`, que cubren la forma y las firmas del evento, que no se publica nada con el interruptor apagado o sin tarjeta, que la fecha solo cambia con el contenido, el informe por relay, la retirada, el cambio de relays y el cambio de identidad; el vector de esa sección, comprobado además con `nostr-tools` y `@noble/curves`, independientes del Manager; y el panel en un navegador contra una copia local del servidor y un relay simulado. No ejecutado: ningún envío a un relay real, así que no se ha comprobado cómo responde cada implementación de relay al reenvío de un evento que ya tiene ni a la petición de borrado; ni la lectura del evento por la app BitMaxis en ejecución, cuyo código se leyó en el commit `1167506f`.
 
 No verificado: el comportamiento de relays `ws://` desde una PWA servida por HTTPS, y la app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 
@@ -794,3 +852,5 @@ En `api/tests/fixtures/mostrod-v0.19.2/` del repositorio del Manager hay tráfic
 Cada mensaje es un objeto con `dir` (`user->daemon` o `daemon->user`), `party` (`seller`, `buyer`, un segundo o un tercer tomador, `buyer2` y `buyer3`, o `admin`) y `plaintext`, el contenido descifrado tal como viaja dentro del evento kind 14.
 
 Rechazos capturados: cuatro `cant-do`, todos en `protocol-flows.json` y todos en respuesta a un `take-sell`. Son `invalid_order_status` (dos), `out_of_range_sats_amount` (uno) e `invalid_pubkey` (uno). No hay ningún rechazo de `new-order`, así que `invalid_parameters`, `invalid_fiat_currency` e `invalid_amount` no aparecen. El único flujo descifrado con prima distinta de cero es el de la orden de rango, con +2 %.
+
+Fuera de esa carpeta, `api/tests/fixtures/community-card-event.json` no es una captura sino el vector de la sección 3.3: el evento de la tarjeta de la comunidad y su petición de borrado, emitidos por el Manager con una clave sintética.

@@ -42,8 +42,8 @@ export function StatusDot({ status }: { status?: string }) {
 export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return <label className="field"><span className="field-label">{label}</span>{children}{hint && <span className="field-hint">{hint}</span>}</label>;
 }
-export function Toggle({ checked, onChange, label, note }: { checked: boolean; onChange: (value: boolean) => void; label: string; note?: string }) {
-  return <div className="toggle-row"><div><strong>{label}</strong>{note && <span>{note}</span>}</div><button type="button" role="switch" aria-label={label} aria-checked={checked} className={`toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><i /></button></div>;
+export function Toggle({ checked, onChange, label, note, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; note?: string; disabled?: boolean }) {
+  return <div className="toggle-row"><div><strong>{label}</strong>{note && <span>{note}</span>}</div><button type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} className={`toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><i /></button></div>;
 }
 export function ActorBadge({ actor }: { actor: string }) {
   switch (actor) {

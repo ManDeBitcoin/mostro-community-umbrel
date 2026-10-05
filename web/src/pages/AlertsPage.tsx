@@ -13,6 +13,7 @@ export const ALERT_SOURCE: Record<string, { label: string; page: PageId; action:
   relay: { label: 'Relays', page: 'orders', action: 'Ver relays' },
   dispute: { label: 'Disputas', page: 'disputes', action: 'Ver disputas' },
   backup: { label: 'Respaldos', page: 'backups', action: 'Ver respaldos' },
+  card: { label: 'Tarjeta', page: 'connect', action: 'Ver conexión' },
   system: { label: 'Sistema', page: 'node', action: 'Ver el nodo' },
 };
 const matches = (filter: LevelFilter, level: string) =>
@@ -31,7 +32,7 @@ export function AlertsPage({ notifications, read, settled, navigate }: { notific
 
   return (
     <section className="content alerts-page">
-      <PageHeader group="Ajustes" title="Alertas" description="Los avisos que el panel ha registrado: relays que no responden, disputas que se abren y fallos al aplicar la configuración. Llegan al momento, sin recargar." />
+      <PageHeader group="Ajustes" title="Alertas" description="Los avisos que el panel ha registrado: relays que no responden, disputas que se abren, fallos al aplicar la configuración y relays que no aceptan la tarjeta de la comunidad. Llegan al momento, sin recargar." />
       <Panel
         aside={
           <div className="filter-chips" role="group" aria-label="Filtrar por gravedad">

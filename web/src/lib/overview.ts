@@ -1,6 +1,6 @@
 // What the summary page says, derived from the data the panel already has.
 // Pure functions: no React and no fetching here.
-import type { AutoBackupState, Configuration, DaemonNotice, DaemonReport, Dashboard, OrdersSnapshot } from '../types';
+import type { AutoBackupState, CardPublication, Configuration, DaemonNotice, DaemonReport, Dashboard, OrdersSnapshot } from '../types';
 import type { Tone } from '../components/layout';
 import type { PageId } from './navigation';
 import { isOpenDispute } from './constants';
@@ -82,7 +82,7 @@ export function marketStatus(daemon: DaemonReport | null, settled = true): Marke
       return { state: 'maintenance', tone: 'warn', label: 'En mantenimiento', title: 'El nodo está en mantenimiento', detail: 'El nodo anuncia que no acepta órdenes ni tomas nuevas.' };
     }
     if (announcing) {
-      return { state: 'open', tone: 'good', label: 'Mercado abierto', title: 'Tu mercado está abierto', detail: 'El nodo anuncia su información en los relays y atiende a las apps. Este panel solo observa: no toma órdenes ni mueve fondos.' };
+      return { state: 'open', tone: 'good', label: 'Mercado abierto', title: 'Tu mercado está abierto', detail: 'El nodo anuncia su información en los relays y atiende a las apps. Este panel no toma órdenes ni mueve fondos.' };
     }
     const running = daemon.running_for_secs;
     if (typeof running === 'number' && running <= STARTUP_WINDOW_SECS) {
@@ -148,6 +148,7 @@ export type OverviewInput = {
   daemon: DaemonReport | null;
   orders: OrdersSnapshot | null;
   backups: AutoBackupState | null;
+  cardPublication?: CardPublication | null;
   /** Serious alerts the operator has not looked at yet. */
   unseenAlerts: number;
   hasUnsavedChanges: boolean;
@@ -156,7 +157,7 @@ export type OverviewInput = {
 };
 
 /** Everything that needs the operator, most urgent first. */
-export function attentionItems({ apiOnline, daemon, orders, backups, unseenAlerts, hasUnsavedChanges, duringSetup = false }: OverviewInput): AttentionItem[] {
+export function attentionItems({ apiOnline, daemon, orders, backups, cardPublication = null, unseenAlerts, hasUnsavedChanges, duringSetup = false }: OverviewInput): AttentionItem[] {
   const items: AttentionItem[] = [];
   if (!apiOnline) {
     items.push({ id: 'api', tone: 'bad', title: 'El panel no recibe respuesta de su servidor', detail: 'Los datos de esta página pueden estar desactualizados.', page: 'home', action: 'Reintentar' });
@@ -200,6 +201,12 @@ export function attentionItems({ apiOnline, daemon, orders, backups, unseenAlert
     });
   }
 
+  const card = cardAttention(cardPublication);
+  // During the setup, a card that waits for the identity is one of its steps.
+  if (card && !(duringSetup && cardPublication?.state === 'blocked')) {
+    items.push({ id: 'card', tone: 'warn', ...card, page: 'connect', action: 'Ver conexión' });
+  }
+
   // Without a passphrase the automatic backup is simply off: not a failure.
   if (backups?.enabled && backups.last_error) {
     items.push({ id: 'backup-error', tone: 'warn', title: 'El último respaldo automático falló', detail: backups.last_error, page: 'backups', action: 'Ver respaldos' });
@@ -228,6 +235,26 @@ export function attentionItems({ apiOnline, daemon, orders, backups, unseenAlert
     items.push({ id: 'unsaved', tone: 'info', title: 'Tienes cambios de configuración sin guardar', page: 'config', action: 'Ir a guardar' });
   }
   return items;
+}
+
+/**
+ * The operator asked for the community card to be on the relays and it is
+ * not, or not on all of them. `null` while it is, while the switch is off and
+ * while the server is still talking to the relays.
+ */
+export function cardAttention(publication: CardPublication | null): { title: string; detail: string } | null {
+  if (!publication?.enabled || publication.working) return null;
+  const failing = publication.relays.filter((relay) => relay.outcome !== 'accepted').length;
+  switch (publication.state) {
+    case 'failed':
+      return { title: 'La tarjeta de la comunidad no está publicada', detail: publication.reason_text || 'Ningún relay la aceptó: las apps no pueden leerla de los relays.' };
+    case 'partial':
+      return { title: failing === 1 ? 'Un relay no aceptó la tarjeta de la comunidad' : `${failing} relays no aceptaron la tarjeta de la comunidad`, detail: 'Una app que solo use esos relays no la encontrará.' };
+    case 'blocked':
+      return { title: 'La tarjeta de la comunidad no se puede publicar', detail: publication.reason_text || 'El nodo no puede emitir la tarjeta.' };
+    default:
+      return null;
+  }
 }
 
 export type SetupStep = {

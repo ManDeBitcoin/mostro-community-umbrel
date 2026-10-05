@@ -568,6 +568,8 @@ fn apply_settings(
     // The daemon publishes its own kind 0, 10002 and 38385 events when it
     // starts. The panel never signs protocol events with the node key: an
     // info event from here would advertise a node whether or not mostrod came up.
+    // The one event the panel does sign, the community card (`card_publication`),
+    // is not part of the protocol and says nothing about a daemon running.
     if settings_changed || restart_when_unchanged {
         notify_standby(root);
     }

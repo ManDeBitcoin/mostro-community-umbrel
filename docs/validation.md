@@ -399,3 +399,38 @@ Copias aisladas del panel en puertos locales, cada una con su propio directorio 
 - Lectores de pantalla. Se comprobó el manejo con teclado del menú y de los diálogos, no una tecnología de apoyo real.
 - Navegadores distintos de Chromium.
 - Lo que el panel afirma sobre el comportamiento de `mostrod` y no se ejecutó aquí: el modo mantenimiento, la penalización automática por vencimiento y los comandos de `mostro-cli` de la guía de disputas.
+
+## Publicación de la tarjeta de la comunidad en los relays (2026-10-05)
+
+El panel puede publicar la tarjeta firmada de la comunidad como evento Nostr kind 30078 con `d = mostro-community-card`. Lo decide el operador con un interruptor de **Conexión de apps** que nace apagado. El formato y lo que debe comprobar una app están en `INTEGRACION-APPS.md`, sección 3.3. Es el único evento que el panel firma con la clave del nodo.
+
+### Cómo se probó
+
+Sin ningún relay real. Todos los relays fueron simulados en `127.0.0.1`, en puertos del rango 39xxx, y las copias del servidor usaron directorios de configuración y de respaldos temporales, sin las variables que las conectarían a LND, al daemon, a un webhook o a una identidad existente. Las claves fueron sintéticas o generadas para la prueba.
+
+### Qué se comprobó
+
+- `api/tests/card_publication.rs`, 22 pruebas contra relays simulados:
+  - La forma del evento: kind 30078, autor la clave del nodo, un solo tag `d`, sin `expiration`, y como contenido la tarjeta en JSON compacto con su firma. Verifican la firma del evento y la de la tarjeta.
+  - Con el interruptor apagado no se abre ninguna conexión ni se firma nada. Con el interruptor encendido y sin identidad, sin reglas o con una configuración ambigua, tampoco, y el estado dice el motivo.
+  - Una tarjeta sin cambios conserva el mismo evento, byte a byte, entre reenvíos, tras un guardado que no la altera y tras reiniciar. Una tarjeta cambiada recibe un evento nuevo con fecha estrictamente posterior, también dentro del mismo segundo.
+  - El informe por relay: aceptado, rechazado con el motivo del relay, sin respuesta, sin conexión, `OK` de otro evento, `NOTICE`, petición de autenticación y cierre sin responder. Solo un `OK` afirmativo para ese evento cuenta como publicado. Con un relay que rechaza, el estado es «no publicada» o «parcial», nunca «publicada».
+  - La alerta por fallo se registra una vez, al segundo intento fallido, y no en cada reintento.
+  - La retirada: petición de borrado kind 5 con los tags `a`, `e` y `k` de la tarjeta y ningún otro; reintento a un relay que la rechaza, también tras reiniciar; abandono al vencer el plazo; envío a un relay que ya salió de la configuración; nueva publicación con fecha posterior a la petición.
+  - Casos límite: un evento que no se puede guardar en disco no se envía; una clave que no se puede leer al apagar retrasa la retirada en lugar de perderla; al cambiar la identidad el panel avisa de que la tarjeta anterior sigue en los relays; un evento del nodo que no es una tarjeta, colocado en el archivo de estado, no recibe petición de borrado.
+  - Por HTTP: el interruptor exige la misma protección que guardar las reglas, rechaza campos desconocidos, no funciona sin reglas guardadas, no cambia la revisión ni la copia de la revisión anterior, y sobrevive a un guardado. Con el trabajador en marcha, encender el interruptor y guardar un cambio publican sin más intervención.
+- Once alteraciones deliberadas del código. Diez hicieron fallar al menos una prueba: no reutilizar el evento guardado, fechar siempre con la hora actual, ignorar el interruptor, contar un rechazo como aceptación, añadir un tag de expiración, dar por perdida la retirada si la clave no se lee, enviar antes de guardar, pedir el borrado de cualquier evento, olvidar un relay retirado y reintentar sin fin. La undécima, aceptar un `OK` de otro evento, no la detectaba ninguna prueba: se añadió el caso y, repetida, ya falla.
+- El vector de la guía (`api/tests/fixtures/community-card-event.json`): el `id` y la firma del evento con `nostr-tools`, y la firma de la tarjeta con `@noble/curves` siguiendo a mano la sección 3.1. Son implementaciones independientes del Manager.
+- El binario real contra un relay simulado, por HTTP: nada publicado antes de encender; un evento al encender; el mismo evento, con el mismo `id` y la misma fecha, reenviado al reiniciar el servidor sin pedirlo; un evento nuevo un segundo posterior al guardar un método de pago; nada enviado al guardar un cambio que no afecta a la tarjeta; la petición de borrado al apagar. Los archivos de estado quedaron con permisos `0600` y la clave privada no apareció en los registros ni en esos archivos.
+- `scripts/playwright-smoke.cjs`, ampliado a 33 pasos sin errores de consola. Antes de encender el interruptor comprueba que el único relay de la configuración es el simulado. Recorre: el interruptor apagado con su explicación; la confirmación al encender y lo que ocurre al decir que no; la publicación, con el evento que recibió el relay; la retirada; el motivo cuando no hay clave para firmar, con el aviso en el resumen y el enlace a donde se corrige; y, con respuestas simuladas, un relay que rechaza, la publicación parcial, un relay que salió de la configuración y una retirada que aún no se pudo firmar. Incluye la página a 390 px.
+- `./scripts/check.sh` completo: formato, `cargo test` (153 pruebas), clippy, las 10 pruebas de Python, la compilación del frontend, la validación del Compose y el smoke del supervisor. Formato, clippy y las 153 pruebas también con Rust 1.94.0, la versión de la imagen.
+- Una revisión independiente del cambio antes de confirmarlo. Encontró, entre otras cosas, que un error transitorio al leer la clave en el momento de apagar hacía perder la retirada, y que un fallo de escritura permitía enviar un evento sin guardar. Están corregidos y cada corrección tiene su prueba.
+
+### No verificado
+
+- Ningún envío a un relay real. No se sabe cómo responde cada implementación de relay al reenvío de un evento que ya tiene, a un evento con fecha un segundo por delante, ni a la petición de borrado NIP-09 por dirección. El panel muestra lo que responda cada relay.
+- La lectura del evento por la app BitMaxis en ejecución. Su código se leyó en el commit `1167506f`: busca este kind y este `d`, y comprueba autor, firma del evento y firma de la tarjeta.
+- El cambio en el nodo en producción. Llega con la siguiente versión publicada, y actualizar no publica nada mientras el interruptor siga apagado.
+- La imagen Docker con estos cambios: la construye el workflow del PR.
+- Relays que exigen autenticación NIP-42, más allá de que el panel muestre su petición como motivo.
+- Navegadores distintos de Chromium.
