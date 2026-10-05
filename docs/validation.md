@@ -360,3 +360,42 @@ A petición de la sesión que adapta la app, el tráfico cifrado de esas pruebas
 - Penalización automática por vencimiento, vencimiento cuando falla quien publicó, modo mantenimiento, restauración de sesión, Cashu y Serbero. Su descripción procede del código de v0.19.2.
 - La app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 - La actualización del nodo en producción de v0.19.0 a v0.19.2.
+
+## Reorganización del panel web (2026-10-05)
+
+El panel pasa de una sola pantalla larga a diez páginas en cinco grupos, con una dirección por página. No se añade ni se quita ningún endpoint. En el servidor cambian tres cosas: `/api/daemon/status` da a cada aviso un código estable (`notices`), informa del tiempo que lleva el daemon en ejecución (`running_for_secs`) y devuelve `null`, no cero, en los datos de LND que no ha podido leer; los avisos y las alertas hablan con el vocabulario del panel; y un respaldo manual conserva los mismos archivos que uno automático.
+
+### Cómo se probó
+
+Copias aisladas del panel en puertos locales, cada una con su propio directorio de configuración y de respaldos temporal, y sin las variables que las conectarían a LND, al daemon, a un webhook o a una identidad existente:
+
+- **Instalación vacía:** sin identidad ni reglas.
+- **Lista para activar:** identidad y reglas guardadas, con los eventos reales capturados del daemon de regtest (9 órdenes y 2 disputas resueltas) servidos por un relay local.
+- **Mercado abierto:** configuración activada, un anuncio reciente del nodo, ofertas publicadas, operaciones en curso y dos disputas abiertas, firmados con la clave desechable del nodo de regtest en un relay local. El proceso del daemon se simuló con su archivo de latido. LND se sustituyó por un servidor HTTPS local que responde a las tres consultas de solo lectura del panel con datos inventados: 3 canales activos y 1 inactivo.
+- **Respaldo automático activo:** la misma configuración con `BACKUP_PASSPHRASE` definida.
+
+### Qué se comprobó
+
+- Las diez páginas en las tres primeras copias, a 1440 px y a 390 px de ancho, sin errores en la consola del navegador. Ninguna página se desborda a lo ancho a 320, 360, 390, 640, 860, 861, 1050, 1051, 1280, 1440 ni 1920 px.
+- `scripts/playwright-smoke.cjs`, reescrito para la nueva estructura: 28 pasos sin errores de consola. Arranca su propio relay simulado y dos copias del panel en puertos efímeros, y recorre:
+  - La puesta en marcha completa desde una instalación vacía: clave inválida rechazada, identidad nueva que se muestra una sola vez y que el servidor no repite, reglas, plantilla, guardado, respaldo cifrado, conexión de apps, y activación y desactivación con sus confirmaciones.
+  - El libro de órdenes con sus filtros en la dirección, los enlaces desde cada cifra del resumen, el simulador con sus importes y la página de Lightning sin acceso a LND.
+  - Todas las páginas desde el menú, el enlace de salto, una dirección desconocida y una malformada.
+  - Con respuestas simuladas del servidor: los cinco estados del mercado, el destino de cada aviso según su código, una lectura fallida y la página de disputas al usar Atrás y Adelante.
+  - El uso desde un teléfono: recargar no cambia de página, nada se desborda y el menú se maneja con teclado.
+- La prueba de disputas falla si se retira la corrección que impide emparejar una disputa con la orden de otra, y vuelve a pasar al restaurarla.
+- Una configuración activada sin daemon que se anuncie no se presenta como mercado abierto: el panel dice «Sin confirmar». Un anuncio reciente sin Mostro activado aquí se presenta como «Anuncio vigente».
+- Con LND ilegible el panel no muestra saldos ni dice «0 canales». Con LND legible muestra canales, liquidez y la estimación de operaciones simultáneas, calculada con los canales activos.
+- `verify-backup` y `restore-backup`, ejecutados tal como los muestra la página de respaldos sobre un respaldo de prueba: la restauración dentro de la carpeta de respaldos crea `community.json` e `identity/` con permisos privados, y bajo una carpeta que no es privada el comando la rechaza con «El directorio padre debe ser privado (0700)».
+- Las hojas de estilo perdieron 199 selectores que ningún componente usaba. Se compararon 60 capturas de antes y después, las diez páginas en tres copias y a dos anchos: sin diferencias.
+- `./scripts/check.sh` completo: formato, `cargo test` (127 pruebas), clippy, las pruebas de Python (10, con la nueva que exige que el panel conozca todos los códigos de aviso del servidor), la compilación del frontend y el smoke del supervisor. Formato, clippy y pruebas se repitieron con Rust 1.94.0, la versión de la imagen de compilación.
+- Dos revisiones independientes antes de confirmar los cambios. Una leyó el código de la interfaz en busca de regresiones respecto al panel anterior. La otra contrastó cada afirmación de la interfaz y de la documentación con el código del servidor. Cada una encontró un defecto bloqueante: la guía de disputas podía mostrar, tras usar Atrás, el comando de resolución con la orden de otra disputa; y el comando de restauración documentado usaba un destino que el paquete de Umbrel rechaza. Los dos, los once hallazgos mayores y los menores se corrigieron, y los que se podían probar quedaron cubiertos por la prueba de navegador.
+
+### No verificado
+
+- El panel reorganizado contra el nodo en producción ni contra un daemon real en ejecución: el estado «mercado abierto» se reprodujo con eventos firmados y un latido de proceso simulado.
+- La imagen Docker con estos cambios. Este equipo no da acceso al socket de Docker a la sesión de desarrollo; la construye el workflow `image-check.yml` cuando la rama se sube y se abre su PR.
+- El modo de permisos de `/data` en una instalación real de Umbrel. Las instrucciones de restauración no dependen de él: usan la carpeta de respaldos, que el paquete crea privada.
+- Lectores de pantalla. Se comprobó el manejo con teclado del menú y de los diálogos, no una tecnología de apoyo real.
+- Navegadores distintos de Chromium.
+- Lo que el panel afirma sobre el comportamiento de `mostrod` y no se ejecutó aquí: el modo mantenimiento, la penalización automática por vencimiento y los comandos de `mostro-cli` de la guía de disputas.

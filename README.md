@@ -26,7 +26,8 @@ Puedes conservar tu instalación. El Manager incluye su propio daemon Mostro, qu
 - Panel React en español y API Rust/Axum.
 - Configuración persistente de comunidad, mercado, seguridad, relays y métodos de pago, con validación y revisiones.
 - Activación y desactivación del daemon Mostro oficial a partir de la configuración guardada.
-- Consulta de LND y panel de liquidez; monitor de órdenes públicas Nostr y simulador P2P.
+- Página de resumen con el estado del mercado, lo que requiere atención y la puesta en marcha guiada.
+- Consulta de LND y página de liquidez; libro de órdenes públicas Nostr y simulador de operaciones.
 - Consola de mediación de solo lectura (disputas del nodo y mensajes de protocolo), notificaciones en vivo y respaldos cifrados.
 
 El [roadmap](docs/roadmap.md) conserva el historial y los siguientes pasos.
