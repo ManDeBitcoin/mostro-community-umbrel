@@ -60,9 +60,9 @@ v=<version>&name=<name>&pubkey=<pubkey>&relays=<relays ordenados, unidos por com
 
 Normalización antes de formar la cadena: `name`, `website` y `contact` sin espacios en los extremos, `pubkey` en minúsculas, `currency` en mayúsculas, cada relay sin espacios en los extremos ni barras finales. Las etiquetas de `payment_methods` se unen tal como vienen. Los relays se ordenan después de normalizarlos, comparando las cadenas byte a byte.
 
-En la app esto se reparte entre dos funciones de `rust/src/api/community.rs`. `parse_and_validate_json` normaliza los relays al leer la tarjeta: quita espacios y barras finales y descarta los que no empiezan por `ws://` o `wss://` en minúsculas. `canonical_digest` aplica el resto de la normalización y, de los relays, solo los ordena y los une. La cadena de la app coincide con la de arriba cuando la tarjeta pasa por `parse_community_payload` antes de `verify_community_signature`. Si `canonical_digest` recibe una lista sin normalizar, por ejemplo con una barra final, calcula otra cadena y la firma no verifica.
+En la app esto se reparte entre dos funciones de `rust/src/api/community.rs`. `parse_and_validate_json` normaliza los relays al leer la tarjeta: quita espacios y barras finales y descarta los que no empiezan por `ws://` o `wss://`. Hasta el commit `cca71499` esa comparación distinguía mayúsculas. Desde `64ae7c91` no las distingue y el relay se conserva tal como está escrito. `canonical_digest` aplica el resto de la normalización y, de los relays, solo los ordena y los une. La cadena de la app coincide con la de arriba cuando la tarjeta pasa por `parse_community_payload` antes de `verify_community_signature`. Si `canonical_digest` recibe una lista sin normalizar, por ejemplo con una barra final, calcula otra cadena y la firma no verifica.
 
-Para quien emite una tarjeta: firma sobre la lista ya normalizada y no incluyas relays que no empiecen por `ws://` o `wss://` en minúsculas. La app los quita antes de calcular la cadena y la firma deja de coincidir.
+Para quien emite una tarjeta: firma sobre la lista ya normalizada y escribe el esquema en minúsculas, `ws://` o `wss://`. Una app anterior a `64ae7c91` descarta un relay con el esquema en mayúsculas antes de calcular la cadena, y la firma deja de coincidir.
 
 Verificación:
 
@@ -127,7 +127,7 @@ No des por hecho que la librería lo comprueba. nostr-sdk 0.45.2 verifica la fir
 
 Reglas para la app:
 
-- **Vigencia.** Considera el nodo activo solo si el evento tiene menos de unos 11 minutos (dos publicaciones perdidas). El Manager usa ese mismo umbral.
+- **Vigencia.** Considera el nodo activo solo si el evento tiene menos de unos 11 minutos (dos publicaciones perdidas). El Manager usa ese mismo umbral. La antigüedad se mide con el reloj del dispositivo: un teléfono adelantado varios minutos verá parado un nodo que funciona.
 - **Garantía.** `bond = max(redondeo(bond_amount_pct × sats), bond_base_amount_sats)`. El importe base es un suelo, no un sumando. Con `bond_enabled = false` no hay que mostrar ninguna garantía.
 - **Comisión.** Muestra `fee / 2` por parte. `fee_bps` de la tarjeta es el mismo dato en otra unidad.
 
@@ -642,7 +642,7 @@ Si falta el evento de información, la app no debe inventar valores. Debe decir 
 | La orden se publica y nadie la ve | La app y el nodo no comparten relay | Tarjeta y kind 10002 |
 | La app muestra garantía y el nodo no la exige | Valor fijo en la app en lugar de `bond_enabled` | Sección 3.2 |
 | La app muestra otra versión u otros límites | Lee un evento de información antiguo o de otra clave | Comparar `pubkey` y `created_at` |
-| La tarjeta no verifica | Cadena canónica distinta, relay con barra final sin normalizar, o relay que no empieza por `ws://` o `wss://` en minúsculas | Sección 3.1 |
+| La tarjeta no verifica | Cadena canónica distinta, relay con barra final sin normalizar, o relay con el esquema en mayúsculas en una app anterior a `64ae7c91` | Sección 3.1 |
 | El pago al comprador no sale | Sin ruta dentro de `max_routing_fee`, o sin liquidez saliente en el nodo | Página Lightning del Manager |
 
 Para el operador: en el Manager, la página **Nodo Mostro** muestra la versión que el nodo **anuncia** en los relays y hace cuánto. Si dice «Sin anuncio», las apps verán el nodo como inactivo aunque el contenedor esté en marcha.
@@ -689,10 +689,10 @@ No verificado: el comportamiento de relays `ws://` desde una PWA servida por HTT
 
 Los hallazgos describen `mostro-app` a 2026-10-04. Las rutas y los números de línea son los del commit `97eaa9df`, del que parte la rama `feat/bitmaxis-only`.
 
-**Estado a 2026-10-05.** La rama recibió ese día los commits `f6902377` y `cca71499`, con correcciones para estos hallazgos. Leído en `cca71499`, sin compilar ni ejecutar:
+**Estado a 2026-10-05.** La rama recibió ese día los commits `f6902377`, `cca71499` y `64ae7c91`, con correcciones para estos hallazgos. Están propuestos en el PR 1 de `ManDeBitcoin/mostro-app`. Leído en `64ae7c91`, sin compilar ni ejecutar:
 
 - **A1, A2, A3, A4, A6, A7, A9 y A10.** Corregidos.
-- **A5.** Corregido en el modo simple. Las pantallas avanzadas de crear orden, tomar orden y añadir factura siguen mostrando el mensaje crudo cuando el motivo no tiene texto propio, y la lista de operaciones del modo simple muestra `Error: $e` si falla la carga.
+- **A5.** Corregido en la interfaz. Las hojas del modo simple y las pantallas avanzadas de crear orden, tomar orden y añadir factura usan `localizedDaemonError` con un texto de reserva traducido, y `invalid_pubkey` se redacta de una forma al tomar una orden y de otra en el resto.
 - **A8.** Ningún código Dart importa ya una tarjeta pegada o escaneada. `parse_nip19_community` conserva los valores inventados.
 
 Los hallazgos de abajo no se han reescrito: siguen describiendo `97eaa9df`.
