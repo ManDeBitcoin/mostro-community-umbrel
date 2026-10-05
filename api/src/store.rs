@@ -10,6 +10,12 @@ use std::{
 pub struct Document {
     pub revision: u64,
     pub config: Option<Configuration>,
+    /// The operator's choice to publish the community card on the node's
+    /// relays (`card_publication`). It is not one of the rules: changing it
+    /// does not move `revision`. Left out of the file while it is off, so a
+    /// file that never used it stays readable by an older version.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub publish_card: bool,
 }
 pub struct Store {
     pub root: PathBuf,
@@ -39,7 +45,24 @@ impl Store {
                 .checked_add(1)
                 .ok_or_else(|| std::io::Error::other("revision overflow"))?,
             config: Some(config),
+            publish_card: self.document.publish_card,
         };
+        self.write(next, true)
+    }
+    /// Records whether the community card is published on the relays. The
+    /// rules and their revision stay as they are, and so does the copy of the
+    /// previous revision.
+    pub fn set_publish_card(&mut self, publish_card: bool) -> std::io::Result<Document> {
+        if self.document.config.is_none() {
+            return Err(std::io::Error::other("no saved configuration"));
+        }
+        let next = Document {
+            publish_card,
+            ..self.document.clone()
+        };
+        self.write(next, false)
+    }
+    fn write(&mut self, next: Document, keep_previous: bool) -> std::io::Result<Document> {
         // One process owns this store. Lock held by API until replacement and directory fsync finish.
         let temp = self.root.join(".community.tmp");
         let mut options = OpenOptions::new();
@@ -53,7 +76,7 @@ impl Store {
         file.write_all(&serde_json::to_vec_pretty(&next)?)?;
         file.sync_all()?;
         let target = self.root.join("community.json");
-        if target.exists() {
+        if keep_previous && target.exists() {
             fs::copy(&target, self.root.join("community.previous.json"))?;
         }
         fs::rename(&temp, &target)?;

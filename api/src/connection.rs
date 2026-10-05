@@ -88,6 +88,53 @@ fn card_digest(card: &CommunityCard) -> [u8; 32] {
     Sha256::digest(card_canonical_string(card).as_bytes()).into()
 }
 
+/// Why this node has no card to hand out.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CardUnavailable {
+    /// No configuration has been saved yet.
+    NoRules,
+    /// The saved configuration holds a separator the v1 signature cannot tell
+    /// apart from its own ([`Configuration::card_is_ambiguous`]).
+    ///
+    /// [`Configuration::card_is_ambiguous`]: crate::config::Configuration::card_is_ambiguous
+    Ambiguous,
+    /// The node has no private key to sign with.
+    NoIdentity,
+    /// The private key is there but could not be read safely.
+    IdentityUnreadable,
+}
+
+impl CardUnavailable {
+    /// The reason as a stable code, the same word the JSON form uses.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NoRules => "no_rules",
+            Self::Ambiguous => "ambiguous",
+            Self::NoIdentity => "no_identity",
+            Self::IdentityUnreadable => "identity_unreadable",
+        }
+    }
+
+    /// The reason as a sentence for the operator.
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::NoRules => {
+                "Aún no hay reglas guardadas: la tarjeta se genera a partir de la configuración de la comunidad."
+            }
+            Self::Ambiguous => {
+                "La configuración guardada contiene «&» en el nombre, la web o el contacto, o «&» o «,» en un relay o en un método de pago activo. Con esos caracteres la tarjeta firmada no sería inequívoca: corrígelos en Configuración y guarda."
+            }
+            Self::NoIdentity => {
+                "El nodo no tiene identidad: sin su clave privada no se puede firmar la tarjeta."
+            }
+            Self::IdentityUnreadable => {
+                "No se pudo leer la clave privada del nodo: revisa los permisos de la carpeta de identidad."
+            }
+        }
+    }
+}
+
 /// Build the signed [`CommunityCard`] of this node.
 ///
 /// Returns `None` until the node has an identity and a saved configuration:
@@ -95,13 +142,33 @@ fn card_digest(card: &CommunityCard) -> [u8; 32] {
 /// not served at all. It is also withheld while the configuration contains
 /// separators that would make the signed string ambiguous.
 pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
-    let config = store.document.config.as_ref()?;
+    issue_community_card(root, store).ok()
+}
+
+/// [`get_community_card`], saying why when there is no card.
+pub fn issue_community_card(root: &Path, store: &Store) -> Result<CommunityCard, CardUnavailable> {
+    issue_card_with_keys(root, store).map(|(card, _)| card)
+}
+
+/// The card together with the keys that signed it, for the one caller that
+/// signs something else with them: the event that carries the card.
+pub(crate) fn issue_card_with_keys(
+    root: &Path,
+    store: &Store,
+) -> Result<(CommunityCard, nostr::Keys), CardUnavailable> {
+    let config = store
+        .document
+        .config
+        .as_ref()
+        .ok_or(CardUnavailable::NoRules)?;
     // A draft saved before this check existed may hold values that make the
     // unescaped canonical string ambiguous. Such a card is not signed.
     if config.card_is_ambiguous() {
-        return None;
+        return Err(CardUnavailable::Ambiguous);
     }
-    let keys = identity::load_identity_keys(root).ok()??;
+    let keys = identity::load_identity_keys(root)
+        .map_err(|_| CardUnavailable::IdentityUnreadable)?
+        .ok_or(CardUnavailable::NoIdentity)?;
 
     // bond_percent: bond_bps (basis points) → integer percent, rounded.
     let bond_percent = if config.safety.bond_enabled {
@@ -121,7 +188,12 @@ pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
             .map(|r| normalize_relay(r))
             .collect(),
         // Primary fiat currency: first in the validated list.
-        currency: config.market.fiat_currencies.first()?.clone(),
+        currency: config
+            .market
+            .fiat_currencies
+            .first()
+            .ok_or(CardUnavailable::NoRules)?
+            .clone(),
         // Only active payment methods.
         payment_methods: config
             .payment_methods
@@ -136,7 +208,18 @@ pub fn get_community_card(root: &Path, store: &Store) -> Option<CommunityCard> {
         signature: String::new(),
     };
     card.signature = sign_community_card(&keys, &card);
-    Some(card)
+    Ok((card, keys))
+}
+
+/// Whether two cards say the same. The signature is left out: BIP-340 signing
+/// takes fresh randomness, so two cards issued for the same configuration
+/// differ in it and in nothing else.
+pub fn same_card_content(a: &CommunityCard, b: &CommunityCard) -> bool {
+    let unsigned = |card: &CommunityCard| CommunityCard {
+        signature: String::new(),
+        ..card.clone()
+    };
+    unsigned(a) == unsigned(b)
 }
 
 /// BIP-340 Schnorr signature over the SHA-256 of the canonical string.

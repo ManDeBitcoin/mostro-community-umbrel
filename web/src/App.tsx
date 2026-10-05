@@ -2,7 +2,7 @@ import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } fr
 import { api } from './lib/api';
 import { shortKey } from './lib/format';
 import { NAV_GROUPS, type PageId, navGroupOf, navItem, pageLink, useRoute } from './lib/navigation';
-import { announcedRules, attentionItems, isActive, isSettingUp, marketStatus, orderStats, savedRules, serviceTiles, setupSteps } from './lib/overview';
+import { announcedRules, attentionItems, cardAttention, isActive, isSettingUp, marketStatus, orderStats, savedRules, serviceTiles, setupSteps } from './lib/overview';
 import { usePanelData } from './hooks/usePanelData';
 import { useCommunityEditor } from './hooks/useCommunityEditor';
 import { useSimulator } from './hooks/useSimulator';
@@ -37,7 +37,7 @@ function App() {
   const [route, navigate] = useRoute();
   const page = route.page;
   const data = usePanelData();
-  const { daemon, dashboard, orders, notifications, backups, health } = data;
+  const { daemon, dashboard, orders, notifications, backups, health, cardPublication } = data;
   const [flash, setFlash] = useState<Flash | null>(null);
   const [activating, setActivating] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -83,8 +83,8 @@ function App() {
   // While the setup list is on the summary, the attention list does not repeat its steps.
   const duringSetup = isSettingUp(status);
   const attention = useMemo(
-    () => attentionItems({ apiOnline: data.apiOnline || !data.settled, daemon, orders, backups, unseenAlerts, hasUnsavedChanges: editor.dirty, duringSetup }),
-    [data.apiOnline, data.settled, daemon, orders, backups, unseenAlerts, editor.dirty, duringSetup],
+    () => attentionItems({ apiOnline: data.apiOnline || !data.settled, daemon, orders, backups, cardPublication, unseenAlerts, hasUnsavedChanges: editor.dirty, duringSetup }),
+    [data.apiOnline, data.settled, daemon, orders, backups, cardPublication, unseenAlerts, editor.dirty, duringSetup],
   );
   // Only a recent announcement is what apps see now; an old one is history.
   const announced = daemon?.announced_fresh ? (daemon.announced ?? null) : null;
@@ -190,6 +190,7 @@ function App() {
     if (id === 'disputes' && stats.openDisputes > 0) return { text: String(stats.openDisputes), tone: 'bad', label: `${stats.openDisputes} abiertas` };
     if (id === 'alerts' && unseenAlerts > 0) return { text: String(unseenAlerts), tone: 'bad', label: `${unseenAlerts} sin leer` };
     if (id === 'node' && (daemon?.warnings.length ?? 0) > 0) return { text: '', tone: 'warn', label: 'con avisos' };
+    if (id === 'connect' && cardAttention(cardPublication)) return { text: '', tone: 'warn', label: 'la tarjeta no está publicada como pediste' };
     if (id === 'config' && editor.dirty) return { text: '', tone: 'info', label: 'cambios sin guardar' };
     if (id === 'backups' && backups?.last_error && backups.enabled) return { text: '', tone: 'warn', label: 'el último falló' };
     return null;

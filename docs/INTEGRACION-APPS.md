@@ -4,10 +4,10 @@ Guía técnica para quien desarrolla una app de servicio (la Mostro App de BitMa
 
 Todo lo que aquí se afirma sobre el daemon se comprobó contra el binario oficial `mostrod` **v0.19.2** (mostro-core 0.16.0) ejecutado en regtest el 3 y el 4 de octubre de 2026 con un `settings.toml` generado por el Manager, o se leyó en el código de esa versión. La sección [Qué se verificó](#12-qué-se-verificó-y-cómo) separa lo ejecutado de lo solo leído.
 
-## 1. Las diez reglas
+## 1. Las once reglas
 
 1. La app habla con el nodo **solo por Nostr**. El Manager no ofrece ninguna API a las apps: su HTTP queda detrás de la autenticación de Umbrel.
-2. Para operar basta la **clave pública del nodo** y sus **relays**. Comisión, límites, monedas, garantía y versión se leen del evento de información del nodo (kind 38385), no de valores fijos en la app.
+2. Para operar basta la **clave pública del nodo** y sus **relays**. Comisión, límites, monedas, garantía y versión se leen del evento de información del nodo (kind 38385), no de valores fijos en la app. Ese evento solo vale si pasa la regla 11.
 3. Antes de enviar nada, comprueba en ese evento `protocol_version = "2"` y que el evento sea reciente. Un nodo sin anuncio reciente está parado. Lee también `pow_first_contact`: si no es `0`, el primer mensaje de cada clave debe llevar esa prueba de trabajo.
 4. Los mensajes son eventos **kind 14** firmados por la clave de la operación, con contenido cifrado **NIP-44 v2**. Kind 4 y gift wrap (1059) no reciben respuesta.
 5. Una orden lleva **sats fijos o prima, nunca ambos**. `amount ≠ 0` con `premium ≠ 0` devuelve `cant-do: invalid_parameters`.
@@ -16,6 +16,7 @@ Todo lo que aquí se afirma sobre el daemon se comprobó contra el binario ofici
 8. Usa un `request_id` propio en cada petición, también en `cancel`, y correlaciona la respuesta por él. Un rechazo de `new-order` no trae `id`. Un mensaje del nodo puede traer el `request_id` de la otra parte o ninguno: entonces es un aviso y se enruta por `id` y `action` (sección 5.5).
 9. Muchos fallos son **silenciosos**: sin respuesta en unos segundos, la petición no se aceptó. No muestres una orden como creada hasta recibir `new-order` del daemon, y no des una orden por libre solo porque figure como `pending`.
 10. No atrases ni aleatorices `created_at` en los mensajes al nodo: un evento con más de 10 s de antigüedad se descarta.
+11. El filtro de una suscripción es una petición al relay, no una garantía. Antes de usar un evento como del nodo, comprueba en la app su firma, que su `pubkey` es la clave del nodo y que su kind es el que pediste. En los eventos direccionables comprueba también el tag `d`. Hazlo antes de elegir la revisión más reciente (sección 3.2).
 
 ## 2. Quién habla con quién
 
@@ -27,7 +28,7 @@ Operador ──(navegador, sesión de Umbrel)──► Manager ── settings.t
 
 El Manager genera la configuración del daemon, lo arranca y lo supervisa. No participa en las operaciones ni reenvía mensajes. Sus rutas HTTP (`/api/…`) pasan por `app_proxy` de Umbrel y exigen la sesión del operador, de modo que una app móvil no puede consultarlas.
 
-La tarjeta de la comunidad llega a la app fuera de banda: QR, enlace o texto pegado.
+La tarjeta de la comunidad llega a la app fuera de banda: QR, enlace o texto pegado. Desde la v1.0.13, si el operador lo activa, el Manager la publica además en los relays del nodo, firmada con la clave del nodo (sección 3.3). Es el único evento que publica el Manager: todos los demás son del daemon.
 
 ## 3. Descubrir el nodo
 
@@ -57,7 +58,11 @@ Convención entre el Manager y las apps que la leen. No forma parte del protocol
 v=<version>&name=<name>&pubkey=<pubkey>&relays=<relays ordenados, unidos por coma>&currency=<currency>&payment_methods=<unidos por coma, en el orden de la tarjeta>&fee_bps=<fee_bps>&bond_percent=<bond_percent>&website=<website>&contact=<contact>
 ```
 
-Normalización antes de formar la cadena: `name`, `website` y `contact` sin espacios en los extremos, `pubkey` en minúsculas, `currency` en mayúsculas, cada relay sin espacios ni barra final. Es la misma cadena que calcula `canonical_digest` en `rust/src/api/community.rs` de la app.
+Normalización antes de formar la cadena: `name`, `website` y `contact` sin espacios en los extremos, `pubkey` en minúsculas, `currency` en mayúsculas, cada relay sin espacios en los extremos ni barras finales. Las etiquetas de `payment_methods` se unen tal como vienen. Los relays se ordenan después de normalizarlos, comparando las cadenas byte a byte.
+
+En la app esto se reparte entre dos funciones de `rust/src/api/community.rs`. `parse_and_validate_json` normaliza los relays al leer la tarjeta: quita espacios y barras finales y descarta los que no empiezan por `ws://` o `wss://`. Hasta el commit `cca71499` esa comparación distinguía mayúsculas. Desde `64ae7c91` no las distingue y el relay se conserva tal como está escrito. `canonical_digest` aplica el resto de la normalización y, de los relays, solo los ordena y los une. La cadena de la app coincide con la de arriba cuando la tarjeta pasa por `parse_community_payload` antes de `verify_community_signature`. Si `canonical_digest` recibe una lista sin normalizar, por ejemplo con una barra final, calcula otra cadena y la firma no verifica.
+
+Para quien emite una tarjeta: firma sobre la lista ya normalizada y escribe el esquema en minúsculas, `ws://` o `wss://`. Una app anterior a `64ae7c91` descarta un relay con el esquema en mayúsculas antes de calcular la cadena, y la firma deja de coincidir.
 
 Verificación:
 
@@ -85,6 +90,10 @@ digest: d6a36f0d46513507fe07c551a4cf6763065abf6019d11b5ff1b7231966456ef6
 | JSON | el objeto de arriba | La tarjeta firmada completa |
 | nprofile | `mostro://community/nprofile1…` | Solo clave pública y relays |
 
+Hay una cuarta vía, que no pasa por las manos del usuario: el evento de la sección 3.3 lleva esta misma tarjeta en su `content`, byte a byte como la entrega el formato JSON. Solo existe si el operador activó la publicación.
+
+El analizador de la app (`parse_community_payload`) acepta más entradas que esas tres. El prefijo puede ser `mostro://community/`, `https://mostro.network/c/`, `http://mostro.network/c/` o ninguno. Detrás puede venir el JSON, el JSON en base64url, con relleno o sin él, o en base64 estándar, un `nprofile1…` o un `npub1…`. Estos dos últimos admiten además `nostr:` delante. Un `nprofile` o un `npub` no llevan datos de la comunidad ni firma: no sirven para comprobar quién emitió la tarjeta.
+
 **Límites del esquema v1.** Los campos no se escapan: un `&` en el nombre, la web o el contacto, o una `,` en un relay o en una etiqueta de pago, harían que una misma firma valiera para dos tarjetas distintas. El Manager no deja guardar esos valores ni firma una tarjeta que los contenga. Admitirlos exige una versión 2 con escape, implementada a la vez en el Manager y en la app. `bond_percent` no expresa el mínimo en sats ni a qué parte se aplica: para eso está el evento de información.
 
 ### 3.2 Evento de información del nodo (kind 38385)
@@ -92,6 +101,10 @@ digest: d6a36f0d46513507fe07c551a4cf6763065abf6019d11b5ff1b7231966456ef6
 Evento direccionable firmado por el nodo, con `d` igual a su clave pública en hex. El daemon lo publica al arrancar y cada 5 minutos. Es la **fuente autoritativa** de todo lo que la app muestra sobre el nodo.
 
 Filtro: `{"kinds":[38385],"authors":["<pubkey del nodo>"]}`.
+
+El filtro es una petición al relay, no una garantía. Antes de leer los tags, comprueba en la app que el evento tiene firma válida, que su `pubkey` es la clave del nodo, que su kind es 38385 y que su tag `d` es esa misma clave. Descarta los demás antes de quedarte con la copia más reciente. Sin esa comprobación, un relay puede entregar un evento firmado con otra clave y la app lo leería como del nodo: otra dificultad de prueba de trabajo, otra versión de protocolo, otra política de garantía. Con `maintenance_mode = true` y un `created_at` futuro, ese evento sería la copia más reciente y una app que siga la sección 6.4 dejaría de enviar órdenes y tomas.
+
+No des por hecho que la librería lo comprueba. nostr-sdk 0.45.2 verifica la firma de un evento la primera vez que recibe su id. Si ese id ya está en su caché de eventos verificados, lo acepta sin verificarlo otra vez. Y solo compara el evento con el filtro si se activa `verify_subscriptions` o `ban_relay_on_mismatch`: las dos opciones vienen desactivadas. La misma comprobación vale para los kinds 38383, 38386 y 30078, cada uno con su kind y, si lo conoces de antemano, con su `d`.
 
 | Tag | Significado |
 | --- | --- |
@@ -116,7 +129,7 @@ Filtro: `{"kinds":[38385],"authors":["<pubkey del nodo>"]}`.
 
 Reglas para la app:
 
-- **Vigencia.** Considera el nodo activo solo si el evento tiene menos de unos 11 minutos (dos publicaciones perdidas). El Manager usa ese mismo umbral.
+- **Vigencia.** Considera el nodo activo solo si el evento tiene menos de unos 11 minutos (dos publicaciones perdidas). El Manager usa ese mismo umbral. La antigüedad se mide con el reloj del dispositivo: un teléfono adelantado varios minutos verá parado un nodo que funciona.
 - **Garantía.** `bond = max(redondeo(bond_amount_pct × sats), bond_base_amount_sats)`. El importe base es un suelo, no un sumando. Con `bond_enabled = false` no hay que mostrar ninguna garantía.
 - **Comisión.** Muestra `fee / 2` por parte. `fee_bps` de la tarjeta es el mismo dato en otra unidad.
 
@@ -139,14 +152,69 @@ Con la garantía activada y prueba de trabajo de primer contacto, otro nodo v0.1
 | 0 | Nombre, descripción y web de la instancia |
 | 10002 | Lista de relays del nodo (un tag `r` por relay conectado). No es fiable como lista completa: solo incluye los relays conectados al publicar |
 | 30078, `d = "mostro-rates"` | Cotizaciones BTC/fiat que usa el nodo, `{"BTC":{"USD":84706.4,…}}`, con expiración de 10 minutos |
+| 30078, `d = "mostro-community-card"` | Tarjeta de la comunidad. No la publica el daemon sino el Manager, y solo si el operador lo activa. Ver más abajo |
 | 38384 | Valoración acumulada de un usuario tras recibir una valoración: tags `total_reviews`, `total_rating`, `last_rating`, `min_rate`, `max_rate`, `since` y `days`. El nodo las publica en lotes, cada hora por defecto, y con `d` igual a la clave de operación de quien valoró, no a la identidad valorada. Para mostrar reputación usa el tag `rating` de la orden y el payload `peer` |
 | 8383 | Auditoría del aporte al desarrollo de Mostro, solo en mainnet |
 
 Para estimar sats en pantalla usa la cotización del propio nodo (kind 30078) y no un proveedor distinto: es el precio con el que el daemon fijará la operación.
 
+**Tarjeta de la comunidad en los relays.** Desde la v1.0.13 el Manager puede publicar la tarjeta de la sección 3.1 como evento, para que una app lea los métodos de pago y el contacto sin que el usuario escanee nada. Es una convención entre el Manager y las apps que la leen, como la propia tarjeta: no forma parte del protocolo Mostro. Lo decide el operador con un interruptor que nace apagado, porque deja a la vista de cualquiera los métodos de pago, la web y el contacto, ligados a la clave del nodo. Hasta la v1.0.12 el Manager solo la entregaba fuera de banda.
+
+| | |
+| --- | --- |
+| Kind | 30078, direccionable (NIP-78) |
+| Autor | La clave del nodo |
+| Tags | Solo `["d","mostro-community-card"]`. No lleva `expiration` |
+| `content` | La tarjeta v1 tal como la entrega el Manager: JSON compacto, con su `signature` |
+| `created_at` | Cuándo cambió la tarjeta por última vez |
+
+Filtro: `{"kinds":[30078],"authors":["<pubkey del nodo>"],"#d":["mostro-community-card"]}`.
+
+El nodo publica sus cotizaciones con el mismo kind y la misma clave, en `d = "mostro-rates"`. Son dos direcciones distintas. Pide siempre con `#d` y, al recibir, no leas un evento como si fuera el otro.
+
+El Manager envía el evento al arrancar, al guardar un cambio que altera la tarjeta y cada 6 horas. El envío periódico es el mismo evento firmado, con el mismo `id` y el mismo `created_at`: la fecha solo avanza cuando cambia el contenido de la tarjeta, así que una app puede mostrarla como «última modificación». Dos salvedades. Un cambio de comisión o de garantía también cambia la tarjeta, porque lleva `fee_bps` y `bond_percent`. Y si el operador retira la tarjeta y la vuelve a publicar, o cambia la identidad del nodo, el evento es nuevo y lleva la fecha de ese momento.
+
+Reglas para la app:
+
+1. **Comprueba el evento antes de abrirlo** (regla 11): firma válida, `kind = 30078`, `pubkey` igual a la clave del nodo y un tag `d` igual a `mostro-community-card`. Un relay puede devolver algo distinto de lo que se le pidió.
+2. **Comprueba la tarjeta que lleva dentro.** `content` es un objeto JSON con `version = 1`, su `pubkey` es el autor del evento y su propia firma verifica como en la sección 3.1. Descarta un evento del nodo que envuelva la tarjeta de otra clave o una tarjeta alterada. La firma del evento no sustituye a la de la tarjeta ni al revés.
+3. **Gana el `created_at` más reciente** entre los eventos que pasan los puntos 1 y 2, no entre todos los recibidos: un evento posterior sin una tarjeta válida no tapa al bueno. Escucha a todos los relays antes de elegir, porque uno puede conservar una revisión antigua. No sustituyas una tarjeta guardada por otra con un `created_at` menor.
+4. **Que no haya evento es lo normal**, no un error. El operador puede no haberlo activado o haberlo retirado, o el relay puede no tenerlo. Tampoco dice nada de si el nodo está en marcha: el evento no caduca ni se renueva como señal de vida. La vigencia del nodo sale solo del kind 38385 (sección 3.2).
+5. **No tomes de la tarjeta la comisión ni la garantía.** `fee_bps` y `bond_percent` son orientativos y pueden llevar meses publicados. Lo que se aplica es `fee` y los tags `bond_*` del evento de información. De la tarjeta se usan el nombre, la moneda principal, los métodos de pago, la web y el contacto.
+
+**Retirada.** Si el operador apaga el interruptor, el Manager deja de enviar el evento y manda a los relays que pudieron recibirlo una petición de borrado NIP-09: un evento kind 5 firmado por el nodo, con los tags `["a","30078:<pubkey>:mostro-community-card"]`, `["e","<id del último evento>"]` y `["k","30078"]`. No nombra ninguna otra dirección. Es una petición: un relay puede no atenderla, y el Manager la repite durante una semana a los relays que no la aceptan. Si el operador publica de nuevo, el evento lleva un `created_at` posterior al de esa petición. Una app no necesita tratar el kind 5: tras una retirada deja de encontrar el evento (punto 4) y decide qué hace con la tarjeta que ya tenía. La app BitMaxis, leída en su commit `1167506f`, conserva la última tarjeta válida.
+
+Límites de esta versión:
+
+- El Manager publica en los relays de su configuración. Si el operador quita uno, la revisión que ese relay tenía se queda allí hasta la siguiente retirada, que también se le envía. Por eso el punto 3 pide elegir entre todos los relays y no quedarse con el primero que responde.
+- Si el operador cambia la identidad del nodo, la tarjeta firmada con la clave anterior sigue en los relays: solo esa clave podría pedir su borrado. Una app que opera con la clave nueva no la lee, porque el autor no coincide (punto 1).
+- El Manager no se autentica ante los relays (NIP-42). Un relay que lo exija para escribir rechaza el evento, y el panel se lo muestra al operador como rechazado.
+- El Manager solo da por publicada la tarjeta en un relay cuando este responde `OK` con `true` para ese evento.
+
+Vector de prueba, firmado con una clave sintética (`api/tests/fixtures/community-card-event.json`, campo `card_event`):
+
+```json
+{"id":"bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1","pubkey":"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa","created_at":1790000000,"kind":30078,"tags":[["d","mostro-community-card"]],"content":"{\"version\":1,\"name\":\"Comunidad de prueba\",\"pubkey\":\"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa\",\"relays\":[\"wss://relay.example.com\",\"wss://relay2.example.com\"],\"currency\":\"USD\",\"payment_methods\":[\"Transferencia bancaria\",\"Efectivo\"],\"fee_bps\":60,\"bond_percent\":3,\"website\":\"https://comunidad.example\",\"contact\":\"https://t.me/comunidad_de_prueba\",\"signature\":\"c329cf46e95e2560a6f39b3a7a567ad1b65f122dd40f08e42389b5f542fd21666e3fd1a4de8df43c5bf00eeab3aa1c3b7249ea483218b496f9ca2ca89b23478f\"}","sig":"fa3a4cfebe0e597ef79cd112bb176cb266596d7ffb82bc31a5ab8589f9e26ff0ca9905d9a3f3a62eba2644dec103e851e1a3303370ac034c1ca14480571587c9"}
+```
+
+Sobre ese evento: la firma y el `id` verifican, la clave del nodo es `4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa`, y la tarjeta de `content` verifica con esta cadena y este digest (sección 3.1):
+
+```text
+cadena: v=1&name=Comunidad de prueba&pubkey=4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa&relays=wss://relay.example.com,wss://relay2.example.com&currency=USD&payment_methods=Transferencia bancaria,Efectivo&fee_bps=60&bond_percent=3&website=https://comunidad.example&contact=https://t.me/comunidad_de_prueba
+digest: 076610bd0d6cd04e9f1b96f908b7bacfefd17b8400ab5e96bf4e7979431b4ee8
+```
+
+El mismo archivo trae en `deletion_event` la petición de borrado que corresponde a ese evento:
+
+```json
+{"id":"dbae75fa05b2a956de0e7c4ae477a609aa3c9fd42c9f0f58d960b456a166d94b","pubkey":"4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa","created_at":1790086400,"kind":5,"tags":[["a","30078:4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa:mostro-community-card"],["e","bc2c595e6dc7e88a1eab143c2540b403f3c92a90b4e6a787e509d6aa857b53b1"],["k","30078"]],"content":"","sig":"efd8eafc0a7e4c5dc12620aa7697cfedb6bf0306ef0821e6054a87e58f490c115d71e45e1255192e7e12b57345e95059b022ecf9794c40d9f8210a5bb987a4cd"}
+```
+
+Casos que una app debe rechazar con ese vector, todos cubiertos en `api/tests/card_publication.rs`: el mismo `content` en un evento del nodo con `d = "mostro-rates"` o con otro kind, el mismo `content` en un evento firmado por otra clave, y un evento del nodo con `d` correcto cuya tarjeta lleva un método de pago añadido después de firmarla.
+
 ## 4. Libro de órdenes (kind 38383)
 
-Evento direccionable firmado por el nodo, con `d` igual al UUID de la orden. Filtro: `{"kinds":[38383],"authors":["<pubkey del nodo>"]}`, opcionalmente con `#s`, `#k` o `#f`.
+Evento direccionable firmado por el nodo, con `d` igual al UUID de la orden. Filtro: `{"kinds":[38383],"authors":["<pubkey del nodo>"]}`, opcionalmente con `#s`, `#k` o `#f`. Comprueba firma, autor y kind de cada evento (regla 11). Si pediste una orden concreta, comprueba también que `d` es su id. Sin ello, un relay puede meter en el libro órdenes que el nodo no publicó, o una revisión falsa de una orden real.
 
 | Tag | Valor |
 | --- | --- |
@@ -212,7 +280,7 @@ Tres revisiones reales de una misma orden:
 
 - Autor: la **clave de la operación**, distinta para cada operación. Añade el tag `nonce` de NIP-13 si el nodo exige prueba de trabajo.
 - Cifrado: NIP-44 v2 con la clave de conversación entre la clave de la operación y la del nodo.
-- Respuestas: el nodo firma con su clave y etiqueta `p` con la clave de la operación. Filtro de suscripción: `{"kinds":[14],"authors":["<nodo>"],"#p":["<claves de operación activas>"]}`.
+- Respuestas: el nodo firma con su clave y etiqueta `p` con la clave de la operación. Filtro de suscripción: `{"kinds":[14],"authors":["<nodo>"],"#p":["<claves de operación activas>"]}`. Comprueba que `pubkey` del evento es la clave del nodo antes de procesarlo: el filtro no lo garantiza (regla 11).
 - Las respuestas expiran en los relays a los 30 días.
 
 ### 5.2 Contenido cifrado
@@ -297,7 +365,7 @@ Consecuencia para la app: fija un tiempo de espera por petición (la app BitMaxi
 [{"cant-do":{"version":2,"request_id":62841,"trade_index":null,"action":"cant-do","payload":{"cant_do":"invalid_parameters"}}},null,null]
 ```
 
-La clave superior es `cant-do`, no `order`. Llega a la clave que envió la petición y repite su `request_id`.
+La clave superior es `cant-do`, no `order`. Llega a la clave que envió la petición y repite su `request_id`. Si la petición llevaba `id`, también lo repite.
 
 ### 5.5 Qué mensajes repiten tu `request_id`
 
@@ -367,6 +435,8 @@ Nodo de prueba: solo USD, mínimo 1 000 sats, máximo 1 000 000 sats, sin garant
 
 Las dos primeras filas son exactamente lo que enviaba el flujo de venta simple de la app BitMaxis. Es el origen del error «parámetro inválido: la prima de venta no es válida».
 
+De las trece, las capturas del anexo D solo conservan el evento público de cinco de las seis órdenes aceptadas: `fixed_sats_premium_0`, `market_premium_5`, `market_premium_negative`, `range_premium_2` y `buy_market_premium_3` en `public-events.json`. Falta la de precio de mercado con prima 0. Ningún rechazo de `new-order` está en las capturas. Los siete rechazos de la tabla coinciden con el código de v0.19.2: `order_action` y `calculate_and_check_quote` en `src/app/order.rs` de mostrod, y `check_zero_amount_with_premium`, `check_fiat_currency`, `check_fiat_amount` y `check_range_order_limits` en `src/order.rs` de mostro-core 0.16.0.
+
 ### 6.3 Precio, prima y comisión
 
 ```text
@@ -377,7 +447,7 @@ vendedor paga   sats + comisión               factura retenida
 comprador cobra sats − comisión
 ```
 
-- La fórmula es la misma para compra y venta. **Prima positiva: menos sats por el mismo fiat**, es decir, bitcoin más caro, favorable a quien vende. Prima negativa: más sats, favorable a quien compra.
+- La fórmula es la misma para compra y venta. **Prima positiva: menos sats por el mismo fiat**, es decir, bitcoin más caro, favorable a quien vende bitcoin, sea quien publica la orden o quien la toma. Prima negativa: más sats, favorable a quien compra. En una orden de compra, una prima positiva significa que quien la publica recibe menos sats por el mismo fiat.
 - El daemon aplica `1 − premium/100`. No es `1 / (1 + premium/100)`: con un 10 % la diferencia ronda el 1 %.
 - El precio de una orden de mercado se fija **al tomarla**, no al publicarla.
 
@@ -389,6 +459,10 @@ Operación real: 50 USD con prima +5 % y comisión 0,6 %, cotización 84 706,4 U
 | Comisión por parte | 168 |
 | Factura retenida que pagó el vendedor | 56 244 |
 | Lo que recibió la factura del comprador | 55 908 |
+
+De esta operación, las capturas del anexo D solo conservan los tres eventos públicos (`full_trade` en `public-events.json`), con `amt` 56076 tras la toma. La cotización, la comisión y los importes de las dos facturas no están en las capturas. Con esa cotización, el código da las mismas cifras (`get_market_quote`, `get_fee` y `show_hold_invoice` en `src/util.rs`, y `dispatch_payout` en `src/app/release.rs`): 50 / 84 706,4 × 100 000 000 = 59 027,4. Menos el 5 % queda 56 076,05, que se trunca a 56 076. La comisión es 0,006 × 56 076 / 2 = 168,2, que se redondea a 168. La factura retenida es 56 076 + 168 = 56 244 y el comprador cobra 56 076 − 168 = 55 908.
+
+Una venta sin prima sí está capturada con todos sus importes (`protocol-messages.jsonl`): 40 USD, 47 231 sats, comisión 142, factura retenida de 47 373 y factura del comprador de 47 089.
 
 ### 6.4 Validación recomendada en la app antes de enviar
 
@@ -552,21 +626,47 @@ Motivos de `cant-do` que una app de compraventa verá, con el texto sugerido par
 
 | Motivo | Cuándo | Qué decir |
 | --- | --- | --- |
-| `invalid_parameters` | Sats fijos junto con prima | «La orden no puede llevar sats fijos y prima a la vez» |
+| `invalid_parameters` | En `new-order`: sats fijos junto con prima. En `orders`: lista de ids vacía | Al publicar: «La orden no puede llevar sats fijos y prima a la vez». En `orders` es un error de la app: no mostrar ese texto |
 | `invalid_amount` | Fiat ≤ 0, rango incompleto o invertido, rango con sats fijos | «Importe no válido» |
 | `invalid_fiat_currency` | Moneda no admitida por el nodo | «Esta comunidad no opera en esa moneda» |
 | `out_of_range_sats_amount` | Sats fuera de los límites, o importe fuera del rango al tomar | «El importe está fuera de los límites de la comunidad» |
 | `price_too_stale` | El nodo no tiene cotización reciente | «No hay cotización reciente. Inténtalo en unos minutos» |
 | `invalid_invoice` | Factura mal formada, vencida o de otro importe | «La factura no es válida para este importe» |
-| `pending_order_exists` | Quien toma ya tiene otra operación a medias | «Termina tu operación en curso antes de tomar otra» |
+| `pending_order_exists` | Solo en `take-sell` y `take-buy`. Tu identidad ya es compradora en una orden que espera tu factura, o vendedora en una que espera tu pago. O, en un nodo con garantía para quien toma, esa orden ya tiene pagada una garantía de quien toma | «No se pudo tomar la orden: tienes otra operación a la espera de tu factura o de tu pago, o alguien se adelantó» |
 | `invalid_order_status`, `not_allowed_by_status` | La orden ya no admite esa acción | «La orden ya no está disponible» |
 | `is_not_your_order` | La clave no participa en la orden | «Esta orden no es tuya» |
 | `invalid_pubkey` | Al tomar: es tu propia orden. En `fiat-sent` o `dispute`: la clave no es la parte esperada | «No puedes tomar tu propia orden» o «Esta acción no te corresponde» |
 | `invalid_peer` | La acción corresponde a la otra parte (`release` solo el vendedor, `add-invoice` solo el comprador) | «Esta acción corresponde a la otra parte» |
-| `not_found` | La orden no existe en este nodo | «La orden no existe o ya no está disponible» |
+| `not_found` | La orden no existe en este nodo. En `orders`: ninguno de los ids pertenece a tu identidad. En `last-trade-index`: el nodo no tiene registrada tu identidad | «La orden no existe o ya no está disponible». En `orders` y `last-trade-index` responde a una consulta de la app: no mostrar ese texto |
 | `invalid_trade_index` | Índice ya usado | Resincronizar el índice y reintentar |
 | `maintenance_mode` | El nodo está en mantenimiento | «La comunidad no acepta operaciones nuevas por mantenimiento» |
+| `invalid_order_kind` | `take-sell` sobre una orden de compra o `take-buy` sobre una de venta. También `new-order` sin `kind` | Error de la app: la acción se elige por el tag `k`. Mostrar un error genérico |
+| `order_already_canceled` | `cancel` sobre una orden ya cancelada, también de mutuo acuerdo o por un mediador | «La orden ya estaba cancelada» |
+| `too_many_requests` | `orders` con más ids que `max_orders_per_response` | Partir la lista y repetir la petición |
+| `invalid_action` | La app envía `pay-invoice`, que solo emite el nodo | Error de la app. Mostrar un error genérico |
 | `unknown` | Motivo de un daemon más reciente | Mostrar un error genérico, no fallar |
+
+`pending_order_exists` tiene dos causas y el mensaje no las distingue. Leído en el código de v0.19.2, no ejecutado:
+
+- **Operación propia a la espera.** Al recibir `take-sell`, el nodo busca una orden en `waiting-buyer-invoice` cuya identidad compradora sea la tuya. Al recibir `take-buy`, una en `waiting-payment` cuya identidad vendedora sea la tuya. Da igual que esa orden la publicaras o la tomaras. Una operación activa o con el fiat enviado no bloquea. Repetir `take-sell` sobre la misma orden mientras espera tu factura devuelve también este motivo. La excepción es el modo de reputación con un `trade_index` que no sea mayor que el último usado: ahí el nodo responde antes `invalid_trade_index` (sección 5.3). En privacidad total la identidad es la clave de la operación: solo coincide una orden de esa misma clave.
+- **Garantía ya pagada en esa orden.** Solo en nodos con garantía para quien toma. La orden ya tiene pagada una garantía de quien toma, de otro usuario o tuya, y sigue en `pending` o en espera de garantía. Si la orden ya avanzó, otro usuario que intente tomarla recibe `invalid_order_status`: es lo que recibió el tercer usuario (`buyer3`) en la captura de dos tomas simultáneas del anexo D.
+
+Si la app sabe que el usuario tiene una operación a la espera de su factura o de su pago, puede decirlo y llevarle a ella. Si no la conoce, no puede saber cuál de las dos causas fue. En un nodo sin garantía para quien toma solo existe la primera: la operación a la espera está en el nodo aunque la app no la tenga.
+
+Otros motivos que v0.19.2 puede enviar, leídos en el código y no ejecutados. Los de mediación llegan a quien envía `admin-settle`, `admin-cancel` o `admin-add-solver`:
+
+| Motivo | Cuándo | Qué decir |
+| --- | --- | --- |
+| `dispute_creation_error` | `dispute` sobre una orden que ya tiene marcada una disputa de esa misma parte | «No se pudo abrir la disputa» |
+| `invalid_rating` | `rate-user` cuando el acumulado de la otra parte no pasa la comprobación del nodo. Un valor fuera de 1 a 5 no lo provoca: en una orden completada no recibe respuesta | Mostrar un error genérico |
+| `invalid_payload` | `admin-settle` o `admin-cancel` con `bond_resolution` que penaliza a una parte sin garantía retenida | La resolución no se ejecuta. Corregir y reenviar |
+| `is_not_your_dispute` | `admin-settle` o `admin-cancel` de quien no es el mediador asignado | «Esta disputa no está asignada a ti» |
+| `dispute_taken_by_admin` | Lo mismo, cuando la disputa la tomó el administrador del nodo | «El administrador del nodo tomó esta disputa» |
+| `not_authorized` | `admin-cancel` sobre una orden aún no tomada o a la espera de garantía, con una identidad que no es la del nodo. O mediador asignado sin permiso de escritura | «No tienes permiso para esta acción» |
+| `invalid_text_message` | `admin-add-solver` sin payload, con un payload que no es texto o con texto vacío | Solo afecta a herramientas de administración |
+| `invalid_cashu_token`, `cashu_mint_unavailable`, `invalid_mint_url` | `add-cashu-escrow`, solo en nodos con depósito Cashu. Esos nodos responden además `invalid_action` a las acciones que ese modo no atiende | No aplica a un nodo Lightning |
+
+mostro-core 0.16.0 define además `invalid_signature`, `invalid_payment_request`, `cant_create_user`, `out_of_range_fiat_amount`, `invalid_dispute_status`, `cashu_escrow_not_locked` y `cashu_signature_missing`. v0.19.2 no envía ninguno. `invalid_signature` y `cant_create_user` aparecen en el código, pero ese fallo se descarta sin respuesta (sección 5.3).
 
 No muestres al usuario el texto crudo de la excepción. Un mensaje como `Order rejected by Mostro: InvalidParameters` no le dice qué corregir.
 
@@ -597,7 +697,8 @@ Si falta el evento de información, la app no debe inventar valores. Debe decir 
 | La orden se publica y nadie la ve | La app y el nodo no comparten relay | Tarjeta y kind 10002 |
 | La app muestra garantía y el nodo no la exige | Valor fijo en la app en lugar de `bond_enabled` | Sección 3.2 |
 | La app muestra otra versión u otros límites | Lee un evento de información antiguo o de otra clave | Comparar `pubkey` y `created_at` |
-| La tarjeta no verifica | Cadena canónica distinta o relay con barra final | Sección 3.1 |
+| La app no encuentra la tarjeta en los relays | El operador no activó la publicación o la retiró, ningún relay la aceptó, o la app pide sin `#d` y recibe `mostro-rates` | Página **Conexión de apps** del Manager y sección 3.3 |
+| La tarjeta no verifica | Cadena canónica distinta, relay con barra final sin normalizar, o relay con el esquema en mayúsculas en una app anterior a `64ae7c91` | Sección 3.1 |
 | El pago al comprador no sale | Sin ruta dentro de `max_routing_fee`, o sin liquidez saliente en el nodo | Página Lightning del Manager |
 
 Para el operador: en el Manager, la página **Nodo Mostro** muestra la versión que el nodo **anuncia** en los relays y hace cuánto. Si dice «Sin anuncio», las apps verán el nodo como inactivo aunque el contenedor esté en marcha.
@@ -606,7 +707,7 @@ Para el operador: en el Manager, la página **Nodo Mostro** muestra la versión 
 
 Ejecutado el 3 y el 4 de octubre de 2026 con `mostrod` v0.19.2 oficial (SHA-256 `4d9aa45b…c071` para amd64), LND 0.21.3-beta y Bitcoin Core 31.1 en regtest, con un relay local y un cliente de prueba propio, independiente de mostro-core. El `settings.toml` lo generó siempre el Manager. Salvo donde se indica, el cliente operó en modo de privacidad total.
 
-En un nodo sin garantía ni prueba de trabajo, como el de BitMaxis:
+En un nodo sin garantía ni prueba de trabajo:
 
 - Arranque del daemon y publicación de kinds 0, 10002, 38385 y 30078.
 - Las trece peticiones `new-order` de la sección 6.2.
@@ -632,17 +733,31 @@ En un segundo nodo con garantía del 3 % para ambas partes y `pow_first_contact 
 
 En ambos nodos, el monitor de órdenes, el de disputas y la consola de mensajes del Manager leyeron esos mismos eventos, y la tarjeta del Manager se verificó con una copia del verificador de la app (`k256`).
 
-Leído en el código y no ejecutado: la penalización automática por vencimiento (`bond_slash_on_waiting_timeout = true`), el vencimiento cuando falla quien publicó, el modo mantenimiento, la restauración de sesión, Cashu y Serbero.
+Las capturas del anexo D no cubren todo lo que esta lista da por ejecutado. Faltan al menos el evento kind 30078 de cotizaciones (`mostro-rates`), los rechazos de `new-order` de la sección 6.2, los mensajes de la venta con prima +5 %, el rechazo por orden inexistente, los mensajes descartados sin respuesta en el primer nodo, el rechazo de un `trade_index` repetido y el evento kind 38384. Para esos casos, quien no tenga un nodo de pruebas solo puede comprobarlos en el código de v0.19.2.
+
+Leído en el código y no ejecutado: la penalización automática por vencimiento (`bond_slash_on_waiting_timeout = true`), el vencimiento cuando falla quien publicó, el modo mantenimiento, la restauración de sesión, Cashu y Serbero. También se leyó, sin ejecutarlo, en el código de nostr-sdk 0.45.2 cuándo verifica la firma de un evento recibido y cuándo lo compara con el filtro de su suscripción (sección 3.2). No se probó con un relay que entregue eventos fuera del filtro o con el contenido alterado.
+
+El 5 de octubre de 2026 la guía se contrastó de nuevo con el código de mostrod v0.19.2, mostro-core 0.16.0 y nostr-sdk 0.45.2, a raíz del informe de la sesión que mantiene la app BitMaxis. De ahí salen la regla 11, las precisiones de la sección 9 y las notas sobre qué conservan las capturas. Fue una revisión de lectura, sin ejecuciones nuevas.
+
+El mismo 5 de octubre se implementó en el Manager la publicación de la tarjeta (sección 3.3). Ejecutado: las pruebas de `api/tests/card_publication.rs` contra relays simulados en `127.0.0.1`, que cubren la forma y las firmas del evento, que no se publica nada con el interruptor apagado o sin tarjeta, que la fecha solo cambia con el contenido, el informe por relay, la retirada, el cambio de relays y el cambio de identidad; el vector de esa sección, comprobado además con `nostr-tools` y `@noble/curves`, independientes del Manager; y el panel en un navegador contra una copia local del servidor y un relay simulado. No ejecutado: ningún envío a un relay real, así que no se ha comprobado cómo responde cada implementación de relay al reenvío de un evento que ya tiene ni a la petición de borrado; ni la lectura del evento por la app BitMaxis en ejecución, cuyo código se leyó en el commit `1167506f`.
 
 No verificado: el comportamiento de relays `ws://` desde una PWA servida por HTTPS, y la app BitMaxis en ejecución. Sus hallazgos proceden de leer su código.
 
 ## Anexo A. Hallazgos en la app BitMaxis
 
-Sobre el árbol de trabajo de `mostro-app` en la rama `feat/bitmaxis-only` a 2026-10-04. Los números de línea pueden haber cambiado.
+Los hallazgos describen `mostro-app` a 2026-10-04. Las rutas y los números de línea son los del commit `97eaa9df`, del que parte la rama `feat/bitmaxis-only`.
+
+**Estado a 2026-10-05.** La rama recibió ese día los commits `f6902377`, `cca71499` y `64ae7c91`, con correcciones para estos hallazgos. Están propuestos en el PR 1 de `ManDeBitcoin/mostro-app`. Leído en `64ae7c91`, sin compilar ni ejecutar:
+
+- **A1, A2, A3, A4, A6, A7, A9 y A10.** Corregidos.
+- **A5.** Corregido en la interfaz. Las hojas del modo simple y las pantallas avanzadas de crear orden, tomar orden y añadir factura usan `localizedDaemonError` con un texto de reserva traducido, y `invalid_pubkey` se redacta de una forma al tomar una orden y de otra en el resto.
+- **A8.** Ningún código Dart importa ya una tarjeta pegada o escaneada. `parse_nip19_community` conserva los valores inventados.
+
+Los hallazgos de abajo no se han reescrito: siguen describiendo `97eaa9df`.
 
 **A1. Venta simple: sats fijos junto con prima (bloqueante).** `lib/features/simple_mode/widgets/simple_sell_confirm_sheet.dart:55-64` construye la orden con `premium: widget.premium` y `amountSats: estimatedSats`. Con cualquier prima distinta de cero el nodo responde `invalid_parameters`. Si la cotización no ha cargado, `estimatedSats` es nulo y la orden sí se acepta, por eso el fallo parece intermitente.
 
-El parche está en [`docs/patches/bitmaxis-app-venta-simple-prima.patch`](patches/bitmaxis-app-venta-simple-prima.patch) y aplica limpio sobre ese árbol. Desde la raíz del repositorio de la app:
+El parche está en [`docs/patches/bitmaxis-app-venta-simple-prima.patch`](patches/bitmaxis-app-venta-simple-prima.patch) y aplica limpio sobre `97eaa9df`. En `cca71499` la rama corrige A1 de otra forma: allí el parche ni aplica ni hace falta. Desde la raíz del repositorio de la app:
 
 ```bash
 git apply /ruta/a/mostro-community-umbrel/docs/patches/bitmaxis-app-venta-simple-prima.patch
@@ -670,7 +785,7 @@ git apply /ruta/a/mostro-community-umbrel/docs/patches/bitmaxis-app-venta-simple
 
 **A2. Venta simple con prima 0: precio congelado.** El mismo código publica una orden de precio fijo con los sats calculados en el teléfono, aunque la interfaz la presenta como «al mercado». El cambio de A1 lo corrige.
 
-**A3. Importe por defecto y decimales.** `lib/features/simple_mode/screens/simple_sell_screen.dart:448` usa `parsedAmount ?? 100.0`: con el campo vacío o con coma decimal publica 100 unidades. El botón nunca se desactiva. `rust/src/mostro/actions.rs:62-64` convierte fiat y prima a entero truncando. Hay que exigir un entero ≥ 1 y rechazar el resto.
+**A3. Importe por defecto y decimales.** `lib/features/simple_mode/screens/simple_sell_screen.dart:448` usa `parsedAmount ?? 100.0`: con el campo vacío o con coma decimal publica 100 unidades. El botón nunca se desactiva. La compra tiene un defecto parecido: `lib/features/simple_mode/screens/simple_buy_screen.dart:400-402` toma una orden de rango por `parsedAmount ?? order.fiatAmountMin ?? 50.0`, es decir, por su mínimo si el campo está vacío o lleva coma decimal. `rust/src/mostro/actions.rs:61-64` convierte fiat y prima a entero truncando, y las líneas 422 y 425 truncan igual el importe con el que se toma un rango. Hay que exigir un entero ≥ 1 y rechazar el resto.
 
 **A4. Defensa en el núcleo Rust.** Añadir en `create_order_once` (`rust/src/api/orders.rs`) el rechazo de `amount_sats > 0` con prima distinta de cero y de importes o primas no enteros, con marcadores que la interfaz pueda traducir.
 
@@ -683,29 +798,33 @@ git apply /ruta/a/mostro-community-umbrel/docs/patches/bitmaxis-app-venta-simple
 
 Corregir el cálculo compartido con la fórmula del nodo y usarlo también en el modo simple.
 
-**A7. Garantía fija del 3 %.** `simple_buy_screen.dart:304`, `simple_sell_screen.dart:454` y `simple_sell_confirm_sheet.dart:26,204` muestran un 3 % cuando no hay perfil de comunidad. El nodo BitMaxis anuncia `bond_enabled = false`. Leer la política del evento de información.
+**A7. Garantía fija del 3 %.** `simple_buy_screen.dart:304,425`, `simple_sell_screen.dart:454`, `simple_sell_confirm_sheet.dart:26,204` y `simple_buy_confirm_sheet.dart:25,257` muestran un 3 % cuando no hay perfil de comunidad. El nodo BitMaxis anunciaba `bond_enabled = false` el 2026-10-04 y desde el 2026-10-05 exige una garantía del 5 % a ambas partes (anexo B): un valor fijo en la app falla en los dos sentidos. Leer la política del evento de información.
 
-**A8. Tarjeta sin verificar.** `verify_community_signature` existe en `rust/src/api/community.rs` pero ninguna pantalla lo llama. Al importar un `nprofile`, `parse_nip19_community` inventa moneda USD, comisión de 60 puntos básicos y garantía del 3 %. Si se recupera el flujo de tarjeta: verificar la firma, mostrar «verificada» solo si es válida y no rellenar comisiones ni garantía con valores inventados.
+**A8. Tarjeta sin verificar.** `verify_community_signature` existe en `rust/src/api/community.rs` pero ningún código Dart lo llama. `lib/features/simple_mode/widgets/simple_app_bar.dart:208-216` pasa el texto pegado o escaneado a `parseCommunityPayload` y aplica el resultado sin verificar la firma. Con cualquier perfil activo, la barra muestra el icono de verificado y la hoja que se abre al tocarla muestra el texto «Comunidad verificada». Al importar un `nprofile` o un `npub`, `parse_nip19_community` inventa el nombre «Community Node», moneda USD, comisión de 60 puntos básicos y garantía del 3 %. Con un `npub` la lista de relays queda vacía. En los dos casos la firma queda vacía y `verify_community_signature` devuelve `false`. En cualquier flujo de tarjeta: verificar la firma, mostrar «verificada» solo si es válida y no rellenar comisiones ni garantía con valores inventados.
 
 **A9. Valoración tras el cierre en nodos con prueba de primer contacto.** La app ya mina `pow_first_contact` al crear y tomar órdenes. `rate_user` (`rust/src/mostro/actions.rs:260`) usa en cambio la dificultad general. Uno o dos minutos después del cierre el daemon ya no reconoce la clave de la operación, y en un nodo con `pow_first_contact` mayor que `pow` la valoración se pierde sin respuesta (sección 5.3). Envolver `rate-user` con la dificultad de primer contacto. No afecta al nodo BitMaxis mientras mantenga ambos valores en 0.
 
+**A10. Evento de información sin comprobar autor.** `fetch_mostro_instance_tags` (`rust/src/api/nostr.rs:617-666`) se queda con la copia más reciente de lo que devuelven los relays, sin comprobar `pubkey`, kind ni `d`. De esos tags salen la dificultad de prueba de trabajo, la versión de protocolo y la política de garantía que usa la app. Aplicar la regla 11 antes de elegir la copia.
+
 ## Anexo B. Nodo BitMaxis en producción
 
-Datos públicos leídos de sus tres relays el 2026-10-04, antes de la actualización:
+Datos públicos leídos de sus tres relays el 2026-10-05 a las 19:00 UTC, con el Manager v1.0.12:
 
 | Dato | Valor |
 | --- | --- |
 | Clave pública | `001bd4747d7d265edfe3bd3b7299886146ad850d51095fe77b763c32015685b9` |
 | Relays | `wss://relay.mostro.network`, `wss://mostro-p2p.tech`, `wss://relay.shadowbip.com` |
-| Versión anunciada | 0.19.0 |
+| Versión anunciada | 0.19.2 |
 | Red | mainnet |
 | Moneda | USD |
 | Límites | 1 000 a 1 000 000 sats |
-| Comisión | 0,006 en total, 0,3 % por parte |
-| Garantía | desactivada |
+| Comisión | 0,008 en total, 0,4 % por parte |
+| Garantía | activada: 5 % con un mínimo de 2 000 sats, para ambas partes. Sin penalización automática por vencimiento |
 | Prueba de trabajo | `pow = 0` y `pow_first_contact = 0` |
 
-Tras instalar la versión del Manager que incluye mostrod v0.19.2, `mostro_version` debe pasar a `0.19.2`. Ninguna regla de esta guía cambia entre 0.19.0 y 0.19.2: el protocolo, los eventos y las validaciones de órdenes son los mismos.
+El 2026-10-04, con mostrod v0.19.0, el mismo nodo anunciaba una comisión de 0,006 y la garantía desactivada. El operador cambia estos valores desde el Manager cuando quiere: una app no debe fijarlos en su código (regla 2). Con la garantía activada, `pay-bond-invoice` pasa a ser parte del camino normal al publicar y al tomar (secciones 6.1 y 7.3).
+
+Ninguna regla de esta guía cambia entre 0.19.0 y 0.19.2: el protocolo, los eventos y las validaciones de órdenes son los mismos.
 
 ## Anexo C. Cambios de mostrod entre v0.19.0 y v0.19.2 visibles para una app
 
@@ -723,11 +842,15 @@ En `api/tests/fixtures/mostrod-v0.19.2/` del repositorio del Manager hay tráfic
 
 | Archivo | Contenido |
 | --- | --- |
-| `protocol-flows.json` | Nueve flujos con los mensajes ya descifrados, en el orden en que llegaron al relay y con su segundo relativo en `at`: compra tomada, compra con la factura incluida, venta con la factura adjunta, orden de rango, cancelación de mutuo acuerdo, retirada de quien tomó, vencimiento del plazo, dos tomas simultáneas y disputa con `admin-cancel` |
+| `protocol-flows.json` | Nueve flujos con los mensajes ya descifrados, en el orden en que llegaron al relay y con su segundo relativo en `at`: compra tomada, compra con la factura incluida, venta con la factura adjunta, orden de rango, cancelación de mutuo acuerdo, retirada de quien tomó, vencimiento del plazo, dos tomas simultáneas y disputa con `admin-cancel`. El flujo de las tomas simultáneas incluye además una tercera toma tardía (`buyer3`), rechazada con `invalid_order_status` |
 | `protocol-messages.jsonl` | Venta completa con disputa resuelta con `admin-settle` |
 | `protocol-messages-bond.jsonl` | Venta con garantía de ambas partes y prueba de trabajo de primer contacto |
 | `protocol-messages-reputation.jsonl` | Venta en modo de reputación, con firma interna, prueba de identidad y valoraciones |
 | `protocol-messages-slash.jsonl` | Disputa con `admin-cancel`, garantía penalizada y cobro de la parte del ganador |
-| `public-events.json`, `public-events-2.json` | Eventos públicos firmados por el nodo: órdenes en cada estado, disputas y eventos de información con y sin garantía |
+| `public-events.json`, `public-events-2.json` | Eventos públicos firmados por el nodo: órdenes en cada estado, disputas, eventos de información con y sin garantía, y los kinds 0 y 10002 del nodo sin garantía. No hay ningún evento kind 30078 ni 38384 |
 
-Cada mensaje es un objeto con `dir` (`user->daemon` o `daemon->user`), `party` (`seller`, `buyer`, un segundo tomador `buyer2`, o `admin`) y `plaintext`, el contenido descifrado tal como viaja dentro del evento kind 14.
+Cada mensaje es un objeto con `dir` (`user->daemon` o `daemon->user`), `party` (`seller`, `buyer`, un segundo o un tercer tomador, `buyer2` y `buyer3`, o `admin`) y `plaintext`, el contenido descifrado tal como viaja dentro del evento kind 14.
+
+Rechazos capturados: cuatro `cant-do`, todos en `protocol-flows.json` y todos en respuesta a un `take-sell`. Son `invalid_order_status` (dos), `out_of_range_sats_amount` (uno) e `invalid_pubkey` (uno). No hay ningún rechazo de `new-order`, así que `invalid_parameters`, `invalid_fiat_currency` e `invalid_amount` no aparecen. El único flujo descifrado con prima distinta de cero es el de la orden de rango, con +2 %.
+
+Fuera de esa carpeta, `api/tests/fixtures/community-card-event.json` no es una captura sino el vector de la sección 3.3: el evento de la tarjeta de la comunidad y su petición de borrado, emitidos por el Manager con una clave sintética.

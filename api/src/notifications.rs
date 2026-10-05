@@ -104,6 +104,24 @@ impl Notification {
         }
     }
 
+    /// The community card could not be published on the relays. A warning:
+    /// the market works the same without it.
+    pub fn card_alert(title: &str, message: &str, details: Option<serde_json::Value>) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Self {
+            id: format!("card-{timestamp}-{}", fastrand()),
+            level: "warning".to_string(),
+            category: "card".to_string(),
+            title: title.to_string(),
+            message: message.to_string(),
+            timestamp,
+            details,
+        }
+    }
+
     pub fn system_alert(
         title: &str,
         message: &str,

@@ -243,6 +243,17 @@ a.button { text-decoration: none; }
 .orders-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0; }
 .relay-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
+/* The switch that publishes the community card, and what each relay answered. */
+.panel > .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 42px; }
+.panel > .toggle-row strong { font-size: 14px; }
+.panel > .toggle-row span { font-size: 12.5px; }
+.publish-facts { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid #27312c; list-style: none; color: #8a9a91; font-size: 13.5px; line-height: 1.55; }
+.publish-facts strong { color: #c7d0ca; font-weight: 600; }
+.publish-relays { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.publish-relays li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 11px; border: 1px solid #222c27; border-radius: 7px; background: #0e1412; }
+.publish-relays code { color: #a4e1b7; font-size: 12.5px; overflow-wrap: anywhere; }
+.publish-relays small { flex: 1 1 220px; min-width: 0; color: #8a9a91; font-size: 12.5px; overflow-wrap: anywhere; }
+
 /* ---------- Narrow screens ---------- */
 @media (max-width: 1050px) {
   .side { width: 224px; }

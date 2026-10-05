@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Browser smoke test of the panel.
 //
-// It starts its own mock relay and two throwaway copies of the API on
-// ephemeral ports, then walks the panel as an operator would: the setup of a
-// fresh install, every page, the order book and a phone-sized screen. An
-// error in the browser console fails the run; a request the test makes fail
-// on purpose is asserted through what the page shows instead.
+// It starts its own mock relay and two throwaway copies of the API on local
+// ports of the 39xxx range, then walks the panel as an operator would: the
+// setup of a fresh install, every page, the order book and a phone-sized
+// screen. An error in the browser console fails the run; a request the test
+// makes fail on purpose is asserted through what the page shows instead.
 //
 // The copies of the API get a temporary configuration and backup directory
 // and none of the variables that would connect them to LND, to Mostro, to a
-// webhook or to an existing identity.
+// webhook or to an existing identity. The only relay in their configuration
+// is the mock one: the step that publishes the community card checks that
+// before it turns the switch on, so no event leaves this machine.
 //
 // What it cannot cover with the built-in mock relay, which serves a single
 // published order: real disputes, orders in progress and the open-market
@@ -29,6 +31,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -114,7 +117,23 @@ function tempDir(prefix) {
   return dir;
 }
 
-/** Starts a child and resolves with the first match of `pattern` in its output. */
+/** A free local port between `from` and `to`, the range kept for test services on this machine. */
+async function freePort(from, to) {
+  for (let port = from; port <= to; port += 1) {
+    const free = await new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
+    });
+    if (free) return port;
+  }
+  throw new Error(`No free port between ${from} and ${to}.`);
+}
+
+/**
+ * Starts a child and resolves with the first match of `pattern` in its
+ * output. The match carries `output()`, everything the child has printed so far.
+ */
 function startAndWaitFor(args, env, pattern, what) {
   const child = spawn(API_BINARY, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
@@ -123,7 +142,7 @@ function startAndWaitFor(args, env, pattern, what) {
     const onData = (chunk) => {
       output += chunk.toString();
       const match = output.match(pattern);
-      if (match) resolve(match);
+      if (match) resolve(Object.assign(match, { output: () => output }));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
@@ -134,13 +153,16 @@ function startAndWaitFor(args, env, pattern, what) {
 }
 
 async function startMockRelay() {
-  const match = await startAndWaitFor(['mock-relay', '127.0.0.1:0'], process.env, /MOCK_RELAY_READY npub=(\S+) url=(\S+)\r?\n/, 'the mock relay');
-  return { npub: match[1], url: match[2] };
+  const port = await freePort(39700, 39799);
+  const match = await startAndWaitFor(['mock-relay', `127.0.0.1:${port}`], process.env, /MOCK_RELAY_READY npub=(\S+) url=(\S+)\r?\n/, 'the mock relay');
+  /** The events published to the relay so far. */
+  const published = () => [...match.output().matchAll(/^MOCK_RELAY_EVENT (.+)$/gm)].map((line) => JSON.parse(line[1]));
+  return { npub: match[1], url: match[2], published };
 }
 
 /** One copy of the API that serves the built UI and can reach nothing but its own temporary directories. */
 async function startPanel(configDir) {
-  const env = { ...process.env, CONFIG_DIR: configDir, API_BIND: '127.0.0.1:0', STATIC_DIR, BACKUP_OFFSITE_DIR: tempDir('mostro-smoke-backups-') };
+  const env = { ...process.env, CONFIG_DIR: configDir, API_BIND: `127.0.0.1:${await freePort(39300, 39399)}`, STATIC_DIR, BACKUP_OFFSITE_DIR: tempDir('mostro-smoke-backups-') };
   for (const name of ['LND_REST_URL', 'LND_TLS_CERT', 'LND_READONLY_MACAROON', 'LND_CONNECT_HOST', 'MOSTRO_RPC_URL', 'BACKUP_PASSPHRASE', 'MOCK_LND_CHANNELS', 'WEBHOOK_URL', 'MOSTRO_PUBLIC_KEY', 'MOSTRO_PUBKEY']) delete env[name];
   const match = await startAndWaitFor([], env, /Community API listening on ([0-9.:]+)\r?\n/, 'the API');
   return `http://${match[1]}`;
@@ -336,6 +358,99 @@ async function main() {
     await page.getByText('Cómo resolver «Invalid parameters» o «prima no válida»').click();
     await page.getByText('Importe fijo', { exact: false }).first().waitFor();
     await shot(page, 'fresh-03-connection');
+  });
+
+  const publication = async (baseUrl) => (await page.request.get(`${baseUrl}/api/community/card/publication`, { headers: API_HEADERS })).json();
+  const publishSwitch = () => page.getByRole('switch', { name: 'Publicar la tarjeta de la comunidad' });
+  const publishPanel = () => page.locator('#connect-publish');
+  /** The switch may only be turned on where every relay of the configuration is the mock one. */
+  const assertOnlyTheMockRelay = async (baseUrl) => {
+    const saved = await (await page.request.get(`${baseUrl}/api/community`, { headers: API_HEADERS })).json();
+    assert.deepEqual(saved.config.nostr.relays, [relay.url], 'the test would publish outside the mock relay');
+    assert.match(relay.url, /^ws:\/\/127\.0\.0\.1:397\d\d$/);
+  };
+
+  await step('connection: the card is not published until the operator says so', async () => {
+    await publishPanel().getByRole('heading', { name: 'Publicar la tarjeta en los relays' }).waitFor();
+    assert.equal(await publishSwitch().getAttribute('aria-checked'), 'false');
+    await publishPanel().locator('.badge', { hasText: 'Desactivada' }).waitFor();
+    // The panel says in plain words what becomes public and what turning it off can and cannot undo.
+    const facts = (await publishPanel().locator('.publish-facts').textContent()).replace(/\s+/g, ' ');
+    for (const expected of ['los métodos de pago activos, la web y el contacto', 'Cualquiera que consulte los relays puede leerlo', 'firmado con su clave', 'una app que ya la leyó la conserva']) {
+      assert.ok(facts.includes(expected), `the explanation does not say: ${expected}`);
+    }
+    assert.equal((await publication(freshUrl)).enabled, false);
+    assert.deepEqual(relay.published(), []);
+
+    // Turning it on asks first, and saying no leaves everything as it was.
+    await assertOnlyTheMockRelay(freshUrl);
+    dialogs.answer = false;
+    dialogs.seen.length = 0;
+    await publishSwitch().click();
+    assert.equal(dialogs.seen.length, 1, 'publishing must ask for confirmation');
+    assert.match(dialogs.seen[0], /^¿Publicar la tarjeta de la comunidad en el relay del nodo\?/);
+    assert.match(dialogs.seen[0], /firmados con la clave del nodo: el nombre, la moneda, el método de pago, la web y el contacto/);
+    assert.equal(await publishSwitch().getAttribute('aria-checked'), 'false');
+    assert.equal((await publication(freshUrl)).enabled, false);
+    assert.deepEqual(relay.published(), []);
+    dialogs.answer = true;
+  });
+
+  await step('connection: the card is published as an event and the panel shows what the relay answered', async () => {
+    await publishSwitch().click();
+    await publishPanel().locator('.callout', { hasText: 'Publicada en el relay del nodo' }).waitFor({ timeout: 15000 });
+    assert.equal(await publishSwitch().getAttribute('aria-checked'), 'true');
+    await publishPanel().locator('.badge', { hasText: 'Publicada' }).first().waitFor();
+    const row = publishPanel().locator('.publish-relays li', { hasText: relay.url });
+    await row.locator('.badge', { hasText: 'La tiene' }).waitFor();
+
+    const status = await publication(freshUrl);
+    assert.equal(status.state, 'published');
+    assert.deepEqual(status.relays.map((item) => [item.url, item.outcome]), [[relay.url, 'accepted']]);
+    // What reached the relay is the agreed event: kind 30078, the card's own address and the signed card inside.
+    const events = relay.published();
+    assert.equal(events.length, 1);
+    const [event] = events;
+    assert.equal(event.kind, 30078);
+    assert.deepEqual(event.tags, [['d', 'mostro-community-card']]);
+    assert.equal(event.id, status.event_id);
+    assert.equal(event.created_at, status.card_changed_at);
+    const connection = await (await page.request.get(`${freshUrl}/api/connection`, { headers: API_HEADERS })).json();
+    assert.equal(event.pubkey, connection.pubkey_hex);
+    const card = JSON.parse(event.content);
+    assert.equal(card.pubkey, event.pubkey);
+    assert.equal(card.name, 'Comunidad de prueba');
+    assert.deepEqual(card.payment_methods, ['Transferencia bancaria']);
+    assert.match(card.signature, /^[0-9a-f]{128}$/);
+    assert.equal(/nsec1/.test(JSON.stringify([event, status])), false);
+    await shot(page, 'fresh-03b-card-published');
+
+    // It is still on after a reload, and nothing new was sent for it.
+    await page.reload({ waitUntil: 'networkidle' });
+    await publishPanel().locator('.callout', { hasText: 'Publicada en el relay del nodo' }).waitFor();
+    assert.equal(relay.published().length, 1);
+    await navLink(page, 'Resumen').click();
+    await marketTitle(page).waitFor();
+    assert.equal(await page.getByText('La tarjeta de la comunidad no está publicada').count(), 0);
+    await navLink(page, 'Conexión de apps').click();
+  });
+
+  await step('connection: turning the switch off asks first and withdraws the card', async () => {
+    dialogs.seen.length = 0;
+    await publishSwitch().click();
+    assert.equal(dialogs.seen.length, 1, 'withdrawing must ask for confirmation');
+    assert.match(dialogs.seen[0], /^¿Dejar de publicar la tarjeta\?/);
+    assert.match(dialogs.seen[0], /las apps que ya la leyeron la conservan/);
+    await publishPanel().locator('.callout', { hasText: 'Tarjeta retirada el' }).waitFor({ timeout: 15000 });
+    assert.equal(await publishSwitch().getAttribute('aria-checked'), 'false');
+    await publishPanel().locator('.publish-relays li', { hasText: relay.url }).locator('.badge', { hasText: 'Borrado aceptado' }).waitFor();
+    assert.equal((await publication(freshUrl)).state, 'withdrawn');
+    const events = relay.published();
+    assert.equal(events.length, 2);
+    // A deletion request for the card's address, and for no other event of the node.
+    assert.equal(events[1].kind, 5);
+    assert.deepEqual(events[1].tags, [['a', `30078:${events[0].pubkey}:mostro-community-card`], ['e', events[0].id], ['k', '30078']]);
+    await shot(page, 'fresh-03c-card-withdrawn');
   });
 
   await step('configuration: an unsaved draft survives leaving the page, and removing a relay counts as a change', async () => {
@@ -619,6 +734,76 @@ async function main() {
     assert.equal(await page.getByText('Créala o impórtala primero').count(), 0);
     await page.unroute('**/api/daemon/status');
     await page.unroute('**/api/connection');
+  });
+
+  await step('connection: with the switch on and no key to sign with, nothing is published and the panel says why', async () => {
+    await assertOnlyTheMockRelay(seededUrl);
+    const before = relay.published().length;
+    await page.goto(`${seededUrl}/#/conexion`, { waitUntil: 'networkidle' });
+    await publishSwitch().click();
+    const callout = publishPanel().locator('.callout', { hasText: 'No se publica nada' });
+    await callout.waitFor({ timeout: 15000 });
+    await callout.getByText('El nodo no tiene identidad').waitFor();
+    assert.equal(await publishSwitch().getAttribute('aria-checked'), 'true');
+    const status = await publication(seededUrl);
+    assert.equal(status.state, 'blocked');
+    assert.equal(status.reason, 'no_identity');
+    assert.deepEqual(status.relays, []);
+    assert.equal(relay.published().length, before);
+    // The summary sends the operator here, and from here to where it is fixed.
+    await navLink(page, 'Resumen').click();
+    await page.locator('#attention .attention-item', { hasText: 'La tarjeta de la comunidad no se puede publicar' }).getByRole('button', { name: 'Ver conexión' }).click();
+    await heading(page).filter({ hasText: 'Conexión de apps' }).waitFor();
+    await publishPanel().locator('.callout', { hasText: 'No se publica nada' }).getByRole('button', { name: 'Ir al nodo' }).click();
+    await heading(page).filter({ hasText: 'Nodo Mostro' }).waitFor();
+    await shot(page, 'seeded-04b-card-blocked');
+  });
+
+  await step('connection: a relay that refuses the card is shown as such, and none accepting is not "published"', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const base = { enabled: true, working: false, reason: null, reason_text: null, event_id: 'c'.repeat(64), card_changed_at: now - 3600, withdrawn_at: null, last_attempt_at: now - 30, next_attempt_at: now + 240, resend_every_secs: 21600 };
+    const taken = { url: 'wss://uno.example', outcome: 'accepted', detail: null, at: now - 30 };
+    const refused = { url: 'wss://dos.example', outcome: 'rejected', detail: 'blocked: solo miembros', at: now - 30 };
+    const silent = { url: 'wss://tres.example', outcome: 'no_answer', detail: 'El relay no respondió dentro del plazo', at: now - 30 };
+    const stub = async (status) => {
+      await page.unroute('**/api/community/card/publication');
+      await page.route('**/api/community/card/publication', (route) => route.fulfill({ json: status }));
+      await page.goto(`${seededUrl}/#/conexion`, { waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'networkidle' });
+    };
+    const row = (item) => publishPanel().locator('.publish-relays li', { hasText: item.url });
+
+    await stub({ ...base, state: 'failed', relays: [refused, silent] });
+    await publishPanel().locator('.callout', { hasText: 'La tarjeta no está publicada' }).getByRole('button', { name: 'Reintentar ahora' }).waitFor();
+    await row(refused).locator('.badge', { hasText: 'La rechazó' }).waitFor();
+    await row(refused).getByText('blocked: solo miembros').waitFor();
+    await row(silent).locator('.badge', { hasText: 'Sin respuesta' }).waitFor();
+    assert.equal(await publishPanel().getByText(/^Publicada/).count(), 0, 'a card no relay accepted is shown as published');
+    await shot(page, 'seeded-04c-card-refused');
+    await navLink(page, 'Resumen').click();
+    await page.locator('#attention .attention-item', { hasText: 'La tarjeta de la comunidad no está publicada' }).getByRole('button', { name: 'Ver conexión' }).waitFor();
+    await page.locator('.side-nav a.side-link', { hasText: /^Conexión de apps/ }).locator('.side-badge').waitFor();
+
+    await stub({ ...base, state: 'partial', relays: [taken, refused], former_relays: ['wss://viejo.example'] });
+    await publishPanel().locator('.callout', { hasText: 'Publicada en 1 de 2 relays' }).waitFor();
+    await row(taken).locator('.badge', { hasText: 'La tiene' }).waitFor();
+    // A relay taken out of the configuration may still serve an earlier card: the panel names it.
+    await publishPanel().getByText(/pueden conservar una versión anterior de la tarjeta: wss:\/\/viejo\.example/).waitFor();
+    await navLink(page, 'Resumen').click();
+    await page.locator('#attention .attention-item', { hasText: 'Un relay no aceptó la tarjeta de la comunidad' }).waitFor();
+
+    // A withdrawal that could not even be signed yet says why, and shows no relay as having deleted anything.
+    const waiting = { url: 'wss://uno.example', outcome: 'pending', detail: null, at: now - 30 };
+    await stub({ ...base, enabled: false, state: 'withdrawing', event_id: null, reason: 'identity_unreadable', reason_text: 'No se pudo leer la clave del nodo para firmar la petición de borrado.', relays: [waiting] });
+    await publishPanel().locator('.callout', { hasText: 'La tarjeta aún no se ha podido retirar' }).getByText('No se pudo leer la clave del nodo').waitFor();
+    await row(waiting).locator('.badge', { hasText: 'Pendiente' }).waitFor();
+    assert.equal(await publishPanel().getByText('Borrado aceptado').count(), 0);
+
+    // While the server is still talking to the relays, the last result is not shown as current.
+    await stub({ ...base, working: true, state: 'published', relays: [taken] });
+    await publishPanel().locator('.callout', { hasText: 'Hablando con los relays' }).waitFor();
+    assert.equal(await publishPanel().locator('.publish-relays').count(), 0);
+    await page.unroute('**/api/community/card/publication');
   });
 
   await step('disputes: after Back the guide never pairs a dispute with another order', async () => {

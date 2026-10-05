@@ -1075,9 +1075,10 @@ async fn community_card_endpoint_contract() {
 
     // Without identity or saved configuration there is nothing to sign. A
     // half card (null pubkey or signature) would not even parse in the app.
+    // The answer says which of the two is missing.
     let (status, body) = get_card(app.clone()).await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body["error"].as_str().unwrap().contains("identidad"));
+    assert!(body["error"].as_str().unwrap().contains("reglas guardadas"));
 
     let response = app
         .clone()
@@ -1085,8 +1086,9 @@ async fn community_card_endpoint_contract() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let (status, _) = get_card(app.clone()).await;
+    let (status, body) = get_card(app.clone()).await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("identidad"));
 
     use nostr::{Keys, SecretKey, ToBech32};
     let keys = Keys::new(SecretKey::from_slice(&[21; 32]).unwrap());
