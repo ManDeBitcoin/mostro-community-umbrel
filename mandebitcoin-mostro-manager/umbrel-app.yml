@@ -17,8 +17,8 @@ description: >-
   • Orquestación del Motor Mostro: Ciclo de vida y activación atómica del daemon
   oficial upstream sin necesidad de forks ni compilaciones manuales.
   • Gestión de Liquidez Lightning (LND): Supervisión en tiempo real de canales,
-  balance local vs balance entrante (inbound liquidity) y guía operativa integrada
-  para apertura con Alby Hub y proveedores de servicios Lightning (LSP).
+  balance local vs balance entrante (inbound liquidity) y guía integrada para
+  conseguir liquidez entrante y saliente en el nodo LND de Umbrel.
   • Monitor de Órdenes Públicas: Visualización y seguimiento en vivo de eventos
   Nostr Kind 38383 de solo lectura emitidos por la comunidad.
   • Consola de Mediación de solo lectura: disputas anunciadas por el nodo e
@@ -26,8 +26,8 @@ description: >-
   desde un cliente de mediación.
   • Alertas y Notificaciones en Vivo: Transmisión reactiva de eventos críticos,
   caída de relays y disputas activas mediante Server-Sent Events (SSE).
-  • Respaldos Automáticos Cifrados: Copias periódicas simétricas con age hacia
-  almacenamiento secundario o externo con política de retención automática.
+  • Respaldos Cifrados: Copia con age de la identidad del nodo y las reglas de la
+  comunidad, creada desde el panel. Conviene guardarla también fuera del equipo.
   • Conexión de clientes Mostro mediante tarjeta firmada de la comunidad, código
   QR y nprofile con relays.
 developer: ManDeBitcoin
