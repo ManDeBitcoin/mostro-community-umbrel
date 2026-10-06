@@ -3,7 +3,8 @@ import type { OrdersSnapshot } from '../types';
 import type { Navigate } from '../lib/navigation';
 import { api } from '../lib/api';
 import { ORDER_STATUS_LABELS, isOpenDispute } from '../lib/constants';
-import { formatDateTime, formatNumber, formatTime, formatWhen, shortId } from '../lib/format';
+import { formatDateTime, formatFiatAmount, formatNumber, formatTime, formatWhen, shortId } from '../lib/format';
+import { ordersReadiness } from '../lib/overview';
 import { Icon, StatusDot } from '../components/ui';
 import { type Tone, Badge, Callout, EmptyState, LinkButton, PageHeader, Panel } from '../components/layout';
 
@@ -187,6 +188,8 @@ export function OrdersPage({ initialStatus = '', navigate }: { initialStatus?: s
   const { state, is_stale, last_update, source_npub, relays, orders } = snapshot;
   const openDisputes = (snapshot.disputes || []).filter((d) => isOpenDispute(d.status));
   const countOf = (filter: StatusFilter) => orders.filter((o) => matchesStatus(filter, o.status)).length;
+  // Until the relays have been read, a count would be a zero nobody read, or a part of the book.
+  const counted = ordersReadiness(snapshot) === 'read';
   const filteredOrders = orders.filter((o) => (filterKind === 'all' || o.kind === filterKind) && matchesStatus(filterStatus, o.status));
 
   return (
@@ -315,7 +318,7 @@ export function OrdersPage({ initialStatus = '', navigate }: { initialStatus?: s
           <div className="filter-chips" role="group" aria-label="Filtrar por estado">
             {STATUS_FILTERS.map((item) => (
               <button key={item.id} type="button" className={`filter-chip ${filterStatus === item.id ? 'active' : ''}`} aria-pressed={filterStatus === item.id} onClick={() => setFilterStatus(item.id)}>
-                {item.label} <span>{countOf(item.id)}</span>
+                {item.label}{counted && <> <span>{countOf(item.id)}</span></>}
               </button>
             ))}
           </div>
@@ -366,7 +369,7 @@ export function OrdersPage({ initialStatus = '', navigate }: { initialStatus?: s
                     <td>{o.kind === 'sell' ? 'Venta' : 'Compra'}</td>
                     <td>
                       <strong>
-                        {o.fiat_amount_range.length === 2 ? `${o.fiat_amount_range[0]} – ${o.fiat_amount_range[1]}` : o.fiat_amount_range[0] || '0'} {o.fiat_code.toUpperCase()}
+                        {formatFiatAmount(o.fiat_amount_range, o.fiat_code)}
                       </strong>
                       <small>
                         {o.fiat_amount_range.length === 2 ? 'Rango · ' : ''}

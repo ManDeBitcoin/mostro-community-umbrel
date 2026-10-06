@@ -2,7 +2,7 @@ import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } fr
 import { api } from './lib/api';
 import { shortKey } from './lib/format';
 import { NAV_GROUPS, type PageId, navGroupOf, navItem, pageLink, useRoute } from './lib/navigation';
-import { announcedRules, attentionItems, cardAttention, isActive, isSettingUp, marketStatus, orderStats, savedRules, serviceTiles, setupSteps } from './lib/overview';
+import { type RulesRead, announcedRules, attentionItems, cardAttention, isActive, isSettingUp, marketStatus, orderStats, savedRules, serviceTiles, setupSteps } from './lib/overview';
 import { usePanelData } from './hooks/usePanelData';
 import { useCommunityEditor } from './hooks/useCommunityEditor';
 import { useSimulator } from './hooks/useSimulator';
@@ -75,7 +75,10 @@ function App() {
   const communityName = (editor.serverConfig?.community.name || editor.draft.community.name || '').trim();
   const status = useMemo(() => marketStatus(daemon, data.settled), [daemon, data.settled]);
   const stats = useMemo(() => orderStats(orders), [orders]);
-  const steps = useMemo(() => setupSteps({ dashboard, daemon, backups, hasSavedConfig: editor.serverConfig !== null }), [dashboard, daemon, backups, editor.serverConfig]);
+  const rulesRead: RulesRead = configLoaded ? 'loaded' : editor.loadFailed ? 'failed' : 'reading';
+  // Until the editor has read the saved rules, the daemon report is what says whether there are any.
+  const hasSavedConfig = configLoaded ? editor.serverConfig !== null : typeof daemon?.draft_revision === 'number';
+  const steps = useMemo(() => setupSteps({ dashboard, daemon, backups, hasSavedConfig }), [dashboard, daemon, backups, hasSavedConfig]);
   const services = useMemo(() => serviceTiles(dashboard, daemon, orders, status, data.settled), [dashboard, daemon, orders, status, data.settled]);
   // The alerts carry the server's clock, so "seen" is kept in that clock too.
   const newestAlertAt = notifications[0]?.timestamp ?? 0;
@@ -308,6 +311,7 @@ function App() {
             rules={rules}
             rulesAnnounced={Boolean(announced)}
             savedConfig={editor.serverConfig}
+            rulesRead={rulesRead}
             activating={activating}
             onActivate={() => void activate()}
             navigate={navigate}
@@ -316,9 +320,9 @@ function App() {
         {page === 'orders' && <OrdersPage initialStatus={route.param} navigate={navigate} />}
         {page === 'disputes' && <MediationConsole initialOrderId={route.param} onSelectOrder={(orderId, options) => navigate('disputes', orderId, options)} />}
         {page === 'node' && (
-          <NodePage data={data} status={status} savedConfig={editor.serverConfig} identity={identity} activating={activating} onActivate={() => void activate()} onDeactivate={() => void deactivate()} navigate={navigate} />
+          <NodePage data={data} status={status} savedConfig={editor.serverConfig} rulesRead={rulesRead} identity={identity} activating={activating} onActivate={() => void activate()} onDeactivate={() => void deactivate()} navigate={navigate} />
         )}
-        {page === 'lightning' && <LiquidityOperationsPage lightning={dashboard?.lightning} maxTradeSats={editor.serverConfig?.market.max_trade_sats} navigate={navigate} />}
+        {page === 'lightning' && <LiquidityOperationsPage lightning={dashboard?.lightning} maxTradeSats={editor.serverConfig?.market.max_trade_sats} rulesRead={rulesRead} navigate={navigate} />}
         {page === 'connect' && <ConnectPage data={data} navigate={navigate} />}
         {page === 'config' && <ConfigPage editor={editor} loading={data.loading} mostroActive={mostroActive} navigate={navigate} />}
         {page === 'backups' && <BackupsPage data={data} />}

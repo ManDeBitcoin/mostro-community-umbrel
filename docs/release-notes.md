@@ -9,7 +9,16 @@
 - Al apagar el interruptor, el panel deja de enviar la tarjeta y pide a los relays que la borren. Es una petición: un relay puede no atenderla y una app que ya la leyó la conserva.
 - La tarjeta publicada es un evento kind 30078 con `d = mostro-community-card`, distinto del evento de cotizaciones del daemon. No indica si el nodo está en marcha, y las apps no deben tomar de ella la comisión ni la garantía. El formato, las comprobaciones que debe hacer una app y un vector de prueba están en `docs/INTEGRACION-APPS.md`, sección 3.3.
 - El interruptor se guarda con la configuración y entra en los respaldos. No cambia la revisión de las reglas ni reinicia el daemon.
-- `GET /api/community/card` dice ahora por qué no hay tarjeta cuando no puede emitirla.
+- Después de actualizar o de reiniciar, el panel ya no da el mercado por abierto ni avisa de que «el daemon anuncia otra versión» por el anuncio que dejó en los relays el daemon anterior. Muestra «Arrancando» hasta que el daemon nuevo se anuncia. El campo `market_started` de `/api/dashboard` sigue la misma regla.
+- El primer guardado después de actualizar ya no reinicia el daemon cuando la descripción o la web de la comunidad están vacías. El panel compara lo que el daemon leería de su configuración, no el texto del archivo.
+- Regla de la tarjeta firmada de la comunidad: el nombre, la web y el contacto no pueden contener «&», y los relays y los métodos de pago activos no pueden contener «&» ni «,». El panel rechaza el guardado y dice qué campo hay que cambiar. Si tus reglas, guardadas con una versión anterior, ya los contienen, la tarjeta no se genera hasta que los cambies y guardes. La página «Conexión de apps» y `GET /api/community/card` dan ahora ese motivo; antes respondían que faltaba la identidad o la configuración.
+- Los métodos de pago y los importes de las órdenes que llegan de los relays se muestran acotados: como mucho diez métodos de sesenta caracteres, en una línea y sin caracteres invisibles, y el importe solo cuando es un número entero, o los dos de un rango. Una orden sin importe legible lo dice; antes mostraba 0.
+- Si el daemon termina de forma inesperada, el resumen lo avisa durante una hora aunque el supervisor ya lo haya vuelto a arrancar, y dice si lo terminó una señal del sistema. Antes solo avisaba cuando caía en su primer minuto.
+- Con el mercado abierto, el estado deja de mostrarse en verde cuando Lightning no tiene canales activos, cuando LND no está sincronizado o cuando el panel no ha podido leerlo. Pasa a «Abierto con avisos» y dice cuál de los tres es.
+- Las alertas se vuelven a leer cada 20 segundos y su conexión en vivo se reabre sola. Antes, tras un reinicio de la aplicación, una pestaña abierta dejaba de recibirlas hasta recargarla.
+- El panel ya no dice que no hay reglas guardadas mientras todavía las está leyendo o si no ha podido leerlas. Tampoco cuenta órdenes como cero, ni dice «Todo en orden» o «Ninguna abierta», mientras lee los relays o cuando ninguno responde.
+- Fuera de Umbrel, cuando el panel y el daemon comparten espacio de procesos, una parada pedida desde el panel ya no queda registrada como una caída del daemon.
+- Sigue incluyendo el daemon Mostro v0.19.2. La actualización no requiere migración de base de datos ni cambios de configuración.
 
 # Mostro Community Manager v1.0.12
 

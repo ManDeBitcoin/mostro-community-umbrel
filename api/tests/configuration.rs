@@ -230,6 +230,53 @@ fn saving_requires_a_dev_fee_mostrod_accepts() {
     assert!(c.validate_for_save().is_err());
 }
 
+/// The signed card joins its fields with `&` and its lists with `,`, unescaped.
+/// A save that would make it ambiguous is refused with the field to change.
+#[test]
+fn saving_names_the_field_the_signed_card_cannot_carry() {
+    let rule = |change: &dyn Fn(&mut Configuration)| {
+        let mut c = config();
+        change(&mut c);
+        assert!(c.validate().is_ok(), "stored drafts must still open");
+        assert_eq!(c.validate_for_save().err(), c.card_ambiguity());
+        c.card_ambiguity()
+    };
+    assert_eq!(rule(&|_| {}), None);
+    for (expected, change) in [
+        (
+            "El nombre de la comunidad",
+            &(|c: &mut Configuration| c.community.name = "Compra & venta".into())
+                as &dyn Fn(&mut Configuration),
+        ),
+        ("La web y el contacto", &|c| {
+            c.community.website = "https://comunidad.example/?a=1&b=2".into()
+        }),
+        ("La web y el contacto", &|c| {
+            c.community.contact = "https://wa.me/593000000000?text=hola&lang=es".into()
+        }),
+        ("Los relays", &|c| {
+            c.nostr.relays = vec!["wss://relay.example.com/a,b".into()]
+        }),
+        ("Los nombres de los métodos de pago activos", &|c| {
+            c.payment_methods[0].label = "Banco Pichincha, Ecuador".into()
+        }),
+        ("Los nombres de los métodos de pago activos", &|c| {
+            c.payment_methods[0].label = "Zelle & Wise".into()
+        }),
+    ] {
+        let message = rule(change).unwrap_or_else(|| panic!("{expected}: accepted"));
+        assert!(message.starts_with(expected), "{message}");
+    }
+    // A method that is not offered is not part of the card.
+    assert_eq!(
+        rule(&|c| {
+            c.payment_methods[0].label = "Banco Pichincha, Ecuador".into();
+            c.payment_methods[0].active = false;
+        }),
+        None
+    );
+}
+
 /// Every place that names the pinned mostrod release agrees with
 /// `config/versions.json`. Files outside `api/` and `config/` are not part of
 /// the Docker build context of the API stage, so they are checked only when

@@ -50,5 +50,9 @@ export const formatFraction = (fraction: number) => `${Number((fraction * 100).t
 /** `0,6 %` from basis points. */
 export const formatBps = (bps: number) => `${(bps / 100).toString().replace('.', ',')} %`;
 
+/** `100 USD`, `50 – 200 USD`, or that there is no amount to show: an order without one is not an order of 0. */
+export const formatFiatAmount = (range: string[], fiatCode: string) =>
+  range.length > 0 ? `${range.join(' – ')} ${fiatCode.toUpperCase()}` : `Importe no legible · ${fiatCode.toUpperCase()}`;
+
 export const shortId = (value: string, head = 8) => (value.length > head ? `${value.slice(0, head)}…` : value);
 export const shortKey = (value: string, head = 12, tail = 6) => (value.length > head + tail + 1 ? `${value.slice(0, head)}…${tail > 0 ? value.slice(-tail) : ''}` : value);

@@ -54,6 +54,8 @@ export type ConnectionInfo = {
   card_uri?: string | null;
   qr_card_svg?: string | null;
   card?: CommunityCard | null;
+  /** Why there is no card, when the node has an identity and still has none. */
+  card_unavailable?: string | null;
   app_download_url: string;
   instructions: string;
 };
@@ -107,7 +109,10 @@ export type DaemonReport = {
   protocol_version?: number;
   announced?: NodeInfo | null;
   announced_age_secs?: number | null;
+  /** Recent and, when the age of the running process is known, published by it. */
   announced_fresh?: boolean;
+  /** Recent, but older than the process running now: the previous one published it. */
+  announced_before_start?: boolean;
   last_exit?: { at_unix: number; code: number; uptime_secs: number } | null;
 };
 export type DaemonNotice = { code: string; text: string };
@@ -219,6 +224,7 @@ export type OrderSummary = {
   kind: string;
   status: string;
   fiat_code: string;
+  /** One amount, the two ends of a range, or empty when the node announced none the panel can read. */
   fiat_amount_range: string[];
   amount_sats: number;
   amount_sats_str?: string;

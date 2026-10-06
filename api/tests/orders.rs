@@ -111,7 +111,7 @@ fn build_order_event(
         Tag::custom(TagKind::Custom("k".into()), vec![kind]),
         Tag::custom(TagKind::Custom("s".into()), vec![status]),
         Tag::custom(TagKind::Custom("f".into()), vec!["EUR"]),
-        Tag::custom(TagKind::Custom("fa".into()), vec!["50.00"]),
+        Tag::custom(TagKind::Custom("fa".into()), vec!["50"]),
         Tag::custom(TagKind::Custom("amt".into()), vec!["50000"]),
         Tag::custom(TagKind::Custom("pm".into()), vec!["sepa"]),
         Tag::custom(TagKind::Custom("premium".into()), vec!["0"]),
@@ -1284,4 +1284,102 @@ fn a_dispute_refunded_to_the_seller_is_closed() {
         .map(|event| parse_dispute_event(event, &real.bonded_node, seen_at(event), 60).unwrap())
         .collect();
     assert_eq!(bonded.last().unwrap().status, "settled");
+}
+
+/// A pending sell order with the given `fa` and `pm` tags, signed by `keys`.
+fn order_event_with(keys: &Keys, uuid: &str, fiat_amounts: &[&str], methods: &[String]) -> Event {
+    let custom =
+        |name: &'static str, values: Vec<String>| Tag::custom(TagKind::Custom(name.into()), values);
+    let tags = vec![
+        custom("y", vec!["mostro".into()]),
+        custom("z", vec!["order".into()]),
+        Tag::identifier(uuid),
+        custom("k", vec!["sell".into()]),
+        custom("s", vec!["pending".into()]),
+        custom("f", vec!["USD".into()]),
+        custom("fa", fiat_amounts.iter().map(|v| v.to_string()).collect()),
+        custom("amt", vec!["0".into()]),
+        custom("pm", methods.to_vec()),
+        custom("premium", vec!["0".into()]),
+    ];
+    EventBuilder::new(nostr::Kind::Custom(38383), "")
+        .tags(tags)
+        .sign_with_keys(keys)
+        .unwrap()
+}
+
+/// The `pm` tag is the text the maker typed, copied by the daemon, and `fa`
+/// is read from the relays like everything else. Neither reaches the panel
+/// longer or stranger than an order needs, from either of the two parsers.
+#[test]
+fn order_text_from_the_relays_is_cleaned_and_bounded() {
+    let keys = Keys::generate();
+    let uuid = "d3b07384-d113-4001-a111-a8e0f1112222";
+    let now = Timestamp::now().as_secs();
+    // What the monitor validates on arrival, and what the snapshot serves.
+    let both = |fiat_amounts: &[&str], methods: &[String]| {
+        let event = order_event_with(&keys, uuid, fiat_amounts, methods);
+        let (validated, _) =
+            parse_and_validate_order_event(&event, &keys.public_key(), now + 5, 60).unwrap();
+        let mut cache = OrdersCache::new();
+        assert!(cache.try_insert_event(event, uuid.to_string(), false, 0));
+        let served = cache.to_snapshot().orders.remove(0);
+        assert_eq!(validated.payment_methods, served.payment_methods);
+        assert_eq!(validated.fiat_amount_range, served.fiat_amount_range);
+        served
+    };
+    let text = |values: &[&str]| -> Vec<String> { values.iter().map(|v| v.to_string()).collect() };
+
+    // What mostrod publishes goes through untouched.
+    let order = both(
+        &["50", "200"],
+        &text(&["Transferencia bancaria", "Pago Móvil"]),
+    );
+    assert_eq!(order.fiat_amount_range, ["50", "200"]);
+    assert_eq!(
+        order.payment_methods,
+        ["Transferencia bancaria", "Pago Móvil"]
+    );
+
+    // A long method is cut, on one line and without invisible marks.
+    let long = format!("Banco\nPichincha\u{202e}{}", "x".repeat(300));
+    let order = both(
+        &["100"],
+        &[long, " SEPA ".into(), "  ".into(), "\u{200b}".into()],
+    );
+    assert_eq!(order.payment_methods.len(), 2, "empty names are dropped");
+    let first = &order.payment_methods[0];
+    assert!(first.starts_with("Banco Pichinchaxxx"), "{first}");
+    assert_eq!(first.chars().count(), 61);
+    assert!(first.ends_with('…'));
+    assert_eq!(order.payment_methods[1], "SEPA");
+
+    // A list longer than an order needs is cut, and the cut shows.
+    let many: Vec<String> = (1..=14).map(|n| format!("Método {n}")).collect();
+    let order = both(&["100"], &many);
+    assert_eq!(order.payment_methods.len(), 11);
+    assert_eq!(order.payment_methods[9], "Método 10");
+    assert_eq!(order.payment_methods[10], "…");
+    let ten: Vec<String> = many[..10].to_vec();
+    assert_eq!(both(&["100"], &ten).payment_methods, ten);
+
+    // An amount is one or two short runs of digits. Anything else is not
+    // shown as an amount: the list is empty, which the panel tells apart.
+    let methods = text(&["SEPA"]);
+    for amounts in [
+        vec!["1e9"],
+        vec!["-5"],
+        vec!["50.00"],
+        vec!["1", "2", "3"],
+        vec!["1234567890123456"],
+        vec!["100", "<b>200</b>"],
+        vec![""],
+    ] {
+        let order = both(&amounts, &methods);
+        assert!(order.fiat_amount_range.is_empty(), "{amounts:?}");
+    }
+    assert_eq!(
+        both(&["123456789012345"], &methods).fiat_amount_range,
+        ["123456789012345"]
+    );
 }

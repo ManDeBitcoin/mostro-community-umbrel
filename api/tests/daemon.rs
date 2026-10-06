@@ -2,8 +2,8 @@ use mostro_community_api::{
     adapters::Integrations,
     config::Configuration,
     daemon::{
-        DaemonState, MOSTRO_VERSION, activate, deactivate, report, report_with_node_info,
-        sync_active_settings,
+        DaemonReport, DaemonState, MOSTRO_VERSION, NOTICE_CODES, activate, deactivate, report,
+        report_with_node_info, sync_active_settings,
     },
     identity,
     orders::NodeInfo,
@@ -15,7 +15,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 fn now() -> u64 {
@@ -57,6 +57,25 @@ fn announced(version: &str, created_at: u64) -> NodeInfo {
 fn mark_alive(active_dir: &Path) {
     fs::write(active_dir.join("mostro.pid"), "4242\n").unwrap();
     fs::write(active_dir.join("mostro.heartbeat"), "").unwrap();
+}
+
+/// Puts the start of the current mostrod process `secs` in the past. The
+/// entrypoint writes the pid file once, when it starts the daemon, so the age
+/// of that file is how long the process has been running.
+fn started_secs_ago(active_dir: &Path, secs: u64) {
+    fs::File::options()
+        .write(true)
+        .open(active_dir.join("mostro.pid"))
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(secs))
+        .unwrap();
+}
+
+fn codes(rep: &DaemonReport) -> Vec<&str> {
+    rep.notices
+        .iter()
+        .map(|notice| notice.code.as_str())
+        .collect()
 }
 
 fn config() -> Configuration {
@@ -336,6 +355,7 @@ async fn running_state_needs_a_live_heartbeat_and_a_stable_process() {
 
     // The entrypoint's heartbeat does.
     mark_alive(&active);
+    started_secs_ago(&active, 600);
     let rep =
         report_with_node_info(&root, &integrations, Some(announced("0.19.2", now() - 5))).await;
     assert_eq!(rep.state, DaemonState::ActiveRunning);
@@ -358,6 +378,7 @@ async fn running_state_needs_a_live_heartbeat_and_a_stable_process() {
 
     // The daemon died two seconds after starting and was just respawned: the
     // heartbeat is fresh, but it is not a running node.
+    mark_alive(&active);
     fs::write(
         active.join("mostro.last_exit"),
         format!("{} 1 2\n", now() - 3),
@@ -487,8 +508,6 @@ async fn report_without_lnd_access_says_so_instead_of_zero_channels() {
 /// list as plain sentences.
 #[tokio::test]
 async fn notices_have_known_codes_and_mirror_the_warnings() {
-    use mostro_community_api::daemon::NOTICE_CODES;
-
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("config");
     fs::create_dir(&root).unwrap();
@@ -519,9 +538,6 @@ async fn notices_have_known_codes_and_mirror_the_warnings() {
             rep.warnings.iter().map(String::as_str).collect::<Vec<_>>()
         );
     }
-    let codes = |rep: &mostro_community_api::daemon::DaemonReport| -> Vec<String> {
-        rep.notices.iter().map(|n| n.code.clone()).collect()
-    };
     assert_eq!(
         codes(&empty),
         ["identity_missing", "rules_missing", "lnd_unconfigured"]
@@ -534,4 +550,249 @@ async fn notices_have_known_codes_and_mirror_the_warnings() {
             "pow_first_contact_above_base"
         ]
     );
+}
+
+/// Right after an update or a restart the relays still hold what the previous
+/// process announced. That is neither the version of the process running now
+/// nor proof that it is serving clients.
+#[tokio::test]
+async fn an_announcement_older_than_the_running_process_is_not_its_own() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, _store) = configured_root(&temp, 38);
+    activate(&root, "https://127.0.0.1:10009").unwrap();
+    let active = root.join("active");
+    let integrations = Integrations::default();
+    let seen = |version: &str, age: u64| Some(announced(version, now() - age));
+
+    // The daemon started 20 s ago; the relays hold an announcement of 3 min.
+    mark_alive(&active);
+    started_secs_ago(&active, 20);
+    let rep = report_with_node_info(&root, &integrations, seen("0.17.5", 180)).await;
+    assert_eq!(rep.state, DaemonState::ActiveRunning);
+    assert!(
+        rep.running_for_secs
+            .is_some_and(|secs| (20..30).contains(&secs))
+    );
+    assert!(!rep.announced_fresh, "the market is not open yet");
+    assert!(rep.announced_before_start);
+    assert!(
+        !codes(&rep).contains(&"version_mismatch"),
+        "{:?}",
+        codes(&rep)
+    );
+    assert!(!codes(&rep).contains(&"announcement_stale"));
+    assert_ne!(rep.version_source, "announced");
+    assert_eq!(rep.mostro_version, rep.packaged_version);
+    // What the relays hold is still reported as it was read.
+    assert_eq!(
+        rep.announced
+            .as_ref()
+            .and_then(|a| a.mostro_version.as_deref()),
+        Some("0.17.5")
+    );
+    assert!(
+        rep.announced_age_secs
+            .is_some_and(|age| (180..190).contains(&age))
+    );
+
+    // The same announcement from a daemon that was already running is its own.
+    started_secs_ago(&active, 600);
+    let rep = report_with_node_info(&root, &integrations, seen("0.17.5", 180)).await;
+    assert!(rep.announced_fresh);
+    assert!(!rep.announced_before_start);
+    assert_eq!(rep.mostro_version, "0.17.5");
+    assert!(codes(&rep).contains(&"version_mismatch"));
+
+    // Both ages are whole seconds read at different moments: a few seconds of
+    // difference do not turn the first announcement of a daemon into an old one.
+    started_secs_ago(&active, 100);
+    let rep = report_with_node_info(&root, &integrations, seen("0.19.2", 103)).await;
+    assert!(rep.announced_fresh);
+    let rep = report_with_node_info(&root, &integrations, seen("0.19.2", 112)).await;
+    assert!(!rep.announced_fresh);
+    assert!(rep.announced_before_start);
+
+    // An announcement that is simply old is not "from before this start".
+    let rep = report_with_node_info(&root, &integrations, seen("0.19.2", 3600)).await;
+    assert!(!rep.announced_fresh);
+    assert!(!rep.announced_before_start);
+
+    // Without a pid file the age of the process is unknown, and what is not
+    // known cannot rule an announcement out.
+    fs::remove_file(active.join("mostro.pid")).unwrap();
+    let rep = report_with_node_info(&root, &integrations, seen("0.17.5", 180)).await;
+    assert_eq!(rep.state, DaemonState::ActiveRunning);
+    assert_eq!(rep.running_for_secs, None);
+    assert!(rep.announced_fresh);
+    assert!(!rep.announced_before_start);
+    assert!(codes(&rep).contains(&"version_mismatch"));
+}
+
+/// Up to v1.0.11 the profile fields were written as typed, also when empty.
+/// Such a file says the same to mostrod as the one rendered today: the first
+/// save after updating must not restart a daemon over it.
+#[tokio::test]
+async fn a_settings_file_written_by_an_earlier_version_does_not_restart_the_daemon() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, mut store) = configured_root(&temp, 39);
+    let origin = "https://127.0.0.1:10009";
+    let wake = root.join(".standby_wake");
+    let settings = root.join("active").join("settings.toml");
+
+    let mut draft = config();
+    draft.community.name = "Comunidad de prueba ".into();
+    draft.community.about = String::new();
+    assert!(draft.community.website.is_empty());
+    store.save(draft.clone()).unwrap();
+    activate(&root, origin).unwrap();
+    let rendered = fs::read_to_string(&settings).unwrap();
+    let mut earlier: toml::Value = toml::from_str(&rendered).unwrap();
+    assert!(earlier["mostro"].get("about").is_none());
+    assert!(earlier["mostro"].get("website").is_none());
+
+    // The same settings as v1.0.11 wrote them.
+    let mostro = earlier["mostro"].as_table_mut().unwrap();
+    mostro.insert("name".into(), draft.community.name.as_str().into());
+    mostro.insert("about".into(), "".into());
+    mostro.insert("website".into(), "".into());
+    let earlier = toml::to_string_pretty(&earlier).unwrap();
+    assert_ne!(earlier, rendered);
+    fs::write(&settings, &earlier).unwrap();
+    fs::remove_file(&wake).unwrap();
+
+    // The first save after the update, of something that never reaches the file.
+    let mut relabelled = draft.clone();
+    relabelled.payment_methods[0].label = "Transferencia SEPA".into();
+    store.save(relabelled).unwrap();
+    let synced = sync_active_settings(&root, origin).unwrap();
+    assert!(!synced.settings_changed);
+    assert!(
+        !wake.exists(),
+        "an equivalent settings.toml must not restart mostrod"
+    );
+    assert_eq!(fs::read_to_string(&settings).unwrap(), earlier);
+    // The recorded hash is the one of the file the daemon reads.
+    let rep = report(&root, &Integrations::default()).await;
+    assert_eq!(rep.active_revision, Some(synced.revision));
+    assert_eq!(
+        rep.active_settings_hash.as_deref(),
+        Some(synced.settings_sha256.as_str())
+    );
+
+    // An explicit activation restarts anyway, and brings the file up to date.
+    let again = activate(&root, origin).unwrap();
+    assert!(!again.settings_changed);
+    assert!(wake.exists());
+    assert_eq!(fs::read_to_string(&settings).unwrap(), rendered);
+    fs::remove_file(&wake).unwrap();
+
+    // A profile field that really changed still restarts the daemon.
+    fs::write(&settings, &earlier).unwrap();
+    let mut described = draft.clone();
+    described.community.about = "Mercado local".into();
+    store.save(described).unwrap();
+    let synced = sync_active_settings(&root, origin).unwrap();
+    assert!(synced.settings_changed);
+    assert!(wake.exists());
+    assert!(
+        fs::read_to_string(&settings)
+            .unwrap()
+            .contains("about = \"Mercado local\"")
+    );
+    fs::remove_file(&wake).unwrap();
+
+    // So does a file that cannot be read as settings at all.
+    fs::write(&settings, "esto no es = = TOML").unwrap();
+    let synced = sync_active_settings(&root, origin).unwrap();
+    assert!(synced.settings_changed);
+    assert!(wake.exists());
+}
+
+/// One exit after hours of running is not a crash loop, and the supervisor has
+/// the daemon back within seconds: without a notice the operator never knows.
+#[tokio::test]
+async fn an_unexpected_exit_is_a_notice_while_it_is_recent() {
+    let temp = tempfile::tempdir().unwrap();
+    let (root, _store) = configured_root(&temp, 40);
+    activate(&root, "https://127.0.0.1:10009").unwrap();
+    let active = root.join("active");
+    let integrations = Integrations::default();
+    let exited = |ago: u64, code: i32, uptime: u64| {
+        fs::write(
+            active.join("mostro.last_exit"),
+            format!("{} {code} {uptime}\n", now() - ago),
+        )
+        .unwrap();
+    };
+    assert!(NOTICE_CODES.contains(&"daemon_unexpected_exit"));
+
+    // It ran for two hours, ended ten minutes ago and was started again.
+    mark_alive(&active);
+    started_secs_ago(&active, 590);
+    exited(600, 101, 7200);
+    let rep = report(&root, &integrations).await;
+    assert_eq!(rep.state, DaemonState::ActiveRunning);
+    assert!(!codes(&rep).contains(&"daemon_crash_loop"));
+    let notice = rep
+        .notices
+        .iter()
+        .find(|notice| notice.code == "daemon_unexpected_exit")
+        .expect("a recent unexpected exit is a notice");
+    for expected in ["hace 10 min", "código 101", "tras 2 h", "volvió a arrancar"] {
+        assert!(notice.text.contains(expected), "{}", notice.text);
+    }
+    assert!(rep.warnings.contains(&notice.text));
+
+    // A code above 128 is how the supervisor's shell reports a signal, such as
+    // the kill of a process that ran out of memory: the notice says which.
+    exited(600, 137, 7200);
+    let rep = report(&root, &integrations).await;
+    assert!(
+        rep.warnings
+            .iter()
+            .any(|w| w.contains("con código 137 (señal 9) y tras 2 h")),
+        "{:?}",
+        rep.warnings
+    );
+
+    // While the supervisor waits before its next attempt, it says that instead.
+    fs::remove_file(active.join("mostro.heartbeat")).unwrap();
+    fs::remove_file(active.join("mostro.pid")).unwrap();
+    let rep = report(&root, &integrations).await;
+    assert_eq!(rep.state, DaemonState::ActiveReady);
+    let notice = rep
+        .notices
+        .iter()
+        .find(|notice| notice.code == "daemon_unexpected_exit")
+        .expect("still a notice while the daemon is down");
+    assert!(
+        notice.text.contains("lo vuelve a intentar"),
+        "{}",
+        notice.text
+    );
+
+    // A crash loop has its own notice: the same exit is not told twice.
+    mark_alive(&active);
+    exited(3, 1, 2);
+    let rep = report(&root, &integrations).await;
+    assert!(codes(&rep).contains(&"daemon_crash_loop"));
+    assert!(!codes(&rep).contains(&"daemon_unexpected_exit"));
+
+    // After an hour it is history, kept in the report and out of the notices.
+    exited(3700, 101, 7200);
+    let rep = report(&root, &integrations).await;
+    assert_eq!(rep.state, DaemonState::ActiveRunning);
+    assert!(rep.last_exit.is_some());
+    assert!(!codes(&rep).contains(&"daemon_unexpected_exit"));
+
+    // A record left behind once Mostro is deactivated is nobody's news.
+    deactivate(&root).unwrap();
+    fs::write(
+        active.join("mostro.last_exit"),
+        format!("{} 143 60\n", now() - 5),
+    )
+    .unwrap();
+    let rep = report(&root, &integrations).await;
+    assert_eq!(rep.state, DaemonState::ConfiguredStandby);
+    assert!(!codes(&rep).contains(&"daemon_unexpected_exit"));
 }

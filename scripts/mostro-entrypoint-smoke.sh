@@ -141,6 +141,12 @@ wait_for 5 test -s "$active/mostro.pid" || fail 'no pid file for a running daemo
 wait_for 5 test -e "$active/mostro.heartbeat" || fail 'no heartbeat for a running daemon'
 first=$(cat "$active/mostro.pid")
 kill -0 "$first" 2>/dev/null || fail 'the recorded pid is not running'
+# The pid file is written once per start and left alone: the panel reads its
+# age as the time the daemon has been running. Only the heartbeat moves on.
+started=$(stat -c %Y "$active/mostro.pid")
+sleep 2.2
+[ "$(stat -c %Y "$active/mostro.pid")" = "$started" ] || fail 'the pid file was touched after the daemon started'
+[ "$(stat -c %Y "$active/mostro.heartbeat")" -gt "$started" ] || fail 'the heartbeat stopped moving'
 touch "$standby_dir/.standby_wake"
 # Between the two daemons the pid file does not exist: only a new, non-empty
 # pid counts as a restart.
@@ -149,14 +155,32 @@ wait_for 8 sh -c "pid=\$(cat '$active/mostro.pid' 2>/dev/null) && [ -n \"\$pid\"
 [ ! -e "$standby_dir/.standby_wake" ] || fail 'the wake request was not consumed'
 [ ! -e "$active/mostro.last_exit" ] || fail 'a requested restart was recorded as a crash'
 second=$(cat "$active/mostro.pid")
+# The panel signals the daemon itself when both share a process namespace. A
+# daemon found dead with a restart pending was asked to stop: not a crash.
+touch "$standby_dir/.standby_wake"
+# The supervisor may have stopped it already on seeing the request.
+kill -TERM "$second" 2>/dev/null || true
+wait_for 8 sh -c "pid=\$(cat '$active/mostro.pid' 2>/dev/null) && [ -n \"\$pid\" ] && [ \"\$pid\" != '$second' ]" || fail 'a daemon stopped by the panel was not started again'
+[ ! -e "$active/mostro.last_exit" ] || fail 'a stop the panel asked for was recorded as a crash'
+third=$(cat "$active/mostro.pid")
 rm "$active/settings.toml"
-wait_for 8 sh -c "! kill -0 '$second' 2>/dev/null" || fail 'the daemon kept running without settings'
+wait_for 8 sh -c "! kill -0 '$third' 2>/dev/null" || fail 'the daemon kept running without settings'
 wait_for 5 sh -c "[ ! -e '$active/mostro.pid' ] && [ ! -e '$active/mostro.heartbeat' ]" || fail 'runtime markers left after deactivation'
 # The standby loop writes this file on every turn and removes it when a daemon
 # starts, so it proves the supervisor went back to waiting rather than being
 # on its way out.
 wait_for 5 test -s "$standby_dir/.mostro_standby.pid.sleep" || fail 'the supervisor did not return to standby'
 kill -0 "$entry_pid" 2>/dev/null || fail 'the supervisor exited instead of returning to standby'
+# The same when the panel withdraws the settings and stops the daemon itself.
+touch "$active/settings.toml"
+wait_for 8 test -s "$active/mostro.pid" || fail 'the daemon did not start again with new settings'
+fourth=$(cat "$active/mostro.pid")
+rm "$active/settings.toml"
+kill -TERM "$fourth" 2>/dev/null || true
+wait_for 8 sh -c "! kill -0 '$fourth' 2>/dev/null" || fail 'the daemon stopped by the panel is still running'
+wait_for 5 test -s "$standby_dir/.mostro_standby.pid.sleep" || fail 'the supervisor did not return to standby after the panel stopped the daemon'
+[ ! -e "$active/mostro.last_exit" ] || fail 'a deactivation by the panel was recorded as a crash'
+[ ! -e "$active/mostro.pid" ] || fail 'pid file left after a deactivation by the panel'
 kill -TERM "$entry_pid"
 wait "$entry_pid" || true
 entry_pid=

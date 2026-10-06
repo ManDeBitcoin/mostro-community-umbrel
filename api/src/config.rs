@@ -176,10 +176,8 @@ impl Configuration {
                 "La comisión de desarrollo de Mostro debe estar entre el 10 % y el 100 % de la comisión del nodo",
             );
         }
-        if self.card_is_ambiguous() {
-            return Err(
-                "El nombre, la web y el contacto no pueden contener «&», ni los relays y métodos de pago activos «&» o «,»: la tarjeta firmada de la comunidad dejaría de ser inequívoca",
-            );
+        if let Some(rule) = self.card_ambiguity() {
+            return Err(rule);
         }
         Ok(())
     }
@@ -187,23 +185,37 @@ impl Configuration {
     /// The v1 community card is signed over `key=value&...` with lists joined
     /// by commas and nothing escaped (the app's verifier defines it). A `&` or
     /// a `,` inside a value would let one signature cover two different cards.
-    pub fn card_is_ambiguous(&self) -> bool {
+    /// Returns the rule this configuration breaks, as the operator reads it.
+    pub fn card_ambiguity(&self) -> Option<&'static str> {
         let c = &self.community;
-        [&c.name, &c.website, &c.contact]
+        let in_list = |value: &str| value.contains('&') || value.contains(',');
+        if c.name.contains('&') {
+            Some(
+                "El nombre de la comunidad no puede contener «&»: la tarjeta firmada dejaría de ser inequívoca",
+            )
+        } else if c.website.contains('&') || c.contact.contains('&') {
+            Some(
+                "La web y el contacto no pueden contener «&»: la tarjeta firmada dejaría de ser inequívoca",
+            )
+        } else if self.nostr.relays.iter().any(|relay| in_list(relay)) {
+            Some(
+                "Los relays no pueden contener «&» ni «,»: la tarjeta firmada dejaría de ser inequívoca",
+            )
+        } else if self
+            .payment_methods
             .iter()
-            .any(|value| value.contains('&'))
-            || self
-                .nostr
-                .relays
-                .iter()
-                .map(String::as_str)
-                .chain(
-                    self.payment_methods
-                        .iter()
-                        .filter(|method| method.active)
-                        .map(|method| method.label.as_str()),
-                )
-                .any(|value| value.contains('&') || value.contains(','))
+            .any(|method| method.active && in_list(&method.label))
+        {
+            Some(
+                "Los nombres de los métodos de pago activos no pueden contener «&» ni «,»: la tarjeta firmada dejaría de ser inequívoca",
+            )
+        } else {
+            None
+        }
+    }
+
+    pub fn card_is_ambiguous(&self) -> bool {
+        self.card_ambiguity().is_some()
     }
 }
 

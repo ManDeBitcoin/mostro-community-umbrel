@@ -122,6 +122,14 @@ if [ "${STANDBY_IF_UNCONFIGURED:-false}" = "true" ]; then
         done
         rm -f "$settings_dir/mostro.pid" "$settings_dir/mostro.heartbeat" 2>/dev/null || true
 
+        # The panel signals the daemon itself when both run in the same
+        # process namespace. A daemon found dead while a restart or a stop is
+        # pending was asked to stop: that is not a crash to record.
+        if [ "$stop_requested" = false ] && { wake_requested || [ ! -f "$settings_dir/settings.toml" ]; }; then
+            stop_requested=true
+            wait "$child_pid" 2>/dev/null || true
+        fi
+
         if [ "$stop_requested" = false ]; then
             # mostrod ended on its own: LND or the relays were unreachable, the
             # settings were refused, or it crashed. Record it for the panel and

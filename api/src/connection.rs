@@ -2,7 +2,7 @@
 //! Only public data (npub, hex pubkey, relays, nprofile) is returned.
 //! Secret keys, macaroons, and financial state are strictly excluded.
 
-use crate::{identity, store::Store};
+use crate::{config::Configuration, identity, store::Store};
 use nostr::{PublicKey, RelayUrl, ToBech32, nips::nip19::Nip19Profile};
 use qrcode::{QrCode, render::svg};
 use serde::{Deserialize, Serialize};
@@ -131,6 +131,17 @@ impl CardUnavailable {
             Self::IdentityUnreadable => {
                 "No se pudo leer la clave privada del nodo: revisa los permisos de la carpeta de identidad."
             }
+        }
+    }
+
+    /// The same sentence, naming the field to change when the saved
+    /// configuration is at hand and is what stands in the way.
+    pub fn text_for(self, config: Option<&Configuration>) -> String {
+        match (self, config.and_then(Configuration::card_ambiguity)) {
+            (Self::Ambiguous, Some(rule)) => format!(
+                "La tarjeta no se genera con la configuración guardada. {rule}. Corrige ese valor en Configuración y guarda de nuevo."
+            ),
+            _ => self.text().to_string(),
         }
     }
 }
@@ -283,6 +294,9 @@ pub struct ConnectionInfo {
     pub qr_card_svg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card: Option<CommunityCard>,
+    /// Why there is no card, when the node has an identity and still has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_unavailable: Option<String>,
     pub app_download_url: &'static str,
     pub instructions: &'static str,
 }
@@ -311,6 +325,7 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             card_uri: None,
             qr_card_svg: None,
             card: None,
+            card_unavailable: None,
             app_download_url: "https://mostro.network",
             instructions: "Importa primero la clave de identidad Nostr de la comunidad.",
         };
@@ -344,7 +359,12 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
             .map(|code| code.render::<svg::Color>().build())
     });
 
-    let card = get_community_card(root, store);
+    let issued = issue_community_card(root, store);
+    let card_unavailable = issued
+        .as_ref()
+        .err()
+        .map(|reason| reason.text_for(store.document.config.as_ref()));
+    let card = issued.ok();
     let json_uri = card.as_ref().and_then(|c| serde_json::to_string(c).ok());
     let card_uri = card.as_ref().and_then(card_deep_link);
 
@@ -369,6 +389,7 @@ pub fn get_connection_info(root: &Path, store: &Store) -> ConnectionInfo {
         card_uri,
         qr_card_svg,
         card,
+        card_unavailable,
         app_download_url: "https://mostro.network",
         instructions: "Escanea la tarjeta firmada de la comunidad o usa la clave pública (npub o hex) con los relays indicados. Comisiones, límites y garantía se leen del evento de información del nodo.",
     }

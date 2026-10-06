@@ -434,3 +434,44 @@ Sin ningún relay real. Todos los relays fueron simulados en `127.0.0.1`, en pue
 - La imagen Docker con estos cambios: la construye el workflow del PR.
 - Relays que exigen autenticación NIP-42, más allá de que el panel muestre su petición como motivo.
 - Navegadores distintos de Chromium.
+
+## Correcciones tras la revisión de v1.0.12 (2026-10-05)
+
+La revisión previa a v1.0.12 dejó nueve hallazgos abiertos que nadie había comprobado en el código. Los nueve se confirmaron leyéndolo antes de cambiar nada, y los nueve se sostienen. No se cambia la versión del daemon ni ningún endpoint; `/api/daemon/status` gana el campo `announced_before_start` y el código de aviso `daemon_unexpected_exit`, y `/api/connection` el campo `card_unavailable`.
+
+### Qué se confirmó y qué cambia
+
+- **Anuncio del proceso anterior.** `report_with_node_info` daba por reciente cualquier anuncio de menos de 660 s sin compararlo con el arranque del proceso. El supervisor escribe `mostro.pid` una vez por arranque y solo vuelve a tocar `mostro.heartbeat`, así que la edad de ese archivo es el tiempo en marcha. Ahora un anuncio más viejo que el proceso, con 5 s de margen, no cuenta como reciente ni da su versión por la del daemon. Sin archivo de pid no se descarta nada. `/api/dashboard` aplica el mismo criterio a `market_started` y al estado de Mostro.
+- **Reinicio en el primer guardado.** Hasta v1.0.11 `name`, `about` y `website` se escribían siempre, también vacíos; desde v1.0.12 se recortan y se omiten si están vacíos, y el guardado comparaba el archivo byte a byte. Ahora compara el TOML leído, con esos tres campos recortados y omitidos si quedan vacíos. Un archivo equivalente no se toca; una activación explícita lo reescribe, porque reinicia de todos modos.
+- **Tarjeta sin generar.** En v1.0.12 `GET /api/community/card` respondía que faltaban la identidad o la configuración también cuando existían y lo que impedía firmar era un «&» o una «,». La publicación de la tarjeta, que entró antes en esta misma versión, ya distingue los motivos. Sobre eso, esta entrega nombra el campo que hay que cambiar, en esa respuesta y en el guardado rechazado, y lleva el motivo a la página «Conexión de apps», que seguía diciendo «guarda la configuración».
+- **Texto de las órdenes.** `mostrod` copia en la etiqueta `pm` el texto que escribió quien publicó la orden, partido por comas (`src/nip33.rs` de v0.19.2), y el panel lo mostraba entero. Ahora pasa por la misma limpieza que el texto del chat, con un máximo de diez métodos de sesenta caracteres; `fa` se acepta como una o dos cifras de hasta quince dígitos, que es lo que el daemon publica.
+- **Salida inesperada.** El resumen solo la veía dentro del aviso de reinicio en bucle. Ahora hay un aviso propio durante una hora. Al comprobar que el supervisor solo registra salidas no pedidas apareció un caso en que no era así: si el panel detiene el daemon por su cuenta, lo que solo puede hacer cuando comparten espacio de procesos, la parada quedaba registrada como caída. El supervisor ya no la registra si hay un reinicio pedido o `settings.toml` ya no existe. A cambio, una caída real que coincida en el mismo segundo con un reinicio pedido tampoco queda registrada: el daemon se reinicia igualmente. Un código de salida mayor que 128 se presenta como la señal que es, porque en ese caso el daemon no terminó por su cuenta.
+- **Mercado abierto en verde.** `marketStatus` no miraba los avisos del mismo informe.
+- **Alertas.** Se leían una vez y después solo llegaban por un `EventSource` que el navegador abandona si el servidor le responde con un error.
+- **Datos sin leer.** El resumen contaba ceros con el monitor en `connecting` o `syncing`, y las páginas decían «no hay reglas guardadas» antes de leerlas. Lo mismo hacían los filtros de la página de órdenes, que contaban ceros, y la de disputas, que decía «Ninguna abierta» con el monitor sin leer. Mientras las reglas no se han leído, el panel distingue entre estar leyéndolas y no haber podido.
+- **Prueba de contrato.** El patrón `[a-z_]+` habría dejado pasar sin comparar un código con un dígito.
+
+### Cómo se probó
+
+- Pruebas de Rust nuevas en `api/tests/daemon.rs`, `orders.rs`, `http.rs` y `configuration.rs`. El proceso del daemon se simula con sus archivos de pid y de latido, con la fecha del pid retrasada para darle edad.
+- El primer hallazgo se repitió por el camino real del servidor: una copia aislada de la API, un relay local, una identidad desechable creada por la propia API y un daemon que solo existe como sus archivos de pid y de latido. Con un anuncio de hace 200 s y el proceso recién arrancado, `/api/daemon/status` responde `announced_fresh: false` y `announced_before_start: true`, sin `version_mismatch` y con la versión del paquete. Al publicar el anuncio nuevo pasa a `announced_fresh: true`. Con el proceso en marcha desde hace 15 min, un anuncio con otra versión sigue dando `version_mismatch`.
+- Cada corrección del servidor se deshizo por separado y su prueba falló: el anuncio anterior al arranque, la comparación de `settings.toml`, el motivo de la tarjeta, el campo nombrado al guardar, los métodos de pago, los importes y el aviso de salida.
+- `scripts/mostro-entrypoint-smoke.sh` comprueba ahora que el archivo de pid no se toca mientras el latido avanza, y que una parada hecha por el panel no se registra, ni con un reinicio pendiente ni con la configuración retirada. Cada caso falla tres veces de tres sin su mitad de la corrección.
+- `scripts/playwright-smoke.cjs`: 42 pasos sin errores de consola, contando los de la publicación de la tarjeta. Añade una tercera copia del panel con reglas que la tarjeta no admite, y pasos con respuestas simuladas para el reinicio, el mercado abierto con avisos de Lightning, la salida inesperada, las reglas sin leer, el monitor que aún lee los relays, las alertas sin conexión en vivo y una orden sin importe legible. Los ocho pasos que dependen del panel fallan contra el panel anterior servido por el servidor nuevo.
+- `scripts/tests/test_panel_contract.py` falla con el patrón anterior.
+- `./scripts/check.sh` completo sobre el árbol ya fusionado con la publicación de la tarjeta: formato, `cargo test` (160 pruebas), clippy, las pruebas de Python (14), la compilación del frontend, `docker compose config` y el smoke del supervisor. El formato, clippy y las pruebas se repitieron con Rust 1.94.0.
+- La fusión con la publicación de la tarjeta chocaba en ocho archivos. El motivo de la tarjeta usa el `CardUnavailable` de esa entrega; las dos secciones de notas de v1.0.13 quedan en una sola. En el smoke, los pasos de esta entrega van antes de los que encienden la publicación en la copia de prueba, porque ese interruptor añade un aviso al resumen.
+- Una revisión independiente del diff, solo de lectura, antes de confirmar los cambios. No encontró defectos bloqueantes. Señaló que la nota de versión prometía para todo el panel lo que solo cumplía el resumen, que `/api/dashboard` seguía con el criterio anterior, que la página del nodo mostraba una salida registrada con Mostro desactivado, que un código de señal se presentaba como una salida por cuenta propia y varios textos. Todo ello se corrigió y tiene prueba.
+
+### No verificado
+
+- Un `mostrod` real que se reinicia y se vuelve a anunciar. El caso se reprodujo con archivos de pid y de latido y con anuncios firmados por una clave desechable, y en el navegador con informes simulados.
+- La imagen Docker con estos cambios, `scripts/container-smoke.sh` y el supervisor dentro del contenedor. Este equipo no da acceso al socket de Docker a la sesión de desarrollo; los ejecuta `image-check.yml` cuando la rama se sube y se abre su PR.
+- El cierre de la conexión de alertas durante una actualización real detrás del proxy de Umbrel. Se reprodujo respondiendo a la conexión con un error.
+- El nodo en producción. No se leyó su directorio de datos ni su API; si su `settings.toml` es todavía el que escribió v1.0.11 no se sabe.
+- Navegadores distintos de Chromium.
+
+### Queda abierto
+
+- En la puesta en marcha, el paso del respaldo figura como pendiente mientras el estado de los respaldos aún no se ha leído. Es anterior a estos cambios y no se ha tocado.
+- El monitor no comprueba la etiqueta `d` del evento de información del nodo, y la tarjeta puede firmarse con un relay cuyo esquema está en mayúsculas, que la app descarta antes de verificar. Los dos proceden de la verificación de la guía de integración y no formaban parte de esta lista.
