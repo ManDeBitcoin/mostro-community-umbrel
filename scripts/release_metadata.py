@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("command", choices=("check-candidate", "check-store", "promote"))
     parser.add_argument("version", nargs="?", help="Release tag, for example v1.0.5")
     parser.add_argument("--expected-current", help="Store version captured from the release tag")
-    parser.add_argument("--notes-file", type=Path, default=ROOT / "docs/release-notes.md")
+    parser.add_argument("--notes-file", type=Path, help="docs/release-notes.md of the code repository")
     args = parser.parse_args()
 
     current = current_version()
@@ -96,6 +96,8 @@ def main() -> None:
 
     if not args.version or not args.version.startswith("v"):
         parser.error("A v-prefixed release tag is required")
+    if args.notes_file is None:
+        parser.error("--notes-file is required: the release notes live in ManDeBitcoin/mostro-community-manager")
     new_version = args.version[1:]
     expected = args.expected_current or current
     plan = plan_promotion(ROOT, new_version, expected, args.notes_file)
