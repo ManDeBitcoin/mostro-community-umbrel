@@ -12,6 +12,9 @@ services:
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command: ["mkdir -p /data/config /data/backup && chown -R 1000:1000 /data && chmod 700 /data/config /data/backup"]
+    # The image's healthcheck probes the panel, which only the web service runs.
+    healthcheck:
+      disable: true
     volumes:
       - ${APP_DATA_DIR}/data:/data
     networks: [manager_private]
@@ -70,6 +73,9 @@ services:
   mostro:
     image: ghcr.io/mandebitcoin/mostro-community-umbrel:1.0.15
     entrypoint: ["/bin/sh", "/usr/local/bin/mostro-entrypoint"]
+    # The image's healthcheck probes the panel, which only the web service runs.
+    healthcheck:
+      disable: true
     user: "1000:1000"
     restart: on-failure
     depends_on:
