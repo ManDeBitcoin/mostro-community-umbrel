@@ -1,9 +1,2 @@
-/target/
-/var/
-.env
-web/node_modules/
-web/dist/
-*.log
-
 __pycache__/
 *.pyc

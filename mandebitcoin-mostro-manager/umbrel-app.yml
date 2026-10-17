@@ -31,9 +31,9 @@ description: >-
   • Conexión de clientes Mostro mediante tarjeta firmada de la comunidad, código
   QR y nprofile con relays.
 developer: ManDeBitcoin
-website: https://github.com/ManDeBitcoin/mostro-community-umbrel
-repo: https://github.com/ManDeBitcoin/mostro-community-umbrel
-support: https://github.com/ManDeBitcoin/mostro-community-umbrel/issues
+website: https://github.com/ManDeBitcoin/mostro-community-manager
+repo: https://github.com/ManDeBitcoin/mostro-community-manager
+support: https://github.com/ManDeBitcoin/mostro-community-manager/issues
 dependencies: [lightning]
 gallery:
   - https://raw.githubusercontent.com/ManDeBitcoin/mostro-community-umbrel/main/docs/screenshots/dashboard.png
