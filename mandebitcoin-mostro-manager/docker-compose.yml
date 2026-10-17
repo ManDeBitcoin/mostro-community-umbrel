@@ -67,6 +67,9 @@ services:
       # Where the daemon reaches LND; the panel writes it into mostrod's settings.
       MOSTRO_LND_GRPC_HOST: https://${APP_LIGHTNING_NODE_IP}:${APP_LIGHTNING_NODE_GRPC_PORT}
       BACKUP_OFFSITE_DIR: /data/backup
+      # Umbrel's app_proxy asks for the login in front of the panel.
+      PANEL_AUTH: external
+      MCM_PLATFORM: umbrel
     networks: [default, manager_private]
     read_only: true
     tmpfs: [/tmp]
