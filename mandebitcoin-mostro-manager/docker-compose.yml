@@ -64,6 +64,8 @@ services:
       LND_CONNECT_HOST: lnd_bridge:8080
       LND_TLS_CERT: /lnd/tls.cert
       LND_READONLY_MACAROON: /lnd/readonly.macaroon
+      # Where the daemon reaches LND; the panel writes it into mostrod's settings.
+      MOSTRO_LND_GRPC_HOST: https://${APP_LIGHTNING_NODE_IP}:${APP_LIGHTNING_NODE_GRPC_PORT}
       BACKUP_OFFSITE_DIR: /data/backup
     networks: [default, manager_private]
     read_only: true
